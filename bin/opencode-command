@@ -1,0 +1,3 @@
+#!/bin/bash
+export NODE_PATH=/home/err/.local/share/pnpm/global/5/REDACTED_SECRET_modules
+exec nbb /home/err/devel/bin/create-command "$@"
