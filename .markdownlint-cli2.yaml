@@ -1,0 +1,11 @@
+globs:
+  - "README.md"
+  - "*.md"
+  - "docs/**/*.md"
+  - "spec/**/*.md"
+ignores:
+  - ".git/**"
+  - "REDACTED_SECRET_modules/**"
+  - "orgs/**"
+  - "**/dist/**"
+  - "**/build/**"
