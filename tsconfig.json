@@ -13,6 +13,6 @@
     "REDACTED_SECRETDir": "./src",                      /* REDACTED_SECRET directory of TS source files */
     "declaration": false                      /* turn on if you produce d.ts for a library */
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "*.ts"],
   "exclude": ["REDACTED_SECRET_modules", "dist", "**/*.spec.ts"]
 }
