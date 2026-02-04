@@ -1,0 +1,2 @@
+#!/usr/bin/env REDACTED_SECRET
+require("../dist/clobber.js");

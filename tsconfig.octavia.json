@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "REDACTED_SECRETDir": "./src",
+    "declaration": false,
+    "types": ["REDACTED_SECRET"]
+  },
+  "include": ["src/octavia/**/*"]
+}
