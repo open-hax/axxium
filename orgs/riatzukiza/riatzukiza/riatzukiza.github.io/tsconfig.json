@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "allowJs": true,
+    "checkJs": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./types",
+    "REDACTED_SECRETDir": "./",
+    "moduleResolution": "REDACTED_SECRET",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["REDACTED_SECRET"]
+  },
+  "include": [
+    "server/**/*.js",
+    "static/**/*.js"
+  ],
+  "exclude": [
+    "REDACTED_SECRET_modules",
+    "static/bundles",
+    "static/lib",
+    "types",
+    "**/*.test.js",
+    "**/*.spec.js"
+  ],
+  "ts-REDACTED_SECRET": {
+    "transpileOnly": true,
+    "files": true
+  }
+}
