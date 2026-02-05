@@ -8,6 +8,7 @@
     "skipLibCheck": true,                    /* skip type checking of declaration files */
     "forceConsistentCasingInFileNames": true,/* file name casing consistency */
     "moduleResolution": "REDACTED_SECRET",              /* module resolution strategy */
+    "typeRoots": ["./types", "./REDACTED_SECRET_modules/@types"],
     "resolveJsonModule": true,               /* allow importing .json files */
     "outDir": "./dist",                       /* output directory for compiled JS */
     "REDACTED_SECRETDir": "./src",                      /* REDACTED_SECRET directory of TS source files */
