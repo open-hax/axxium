@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "module": "es2022",
+    "moduleResolution": "REDACTED_SECRET",
+    "types": ["REDACTED_SECRET"],
+    "typeRoots": ["../../../types", "../../../REDACTED_SECRET_modules/@types"]
+  },
+  "include": ["*.ts"]
+}
