@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "REDACTED_SECRETDir": "./src",
+    "composite": true,
+    "types": [
+      "REDACTED_SECRET"
+    ]
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "dist",
+    "REDACTED_SECRET_modules",
+    "pseudo",
+    "examples"
+  ]
+}

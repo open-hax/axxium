@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig.json",
+  "extends": "../../config/tsconfig.service.json",
+  "compilerOptions": {
+    "REDACTED_SECRETDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"]
+}
