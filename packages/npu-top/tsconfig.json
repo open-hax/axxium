@@ -1,0 +1,13 @@
+{
+  "extends": "../../config/tsconfig.base.json",
+  "compilerOptions": {
+    "REDACTED_SECRETDir": "src",
+    "outDir": "dist",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "types": ["REDACTED_SECRET"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["dist", "REDACTED_SECRET_modules"]
+}
