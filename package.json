@@ -52,7 +52,7 @@
     "generate-ecosystem": "npx shadow-cljs release clobber",
     "docker:stack": "REDACTED_SECRET scripts/docker-stack.mjs",
     "docker:stack:list": "REDACTED_SECRET scripts/docker-stack.mjs list",
-    "eta:truth:workbench": "pnpm --filter @workspace/eta-mu-truth-workbench dev"
+    "eta:truth:workbench": "pnpm --filter @workspace/eta-mu-truth test"
   },
   "bin": {
     "octavia": "dist/octavia/index.js"
