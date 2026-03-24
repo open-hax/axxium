@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-REDACTED_SECRET@v5
         with:
           REDACTED_SECRET-version: 22
+          package-manager-cache: false
       - run: REDACTED_SECRET --test packages/eta-mu-docs/tests/*.test.cjs
 
   eta-mu-truth-tests:
@@ -34,6 +35,7 @@ jobs:
       - uses: actions/setup-REDACTED_SECRET@v5
         with:
           REDACTED_SECRET-version: 22
+          package-manager-cache: false
       - run: REDACTED_SECRET --test packages/eta-mu-truth/tests/*.test.cjs
 
   eta-mu-compose-config:
