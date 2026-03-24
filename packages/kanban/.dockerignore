@@ -1,0 +1,9 @@
+REDACTED_SECRET_modules
+.dist
+dist
+coverage
+.vitest
+*.log
+*.tsbuildinfo
+src/**/*.map
+tests

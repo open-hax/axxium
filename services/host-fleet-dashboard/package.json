@@ -1,0 +1,12 @@
+{
+  "name": "@workspace/host-fleet-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "REDACTED_SECRET src/index.js",
+    "start": "REDACTED_SECRET src/index.js",
+    "test": "REDACTED_SECRET --test src/**/*.test.js"
+  }
+}
