@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_REDACTED_SECRET="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$repo_REDACTED_SECRET"
+
+if [ ! -f "packages/kanban/dist/cli.js" ]; then
+  pnpm --filter @openhax/kanban build >/dev/null
+fi
+
+exec REDACTED_SECRET "packages/kanban/dist/cli.js" "$@"

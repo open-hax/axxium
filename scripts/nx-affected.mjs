@@ -17,11 +17,14 @@ const UNTRACKED_COMMAND = "git ls-files --others --exclude-standard";
 const EXCLUDE_PREFIXES = [
   ".clobber/",
   ".codex/",
+  ".opencode/knowledge/",
+  ".opencode/pr-",
   ".reconstitute/",
   ".sisyphus/",
   "archives/",
   "docs/notes/",
   "REDACTED_SECRET_modules/",
+  ".worktrees/",
   "tmp/",
   "temp/",
 ];
