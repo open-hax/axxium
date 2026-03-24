@@ -81,7 +81,7 @@ services:
       PROXY_KEY_RELOAD_MS: "${PROXY_KEY_RELOAD_MS:-5000}"
       PROXY_KEY_COOLDOWN_MS: "${PROXY_KEY_COOLDOWN_MS:-30000}"
 
-      DATABASE_URL: "postgresql://REDACTED_SECRET:REDACTED_SECRET@open-hax-federation-peer-db:5432/REDACTED_SECRET"
+      DATABASE_URL: "postgresql://REDACTED_SECRET:REDACTED_SECRET@open-hax-federation-peer-db:5432/REDACTED_SECRET" # pragma: allowlist secret
 
       VITE_ALLOWED_HOSTS: "${VITE_ALLOWED_HOSTS:-}"
 
@@ -129,7 +129,7 @@ services:
     environment:
       POSTGRES_DB: REDACTED_SECRET
       POSTGRES_USER: REDACTED_SECRET
-      POSTGRES_PASSWORD: REDACTED_SECRET
+      POSTGRES_PASSWORD: REDACTED_SECRET # pragma: allowlist secret
     ports:
       - "${FEDERATION_DB_PORT:-5433}:5432"
     volumes:
