@@ -12,9 +12,36 @@ type Target = {
 
 const REDACTED_SECRET = process.cwd();
 const templatesDir = path.join(REDACTED_SECRET, "orgs/open-hax/eta-mu-github/templates/workflows");
+const allowedCommands = new Set(["inventory", "install"]);
+
+const ensureSafeTargetPath = (targetPath: string): string => {
+  const normalized = String(targetPath ?? "").trim();
+  if (!normalized) {
+    throw new Error("Refusing to install workflows: target path is empty");
+  }
+  if (path.isAbsolute(normalized)) {
+    throw new Error(`Refusing to install workflows outside repo REDACTED_SECRET: ${normalized}`);
+  }
+
+  const segments = normalized.split(/[\\/]+/u).filter(Boolean);
+  if (segments.includes("..")) {
+    throw new Error(`Refusing to install workflows with path traversal: ${normalized}`);
+  }
+
+  const resolvedRoot = path.resolve(REDACTED_SECRET);
+  const resolvedTargetRoot = path.resolve(REDACTED_SECRET, normalized);
+  if (resolvedTargetRoot !== resolvedRoot && !resolvedTargetRoot.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error(`Resolved target escapes repo REDACTED_SECRET: ${normalized}`);
+  }
+
+  return resolvedTargetRoot;
+};
 
 const parseArgs = () => {
   const [command = "inventory", ...rest] = process.argv.slice(2);
+  if (!allowedCommands.has(command)) {
+    throw new Error(`Unknown command: ${command}. Allowed commands: inventory, install`);
+  }
   const apply = rest.includes("--apply");
   const repoFilterIndex = rest.indexOf("--repo");
   const repoFilter = repoFilterIndex >= 0 ? rest[repoFilterIndex + 1] : undefined;
@@ -81,11 +108,16 @@ const listTargets = (): Target[] => {
 
 const installWorkflows = (target: Target): string[] => {
   const created: string[] = [];
-  const workflowDir = path.join(REDACTED_SECRET, target.path, ".github/workflows");
+  const targetRoot = ensureSafeTargetPath(target.path);
+  const workflowDir = path.resolve(targetRoot, ".github/workflows");
+  const resolvedRoot = path.resolve(REDACTED_SECRET);
   mkdirSync(workflowDir, { recursive: true });
   for (const name of ["eta-mu.yml", "eta-mu-review-gate.yml"]) {
     const templatePath = path.join(templatesDir, name);
-    const outputPath = path.join(workflowDir, name);
+    const outputPath = path.resolve(targetRoot, ".github/workflows", name);
+    if (outputPath !== resolvedRoot && !outputPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+      throw new Error(`Refusing to write workflow outside repo REDACTED_SECRET: ${outputPath}`);
+    }
     writeFileSync(outputPath, readFileSync(templatePath, "utf8"));
     created.push(path.relative(REDACTED_SECRET, outputPath));
   }
