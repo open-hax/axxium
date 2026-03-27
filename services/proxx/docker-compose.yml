@@ -1,7 +1,10 @@
-name: open-hax-openai-proxy
+# Local development instance - use this as the primary proxx
+# Usage: cd services/proxx && docker compose up -d
+
+name: proxx-local
 
 services:
-  open-hax-openai-proxy:
+  proxx:
     depends_on:
       open-hax-openai-proxy-db:
         condition: service_healthy
@@ -89,22 +92,24 @@ services:
       HOST_DASHBOARD_REQUEST_TIMEOUT_MS: "${HOST_DASHBOARD_REQUEST_TIMEOUT_MS:-5000}"
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
       OTEL_EXPORTER_OTLP_HEADERS: "${OTEL_EXPORTER_OTLP_HEADERS:-}"
-      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-proxx}"
-      OTEL_RESOURCE_ATTRIBUTES: "${OTEL_RESOURCE_ATTRIBUTES:-service.name=proxx}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-proxx-local}"
+      OTEL_RESOURCE_ATTRIBUTES: "${OTEL_RESOURCE_ATTRIBUTES:-service.name=proxx-local}"
 
       # Federation identity for the primary REDACTED_SECRET
-      FEDERATION_SELF_NODE_ID: "${FEDERATION_SELF_NODE_ID:-primary}"
-      FEDERATION_SELF_GROUP_ID: "${FEDERATION_SELF_GROUP_ID:-local-test-group}"
-      FEDERATION_SELF_CLUSTER_ID: "${FEDERATION_SELF_CLUSTER_ID:-local-test-cluster}"
+      FEDERATION_SELF_NODE_ID: "${FEDERATION_SELF_NODE_ID:-local-primary}"
+      FEDERATION_SELF_GROUP_ID: "${FEDERATION_SELF_GROUP_ID:-proxx-local}"
+      FEDERATION_SELF_CLUSTER_ID: "${FEDERATION_SELF_CLUSTER_ID:-proxx-local-cluster}"
       FEDERATION_SELF_PEER_DID: "${FEDERATION_SELF_PEER_DID:-}"
-      FEDERATION_SELF_PUBLIC_BASE_URL: "${FEDERATION_SELF_PUBLIC_BASE_URL:-http://open-hax-openai-proxy:8789}"
+      FEDERATION_SELF_PUBLIC_BASE_URL: "${FEDERATION_SELF_PUBLIC_BASE_URL:-http://proxx:8789}"
+      FEDERATION_DEFAULT_OWNER_SUBJECT: "${FEDERATION_DEFAULT_OWNER_SUBJECT:-did:web:proxx.local}"
       FEDERATION_REQUEST_TIMEOUT_MS: "${FEDERATION_REQUEST_TIMEOUT_MS:-30000}"
     volumes:
-      - ./keys.json:/workspace/service-config/keys.json
       - ./models.json:/workspace/service-config/models.json:ro
       - ./data:/app/data
       - ./:/workspace/runtime-repo:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -120,19 +125,17 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
-    networks:
-      ai-infra: {}
 
   open-hax-openai-proxy-db:
     image: postgres:16-bookworm
     environment:
       POSTGRES_DB: REDACTED_SECRET
       POSTGRES_USER: REDACTED_SECRET
-      POSTGRES_PASSWORD: REDACTED_SECRET # pragma: allowlist secret
+      POSTGRES_PASSWORD: REDACTED_SECRET
     ports:
-      - "${PROXY_DB_PORT:-5432}:5432"
+      - "${PROXY_DB_PORT:-15432}:5432"
     volumes:
-      - open-hax-openai-proxy-db-data:/var/lib/postgresql/data
+      - open-hax-openai-proxy_open-hax-openai-proxy-db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U REDACTED_SECRET -d REDACTED_SECRET"]
       interval: 10s
@@ -140,13 +143,9 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
-    networks:
-      ai-infra: {}
-
-networks:
-  ai-infra:
-    external: true
-    name: ai-infra
 
 volumes:
-  open-hax-openai-proxy-db-data:
+  open-hax-openai-proxy_open-hax-openai-proxy-db-data:
+    external: true
+
+
