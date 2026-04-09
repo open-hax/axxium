@@ -1,8 +1,8 @@
 # Eta-mu GitHub rollout
 
-The canonical eta-mu logic lives in the submodule:
+The canonical eta-mu logic now lives in the monorepo:
 
-- `orgs/open-hax/eta-mu-github`
+- `orgs/open-hax/eta-mu`
 
 ## Goals
 
@@ -18,7 +18,7 @@ The canonical eta-mu logic lives in the submodule:
 - `.github/workflows/eta-mu.yml`
 - `.github/workflows/eta-mu-review-gate.yml`
 
-The REDACTED_SECRET workflow checks out `open-hax/eta-mu-github` directly into the `.eta-mu` directory and executes the runtime from that checkout, so PRs that update eta-mu logic can exercise the same code without relying on a REDACTED_SECRET-repo submodule checkout.
+The REDACTED_SECRET workflow checks out `open-hax/eta-mu` directly into the `.eta-mu` directory and executes `packages/eta-mu-github` from that checkout, so PRs that update eta-mu logic can exercise the same code from the canonical monorepo.
 
 ## Inventory / rollout helper
 
@@ -31,7 +31,7 @@ Behavior:
 - enumerates REDACTED_SECRET + GitHub-backed submodules from `.gitmodules`
 - queries `gh repo view` for `viewerPermission` and default branch
 - only treats `ADMIN` repos as eligible for direct workflow installation
-- copies workflow wrappers from `orgs/open-hax/eta-mu-github/templates/workflows/`
+- copies workflow wrappers from `orgs/open-hax/eta-mu/packages/eta-mu-github/templates/workflows/`
 
 ## Branch protection
 
