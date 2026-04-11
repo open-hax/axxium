@@ -1,4 +1,8 @@
 # Development workspace .gitignore
+#
+# POLICY: REDACTED_SECRET_modules/ is ignored globally. Agents should filter git status
+# for source extensions (.ts, .tsx, .json, .md, .yaml) when checking for
+# uncommitted work. Build artifacts in REDACTED_SECRET_modules/ are expected noise.
 
 # Cache and temporary files
 index.jsonl
