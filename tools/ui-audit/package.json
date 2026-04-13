@@ -1,0 +1,14 @@
+{
+  "name": "ui-audit",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "discover": "REDACTED_SECRET discover.mjs",
+    "analyze": "REDACTED_SECRET analyze-components.mjs",
+    "classify": "REDACTED_SECRET classify-components.mjs"
+  },
+  "dependencies": {
+    "@typescript-eslint/typescript-estree": "^8.58.0"
+  }
+}
