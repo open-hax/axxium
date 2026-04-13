@@ -1,16 +1,83 @@
+# Dependencies
 node_modules/
-dist/
-logs/
-/data/
-coverage/
-.factory/
+.pnpm-store/
+.pnpm-debug.log
 
+# Build output
+dist/
+.next/
+build/
+__pycache__/
+*.pyc
+*.class
+target/
+
+# Cache / tooling state (never track these)
+.clj-kondo/
+.shadow-cljs/
+.lsp/
+.clojure/
+.cljs_node_repl/
+.pnp.*
+.yarn/
+
+# Coverage / test
+coverage/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+
+# Data volumes
+/data/
+
+# Secrets (keep patterns, never track contents)
 .env
+.env.*
+!.env.example
 keys.json
 models.json
 
-# Large artifacts removed during fork tax
-inbox/chatgpt_export/
-inbox/fixed.zip
+# Factory / scaffolding
+.factory/
+
+# Inbox — unstructured imports, binary exports, not source
+inbox/
+
+# Tmp — scratch space, test artifacts, not source
+tmp/
+
+# Private repos — no upstream to push to, should not be in this repo's tracking
+orgs/private/
+
+# Stale path — renamed to orgs/riatzukiza/mnemosyne
+packages/cephalon-ts/
+
+# services/ourllamas — archived, has __pycache__ bleed
+services/ourllamas/
+
+# Generated audit artifacts
+tools/ui-audit/component-frequency.json
+
+# Large runtime logs
+*.jsonl
 services/proxx/data-federation/request-logs.jsonl
-.pnpm-store/
+
+# Database dumps
+*.dump
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Docker volumes / runtime secrets
+services/openplanner/runtime-secrets/
