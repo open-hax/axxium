@@ -90,3 +90,13 @@ node-compile-cache/
 
 # docs/inbox — duplicate of inbox/, not reference material
 docs/inbox/
+
+# Submodule build cache bleed
+packages/opencode-cljs-client/.shadow-cljs/
+
+# Generated dependency graph screenshots
+services/cephalon-hive/quartz-garden/*.png
+services/cephalon-hive/quartz-garden/proxx-api/*.png
+
+# Database archives
+*.duckdb
