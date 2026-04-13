@@ -81,3 +81,12 @@ desktop.ini
 
 # Docker volumes / runtime secrets
 services/openplannerREDACTED_SECRET/
+
+# Pi session HTML dumps
+pi-session-*.html
+
+# Node compile cache
+REDACTED_SECRET-compile-cache/
+
+# docs/inbox — duplicate of inbox/, not reference material
+docs/inbox/
