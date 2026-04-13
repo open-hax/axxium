@@ -50,30 +50,45 @@ services:
         - vexx
     user: ${DOCKER_USER:-1000:1000}
   mongodb:
-    image: mongodb/mongodb-atlas-local:latest
-    command: []
+    # MongoDB Community Server in standalone mode (no replica set)
+    # This allows persistent volumes across container recreations
+    # Vector search is handled by the embedding service (proxx)
+    image: mongo:8.0
+    command:
+    - mongod
+    - --bind_ip_all
+    - --auth
     ports:
     - 127.0.0.1:${OPENPLANNER_MONGODB_PORT:-27017}:27017
     environment:
-      MONGODB_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
-      MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:REDACTED_SECRET-REDACTED_SECRET-password}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:REDACTED_SECRET-REDACTED_SECRET-password}
     volumes:
-    - openplanner-atlas-data:/data/db
+    - openplanner-mongodb-data:/data/db
     healthcheck:
       test:
       - CMD
       - mongosh
+      - -u
+      - ${MONGODB_ROOT_USERNAME:-openplannerRoot}
+      - -p
+      - ${MONGODB_ROOT_PASSWORD:REDACTED_SECRET-REDACTED_SECRET-password}
+      - --authenticationDatabase
+      - admin
       - --eval
       - db.adminCommand('ping')
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 30s
+      start_period: 20s
   mongot:
+    # Placeholder: Vector search via Atlas mongot disabled
+    # Using Community Server without integrated vector search
+    # Semantic search is handled by proxx embedding service
     image: busybox:1.36
     command:
-    - sleep
-    - infinity
+    - echo
+    - 'MongoDB Community Server - vector search via proxx'
     depends_on: {}
     entrypoint: []
     ports: []
@@ -83,17 +98,18 @@ services:
       test:
       - CMD
       - 'true'
+      - 'true'
       interval: 60s
       timeout: 5s
       retries: 1
   mongo-init:
-    image: mongodb/mongodb-community-server:8.2.0-ubi9
+    image: mongo:8.0
     depends_on:
       mongodb:
         condition: service_healthy
     entrypoint:
     - /bin/sh
-    - /scripts/atlas-init.sh
+    - /scripts/mongo-init.sh
     environment:
       MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
       MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:REDACTED_SECRET-REDACTED_SECRET-password}
@@ -102,7 +118,7 @@ services:
       OPENPLANNER_MONGO_APP_PASSWORD: ${OPENPLANNER_MONGO_APP_PASSWORD:REDACTED_SECRET-openplanner-password}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
     volumes:
-    - ./scripts/atlas-init.sh:/scripts/atlas-init.sh:ro
+    - ./scripts/mongo-init.sh:/scripts/mongo-init.sh:ro
     restart: 'no'
   openplanner:
     build:
@@ -1993,6 +2009,7 @@ services:
     ports:
     - ${KNOXX_FRONTEND_DEV_PORT:-5173}:5173
     environment:
+      CI: "true"
       CHOKIDAR_USEPOLLING: ${KNOXX_FRONTEND_CHOKIDAR_USEPOLLING:-true}
       WATCHPACK_POLLING: ${KNOXX_FRONTEND_WATCHPACK_POLLING:-true}
       VITE_KNOXX_BACKEND_URL: ${VITE_KNOXX_BACKEND_URL:-http://knoxx-backend:8000}
