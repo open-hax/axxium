@@ -50,45 +50,32 @@ services:
         - vexx
     user: ${DOCKER_USER:-1000:1000}
   mongodb:
-    # MongoDB Community Server in standalone mode (no replica set)
-    # This allows persistent volumes across container recreations
-    # Vector search is handled by the embedding service (proxx)
-    image: mongo:8.0
-    command:
-    - mongod
-    - --bind_ip_all
-    - --auth
+    # Atlas Local includes MongoDB + mongot (vector search) in single container
+    # Vector search indexes created by atlas-init.sh
+    image: mongodb/mongodb-atlas-local:latest
+    command: []
     ports:
     - 127.0.0.1:${OPENPLANNER_MONGODB_PORT:-27017}:27017
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-change-me-root-password}
+      MONGODB_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
+      MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-change-me-root-password}
     volumes:
-    - openplanner-mongodb-data:/data/db
+    - openplanner-atlas-data:/data/db
     healthcheck:
       test:
       - CMD
       - mongosh
-      - -u
-      - ${MONGODB_ROOT_USERNAME:-openplannerRoot}
-      - -p
-      - ${MONGODB_ROOT_PASSWORD:-change-me-root-password}
-      - --authenticationDatabase
-      - admin
       - --eval
       - db.adminCommand('ping')
       interval: 15s
       timeout: 10s
       retries: 10
-      start_period: 20s
+      start_period: 30s
   mongot:
-    # Placeholder: Vector search via Atlas mongot disabled
-    # Using Community Server without integrated vector search
-    # Semantic search is handled by proxx embedding service
     image: busybox:1.36
     command:
-    - echo
-    - 'MongoDB Community Server - vector search via proxx'
+    - sleep
+    - infinity
     depends_on: {}
     entrypoint: []
     ports: []
@@ -98,18 +85,17 @@ services:
       test:
       - CMD
       - 'true'
-      - 'true'
       interval: 60s
       timeout: 5s
       retries: 1
   mongo-init:
-    image: mongo:8.0
+    image: mongodb/mongodb-community-server:8.2.0-ubi9
     depends_on:
       mongodb:
         condition: service_healthy
     entrypoint:
     - /bin/sh
-    - /scripts/mongo-init.sh
+    - /scripts/atlas-init.sh
     environment:
       MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-openplannerRoot}
       MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-change-me-root-password}
@@ -118,7 +104,7 @@ services:
       OPENPLANNER_MONGO_APP_PASSWORD: ${OPENPLANNER_MONGO_APP_PASSWORD:-change-me-openplanner-password}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
     volumes:
-    - ./scripts/mongo-init.sh:/scripts/mongo-init.sh:ro
+    - ./scripts/atlas-init.sh:/scripts/atlas-init.sh:ro
     restart: 'no'
   openplanner:
     build:
@@ -370,7 +356,7 @@ services:
     cpuset: 2-21
     user: ${DOCKER_USER:-1000:1000}
     working_dir: /app/workspace/devel/orgs/open-hax/openplanner
-    command: bash -lc "npx pnpm install --no-frozen-lockfile && npx pnpm -C packages/graph-weaver-aco build && cd packages/graph-weaver && npx tsx src/server.ts"
+    command: bash -lc "npx pnpm -C packages/graph-weaver-aco build && cd packages/graph-weaver && npx tsx src/server.ts"
     expose:
     - '8796'
     ports:
@@ -425,7 +411,7 @@ services:
       ai-infra: {}
   eros-eris-field-app:
     profiles:
-    - graph
+    - graph-single
     image: node:22-bookworm
     cpus: 1.5
     cpuset: 2-21
@@ -647,8 +633,10 @@ services:
     user: ${DOCKER_USER:-1000:1000}
   eros-eris-field-app-semantic:
     profiles:
+    - graph
     - graph-2
     - graph-3
+    - graph-20
     image: node:22-bookworm
     cpus: 1.5
     cpuset: 2-21
@@ -728,6 +716,7 @@ services:
     user: ${DOCKER_USER:-1000:1000}
   eros-eris-field-app-shard0of3:
     profiles:
+    - graph
     - graph-3
     image: node:22-bookworm
     cpus: 1.5
@@ -800,6 +789,7 @@ services:
     user: ${DOCKER_USER:-1000:1000}
   eros-eris-field-app-shard1of3:
     profiles:
+    - graph
     - graph-3
     image: node:22-bookworm
     cpus: 1.5
@@ -872,6 +862,7 @@ services:
     user: ${DOCKER_USER:-1000:1000}
   eros-eris-field-app-shard2of3:
     profiles:
+    - graph
     - graph-3
     image: node:22-bookworm
     cpus: 1.5
@@ -2000,8 +1991,7 @@ services:
     cpus: 1
     cpuset: 2-21
     working_dir: /app/workspace/devel
-    command: 'bash -lc "cd orgs/open-hax/openplanner && pnpm install --filter @open-hax/knoxx-frontend --config.node-linker=hoisted --store-dir=/tmp/pnpm-store --no-frozen-lockfile && pnpm --filter @open-hax/uxx
-      build && pnpm exec tsc -p packages/webgl-graph-view/tsconfig.json && cd packages/knoxx/frontend && npx vite --host 0.0.0.0 --port 5173 --strictPort"
+    command: 'bash -lc "cd orgs/open-hax/openplanner && CI=true pnpm --filter @open-hax/uxx build && pnpm exec tsc -p packages/webgl-graph-view/tsconfig.json && cd packages/knoxx/frontend && npx vite --host 0.0.0.0 --port 5173 --strictPort"
 
       '
     expose:
@@ -2009,7 +1999,6 @@ services:
     ports:
     - ${KNOXX_FRONTEND_DEV_PORT:-5173}:5173
     environment:
-      CI: "true"
       CHOKIDAR_USEPOLLING: ${KNOXX_FRONTEND_CHOKIDAR_USEPOLLING:-true}
       WATCHPACK_POLLING: ${KNOXX_FRONTEND_WATCHPACK_POLLING:-true}
       VITE_KNOXX_BACKEND_URL: ${VITE_KNOXX_BACKEND_URL:-http://knoxx-backend:8000}
