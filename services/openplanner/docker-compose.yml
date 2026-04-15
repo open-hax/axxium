@@ -202,8 +202,8 @@ services:
       default: {}
   openplanner-proxx:
     build:
-      context: ../..
-      dockerfile: orgs/open-hax/proxx/Dockerfile
+      context: ../../orgs/open-hax/proxx
+      dockerfile: Dockerfile
     cpus: 1.5
     cpuset: 2-21
     depends_on:
