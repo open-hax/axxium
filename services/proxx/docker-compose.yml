@@ -4,13 +4,26 @@
 name: proxx-local
 
 services:
+  # Init container: fix ownership of the bind-mounted ./data directory so the
+  # main proxx service can run as a non-root user.
+  # Exception: init containers may run as root.
+  proxx-init-data:
+    image: busybox:1.36
+    user: "0:0" # init container; allowed root for one-time volume permission fix
+    command: ["sh", "-lc", "chown -R 1000:1000 /app/data || true"]
+    volumes:
+      - ./data:/app/data
+
   proxx:
     depends_on:
+      proxx-init-data:
+        condition: service_completed_successfully
       proxx-local-db:
         condition: service_healthy
+    user: "${DOCKER_USER:-1000:1000}"
     build:
-      context: ../..
-      dockerfile: orgs/open-hax/proxx/Dockerfile
+      context: ../../orgs/open-hax/proxx
+      dockerfile: Dockerfile
     ports:
       # Bind to all interfaces so containers can reach Proxx for embeddings
       - "0.0.0.0:${PROXY_PORT:-8789}:8789"
@@ -32,7 +45,7 @@ services:
       PROXY_REQUEST_LOGS_FLUSH_MS: "${PROXY_REQUEST_LOGS_FLUSH_MS:-1000}"
       PROXY_PROMPT_AFFINITY_FLUSH_MS: "${PROXY_PROMPT_AFFINITY_FLUSH_MS:-250}"
       UPSTREAM_PROVIDER_ID: "${UPSTREAM_PROVIDER_ID:-openai}"
-      UPSTREAM_FALLBACK_PROVIDER_IDS: "${UPSTREAM_FALLBACK_PROVIDER_IDS:-ollama-cloud,rotussy,zai,requesty}"
+      UPSTREAM_FALLBACK_PROVIDER_IDS: "${UPSTREAM_FALLBACK_PROVIDER_IDS:-openai,ollama-cloud,rotussy,zai,requesty}"
       DISABLED_PROVIDER_IDS: "${DISABLED_PROVIDER_IDS:-}"
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL:-https://chatgpt.com/backend-api}"
       UPSTREAM_PROVIDER_BASE_URLS: "${UPSTREAM_PROVIDER_BASE_URLS:-ollama-cloud=https://ollama.com,openai=https://chatgpt.com/backend-api,vivgrid=https://api.vivgrid.com,requesty=https://router.requesty.ai/v1}"
