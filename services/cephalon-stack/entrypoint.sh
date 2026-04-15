@@ -2,6 +2,7 @@
 set -euo pipefail
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+CEPHALON_TS_ROOT="${CEPHALON_TS_ROOT:-$WORKSPACE_ROOT/orgs/open-hax/openplanner/packages/cephalon/packages/cephalon-ts}"
 
 if [ ! -d "$WORKSPACE_ROOT" ]; then
   echo "[cephalon-stack] expected mounted workspace at $WORKSPACE_ROOT" >&2
@@ -10,7 +11,7 @@ fi
 
 mkdir -p \
   "$WORKSPACE_ROOT/services/cephalon-cljs/logs" \
-  "$WORKSPACE_ROOT/packages/cephalon-ts/logs"
+  "$CEPHALON_TS_ROOT/logs"
 
 mkdir -p /app/node_modules/@promethean-os
 
@@ -23,7 +24,7 @@ link_workspace_package() {
   fi
 }
 
-link_workspace_package "cephalon-ts" "$WORKSPACE_ROOT/packages/cephalon-ts"
+link_workspace_package "cephalon-ts" "$CEPHALON_TS_ROOT"
 link_workspace_package "openplanner-cljs-client" "$WORKSPACE_ROOT/packages/openplanner-cljs-client"
 if [ -d "$WORKSPACE_ROOT/packages/event/dist" ]; then
   link_workspace_package "event" "$WORKSPACE_ROOT/packages/event"
@@ -67,7 +68,7 @@ ensure_runtime_dependency() {
 }
 
 install_runtime_dependencies_from_package_json "$WORKSPACE_ROOT/services/cephalon-cljs/package.json"
-install_runtime_dependencies_from_package_json "$WORKSPACE_ROOT/packages/cephalon-ts/package.json"
+install_runtime_dependencies_from_package_json "$CEPHALON_TS_ROOT/package.json"
 
 build_if_missing() {
   local artifact="$1"
@@ -80,10 +81,10 @@ build_if_missing() {
 
 build_if_missing "$WORKSPACE_ROOT/packages/event/dist/index.js" "pnpm --dir '$WORKSPACE_ROOT' --filter @promethean-os/event build"
 build_if_missing "$WORKSPACE_ROOT/packages/openplanner-cljs-client/dist/index.js" "pnpm --dir '$WORKSPACE_ROOT' --filter @promethean-os/openplanner-cljs-client build"
-if [ -e "$WORKSPACE_ROOT/packages/cephalon-ts/dist/index.cjs" ] || [ -e "$WORKSPACE_ROOT/packages/cephalon-ts/dist/index.js" ]; then
+if [ -e "$CEPHALON_TS_ROOT/dist/index.cjs" ] || [ -e "$CEPHALON_TS_ROOT/dist/index.js" ]; then
   :
 else
-  build_if_missing "$WORKSPACE_ROOT/packages/cephalon-ts/dist/index.cjs" "pnpm --dir '$WORKSPACE_ROOT' --filter @promethean-os/cephalon-ts build"
+  build_if_missing "$CEPHALON_TS_ROOT/dist/index.cjs" "pnpm --dir '$WORKSPACE_ROOT' --filter @promethean-os/cephalon-ts build"
 fi
 
 if [ ! -f "$WORKSPACE_ROOT/services/cephalon-cljs/dist/cephalon.js" ]; then

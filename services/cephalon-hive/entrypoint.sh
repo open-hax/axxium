@@ -12,6 +12,7 @@ CEPHALON_SOURCE_ROOT="${CEPHALON_SOURCE_ROOT:-$CEPHALON_MONOREPO_ROOT/packages/c
 CEPHALON_LOG_FILE="${CEPHALON_LOG_FILE:-$CEPHALON_HOME/logs/${CEPHALON_SLUG}.log}"
 CEPHALON_STATE_DIR="${CEPHALON_STATE_DIR:-$CEPHALON_HOME/state}"
 SEED_WORKSPACE="${SEED_WORKSPACE:-/workspace}"
+SEED_CEPHALON_TS_SOURCE="${SEED_CEPHALON_TS_SOURCE:-$SEED_WORKSPACE/orgs/open-hax/openplanner/packages/cephalon/packages/cephalon-ts}"
 TSUP_BIN="${TSUP_BIN:-$SEED_WORKSPACE/node_modules/.pnpm/node_modules/.bin/tsup}"
 PNPM_STORE_DIR="${PNPM_STORE_DIR:-$CEPHALON_HOME/.pnpm-store}"
 
@@ -37,8 +38,21 @@ bootstrap_clone() {
   fi
   mkdir -p "$CEPHALON_MONOREPO_ROOT/packages"
 
+  if [ -d "$SEED_CEPHALON_TS_SOURCE" ]; then
+    mkdir -p "$CEPHALON_MONOREPO_ROOT/packages/cephalon-ts"
+    rsync -a \
+      --delete \
+      --exclude .git \
+      --exclude node_modules \
+      --exclude dist \
+      --exclude coverage \
+      --exclude .turbo \
+      --exclude .next \
+      --exclude logs \
+      "$SEED_CEPHALON_TS_SOURCE/" "$CEPHALON_MONOREPO_ROOT/packages/cephalon-ts/"
+  fi
+
   for rel in \
-    packages/cephalon-ts \
     packages/event \
     packages/openplanner-cljs-client
   do
@@ -100,7 +114,11 @@ link_workspace_toolchain() {
     ln -s "$SEED_WORKSPACE/node_modules" "$CEPHALON_MONOREPO_ROOT/node_modules"
   fi
 
-  for pkg in cephalon-ts openplanner-cljs-client event; do
+  if [ ! -e "$CEPHALON_MONOREPO_ROOT/packages/cephalon-ts/node_modules" ] && [ -d "$SEED_CEPHALON_TS_SOURCE/node_modules" ]; then
+    ln -s "$SEED_CEPHALON_TS_SOURCE/node_modules" "$CEPHALON_MONOREPO_ROOT/packages/cephalon-ts/node_modules"
+  fi
+
+  for pkg in openplanner-cljs-client event; do
     if [ ! -e "$CEPHALON_MONOREPO_ROOT/packages/$pkg/node_modules" ] && [ -d "$SEED_WORKSPACE/packages/$pkg/node_modules" ]; then
       ln -s "$SEED_WORKSPACE/packages/$pkg/node_modules" "$CEPHALON_MONOREPO_ROOT/packages/$pkg/node_modules"
     fi
