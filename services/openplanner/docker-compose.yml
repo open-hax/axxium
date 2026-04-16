@@ -1981,6 +1981,8 @@ services:
     image: knoxx-kms-ingestion:latest
     cpus: 2
     cpuset: 2-21
+    ports:
+    - 127.0.0.1:3003:3003
     expose:
     - '3003'
     environment:
@@ -2006,6 +2008,7 @@ services:
       INGEST_MAX_LOAD_PER_CORE: ${INGEST_MAX_LOAD_PER_CORE:-1.35}
       INGEST_THROTTLE_SLEEP_MS: ${INGEST_THROTTLE_SLEEP_MS:-500}
       INGEST_BATCH_DELAY_MS: ${INGEST_BATCH_DELAY_MS:-1000}
+      SEMANTIC_EDGE_BUILD_ENABLED: ${SEMANTIC_EDGE_BUILD_ENABLED:-false}
       TRANSLATION_AGENT_ENABLED: ${TRANSLATION_AGENT_ENABLED:-true}
       TRANSLATION_POLL_MS: ${TRANSLATION_POLL_MS:-5000}
       KNOXX_BACKEND_URL: ${KNOXX_BACKEND_URL:-http://host.docker.internal:8000}
