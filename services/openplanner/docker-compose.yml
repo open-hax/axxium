@@ -234,6 +234,7 @@ services:
       UPSTREAM_BASE_URL: ${OPENPLANNER_PROXX_UPSTREAM_BASE_URL:-https://api.z.ai/api/paas/v4}
       UPSTREAM_PROVIDER_BASE_URLS: ${OPENPLANNER_PROXX_UPSTREAM_PROVIDER_BASE_URLS:-ollama-cloud=https://ollama.com,openai=https://chatgpt.com/backend-api,vivgrid=https://api.vivgrid.com,requesty=https://router.requesty.ai/v1,zai=https://api.z.ai/api/paas/v4}
       REQUESTY_API_TOKEN: ${REQUESTY_API_TOKEN:-}
+      OLLAMA_CLOUD_API_KEY: ${OPENPLANNER_PROXX_OLLAMA_CLOUD_API_KEY:-${OLLAMA_CLOUD_API_KEY:-}}
       OPENAI_PROVIDER_ID: ${OPENAI_PROVIDER_ID:-openai}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://chatgpt.com/backend-api}
       OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com}
@@ -1917,6 +1918,7 @@ services:
       PROXX_DEFAULT_MODEL: ${PROXX_DEFAULT_MODEL:-glm-5}
       KNOXX_THINKING_LEVEL: ${KNOXX_THINKING_LEVEL:-off}
       KNOXX_REASONING_MODEL_PREFIXES: ${KNOXX_REASONING_MODEL_PREFIXES:-glm-}
+      KNOXX_MODEL_PREFIX_ALLOWLIST: ${KNOXX_MODEL_PREFIX_ALLOWLIST:-glm-5,gpt-5,qwen3,gemma4:,gemma3:,deepseek,kimi-k2,nemotron,cogito,devstral,minimax,ministral,mistral-large}
       PROXX_EMBED_MODEL: ${PROXX_EMBED_MODEL:-nomic-embed-text:latest}
       OPENPLANNER_BASE_URL: ${KNOXX_OPENPLANNER_BASE_URL:-http://openplanner:7777}
       OPENPLANNER_API_KEY: ${KNOXX_OPENPLANNER_API_KEY:-change-me}
