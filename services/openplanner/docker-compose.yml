@@ -1953,8 +1953,8 @@ services:
     profiles:
     - npu
     build:
-      context: ${DEVEL_ROOT_PATH:-../..}
-      dockerfile: orgs/open-hax/openplanner/packages/knoxx/voice/stt-npu/Dockerfile
+      context: ../../orgs/open-hax/openplanner/packages/knoxx/voice/stt-npu
+      dockerfile: Dockerfile
     cpus: 2
     cpuset: 2-21
     ports:
