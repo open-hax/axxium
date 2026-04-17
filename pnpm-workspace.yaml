@@ -23,6 +23,7 @@ packages:
   - packages/signal-embed-browser
   - packages/thread-assessment
   - packages/embedding
+  - packages/omni-top
   - orgs/riatzukiza/threat-radar-mcp
   - orgs/riatzukiza/threat-radar-web
   - services/*
