@@ -1946,6 +1946,53 @@ services:
     restart: unless-stopped
     networks:
     - knoxx-internal
+
+  # Whisper STT running on Intel NPU via OpenVINO GenAI.
+  # Opt-in profile so hosts without /dev/accel/accel0 don't fail compose startup.
+  knoxx-stt-npu:
+    profiles:
+    - npu
+    build:
+      context: ${DEVEL_ROOT_PATH:-../..}
+      dockerfile: orgs/open-hax/openplanner/packages/knoxx/voice/stt-npu/Dockerfile
+    cpus: 2
+    cpuset: 2-21
+    ports:
+    - 127.0.0.1:${KNOXX_STT_NPU_PORT:-8010}:8010
+    environment:
+      PORT: '8010'
+      WHISPER_DEVICE: ${KNOXX_STT_DEVICE:-NPU}
+      WHISPER_MODEL_ID: ${KNOXX_STT_MODEL_ID:-anubhav200/openai-whisper-small-openvino-int4}
+      WHISPER_NPU_COMPILER_TYPE: ${KNOXX_STT_NPU_COMPILER_TYPE:-DRIVER}
+      MODEL_DIR: /data/models
+      HF_HOME: /data/hf
+      LD_LIBRARY_PATH: /opt/ze:/opt/npu
+    volumes:
+    - knoxx-stt-models:/data
+    # Intel NPU user-space runtime (Level Zero) is provided by the host driver install.
+    # OpenVINO's NPU plugin dlopens these at runtime; without them, OpenVINO will only list CPU.
+    - ${KNOXX_NPU_LIBZE_INTEL_NPU}:/opt/ze/libze_intel_npu.so.1:ro
+    - ${KNOXX_NPU_LIBZE_INTEL_NPU}:/opt/ze/libze_intel_npu.so:ro
+    - ${KNOXX_NPU_LIBZE_LOADER}:/opt/ze/libze_loader.so.1:ro
+    - ${KNOXX_NPU_DRIVER_COMPILER}:/opt/npu/libnpu_driver_compiler.so:ro
+    devices:
+    - /dev/accel/accel0:/dev/accel/accel0
+    group_add:
+    - ${RENDER_GID:-992}
+    healthcheck:
+      test:
+      - CMD
+      - bash
+      - -lc
+      - curl -fsS http://127.0.0.1:8010/health >/dev/null
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+    - knoxx-internal
+    user: ${DOCKER_USER:-1000:1000}
   shibboleth-backend:
     image: knoxx-shibboleth-backend:latest
     cpus: 1
@@ -2135,6 +2182,8 @@ volumes:
   knoxx-redis-data: null
   knoxx-models: null
   knoxx-runs: null
+
+  knoxx-stt-models: null
 
   knoxx-frontend-node-modules: null
   knoxx-knoxx-node-modules: null
