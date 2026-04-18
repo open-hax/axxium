@@ -1,26 +1,28 @@
-# Π handoff
+# Π handoff (continuation)
 
-- time: 2026-04-18T02:49:45Z
+- time: 2026-04-18T03:05:00Z
 - branch: pi/fork-tax/2026-04-15-170411
-- pre-Π HEAD: ea56c668b907
 
 ## Summary
-- Fork-tax snapshot for devel superproject (origin: git@github.com:riatzukiza/devel.git).
-- **430 stale root-level files deleted**: old specs, scripts, images, debug files, absorbed project dirs (pm2-clj-project, reconstitute, hormuz_clock_v4_bundle, labs, web, etc.)
-- **.gitmodules cleanup**: removed 21 stale submodule entries for paths no longer on disk.
-- **Config updates**: opencode plugin bump 1.2.26→1.4.3, new model variants in models.example.json, tooloxx services in pnpm-workspace.yaml, pnpm-lock.yaml sync.
-- **Submodule pointers updated** (pushed only): eta-mu @ 3e384556, ragussy @ 04bf0c2e.
+- Bumped gitlinks for 6 pushed submodules in the superproject.
+- Previous Π (fork-tax-2026-04-18-024945) committed 430 stale file deletions + .gitmodules prune.
+
+## Submodules updated (pushed → gitlink bumped)
+- **eros-eris-field** → 5c1e11a (main) — semantic field module + ant system
+- **eros-eris-field-app** → a32a667 (main) — compose + README updates
+- **proxx** → cde69cf (fix/ollama-cloud-glm-routing) — local ollama routing + observability tests
+- **vexx** → 3ec38d6 (main) — native ONNX runtime, Dockerfile, model assets
+- **our-gpus** → e2ba33b (master) — openplanner sync CLI (pushed to fork)
+- **shuvcrawl** → 2b9af0d (master) — twitter-aware merge (pushed to fork)
+
+## Submodules blocked (gitlink NOT updated)
+- **uxx** — rebase conflicts with remote (theme pack divergence), needs manual resolution
+- **agent-actors** — branch protection requires PR (no merge commits allowed)
+- **ragussy** — push access denied to mojomast org
+- **openplanner** — nested vexx submodule still dirty inside; gitlink shows -dirty suffix
 
 ## Verification
 - skipped (no new run during this Π step; rely on receipts.log for prior passing builds/tests).
 
-## Concurrent/unowned dirt left untouched
-- `.spacemacs` — typechange from symlink to file (personal config)
-- `.ημ/03_ARTIFACTS/narrative_audio` — dirty submodule (modified content)
-- 9 submodules with unpushed commits and/or dirty working trees:
-  - uxx (9 ahead), shuvcrawl (4 ahead), openplanner (1 ahead + dirty), proxx (4 ahead + dirty), eros-eris-field (ahead + dirty), eros-eris-field-app (ahead + dirty), agent-actors (8 ahead + dirty), vexx (ahead + dirty), our-gpus (12 ahead + dirty)
-
 ## Notes
 - Π capture is isolated to this branch; main is not rewritten.
-- Gitlink deletions for removed submodules (internal/open-hax, internal/riatzukiza, etc.) are committed.
-- Some gitlinks remain for submodules still present on disk (bevy_replicon, egregoria, ggrs) but not in .gitmodules — these are legacy and harmless.
