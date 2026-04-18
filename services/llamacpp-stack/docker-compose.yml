@@ -14,9 +14,9 @@ services:
       LLAMA_ARG_N_GPU_LAYERS: "${LLAMACPP_N_GPU_LAYERS:-999}"
       LLAMA_ARG_CTX_SIZE: "${LLAMACPP_CTX_SIZE:-8192}"
       LLAMA_ARG_PARALLEL: "${LLAMACPP_PARALLEL:-4}"
-      LLAMA_ARG_MODEL: "/models/${LLAMACPP_CHAT_MODEL:-gemma-4-e4b-Q4_K_M.gguf}"
+      LLAMA_ARG_MODEL: "/models/${LLAMACPP_CHAT_MODEL:-sha256-4c27e0f5b5adf02ac956c7322bd2ee7636fe3f45a8512c9aba5385242cb6e09a}"
     volumes:
-      - ${LLAMACPP_MODELS_DIR:-./models}:/models:ro
+      - ${LLAMACPP_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/models:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
       interval: 20s
@@ -43,9 +43,9 @@ services:
       LLAMA_ARG_PORT: "8081"
       LLAMA_ARG_N_GPU_LAYERS: "${LLAMACPP_N_GPU_LAYERS:-999}"
       LLAMA_ARG_EMBEDDING: "true"
-      LLAMA_ARG_MODEL: "/models/${LLAMACPP_EMBED_MODEL:-qwen3-embedding-0.6b-F16.gguf}"
+      LLAMA_ARG_MODEL: "/models/${LLAMACPP_EMBED_MODEL:-sha256-06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439}"
     volumes:
-      - ${LLAMACPP_MODELS_DIR:-./models}:/models:ro
+      - ${LLAMACPP_MODELS_DIR:-/usr/share/ollama/.ollama/models/blobs}:/models:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/health"]
       interval: 20s
