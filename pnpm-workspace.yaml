@@ -13,6 +13,7 @@ packages:
   - packages/utils
   - packages/fsm
   - orgs/open-hax/tooloxx/packages/*
+  - orgs/open-hax/tooloxx/services/*
   - packages/radar-core
   - packages/output-contract-gate
   - packages/thread-assessment
