@@ -2,25 +2,9 @@
 	path = orgs/riatzukiza/promethean
 	url = git@github.com:riatzukiza/promethean.git
 	branch = device/stealth
-[submodule "dotfiles"]
-	path = orgs/riatzukiza/dotfiles
-	url = git@github.com:riatzukiza/dotfiles.git
-	branch = device/stealth
-[submodule "agent-shell"]
-	path = oss/agent-shell
-	url = git@github.com:riatzukiza/agent-shell.git
-[submodule "clojure-mcp"]
-	path = oss/clojure-mcp
-	url = git@github.com:bhauman/clojure-mcp.git
-[submodule "opencode-openai-codex-auth"]
-	path = orgs/openai/opencode-openai-codex-auth
-	url = git@github.com:numman-ali/opencode-openai-codex-auth.git
 [submodule "openai/codex"]
 	path = orgs/openai/codex
 	url = org-14957082@github.com:openai/codex.git
-[submodule "sst/opencode"]
-	path = orgs/sst/opencode
-	url = git@github.com:sst/opencode.git
 [submodule "moofone/codex-ts-sdk"]
 	path = orgs/moofone/codex-ts-sdk
 	url = git@github.com:moofone/codex-ts-sdk.git
@@ -43,10 +27,6 @@
 	path = orgs/riatzukiza/goblin-lessons
 	url = git@github.com:riatzukiza/goblin-lessons.git
 	branch = device/stealth
-[submodule "riatzukiza/stt"]
-	path = orgs/riatzukiza/stt
-	url = git@github.com:riatzukiza/stt.git
-	branch = device/stealth
 [submodule "orgs/open-hax/codex"]
 	path = orgs/open-hax/codex
 	url = git@github.com:open-hax/codex.git
@@ -55,21 +35,9 @@
 	path = orgs/open-hax/agent-actors
 	url = git@github.com:open-hax/agent-actors.git
 	branch = device/stealth
-[submodule "orgs/open-hax/clients"]
-	path = orgs/open-hax/clients
-	url = git@github.com:open-hax/clients.git
-	branch = device/stealth
 [submodule "orgs/open-hax/cljs-plugin-template"]
 	path = orgs/open-hax/cljs-plugin-template
 	url = git@github.com:open-hax/cljs-plugin-template.git
-	branch = device/stealth
-[submodule "orgs/open-hax/plugins/codex"]
-	path = orgs/open-hax/plugins/codex
-	url = git@github.com:open-hax/codex.git
-	branch = device/stealth
-[submodule "orgs/open-hax/workbench"]
-	path = orgs/open-hax/workbench
-	url = git@github.com:open-hax/workbench.git
 	branch = device/stealth
 [submodule "orgs/octave-commons/helm"]
 	path = orgs/octave-commons/helm
@@ -110,21 +78,6 @@
 	path = orgs/open-hax/museeks
 	url = https://github.com/open-hax/museeks.git
 	branch = device/stealth
-[submodule "vaults/fork_tales"]
-	path = vaults/fork_tales
-	url = https://github.com/octave-commons/fork_tales.git
-	branch = device/stealth
-[submodule "vaults/static_man"]
-	path = vaults/static_man
-	url = git@github.com:octave-commons/static_man.git
-	branch = device/stealth
-[submodule "services/vivgrid-openai-proxy"]
-	path = services/vivgrid-openai-proxy
-	url = https://github.com/open-hax/vivgrid-openai-proxy.git
-	branch = device/stealth
-[submodule "services/codex-lb"]
-	path = services/codex-lb
-	url = https://github.com/Soju06/codex-lb.git
 [submodule "orgs/ussyverse/openclawssy"]
 	path = orgs/ussyverse/openclawssy
 	url = git@github.com:mojomast/openclawssy.git
@@ -171,14 +124,6 @@
 	path = orgs/riatzukiza/TANF-app
 	url = git@github.com:riatzukiza/TANF-app.git
 	branch = main
-[submodule "orgs/riatzukiza/hormuz-clock-mcp"]
-	path = orgs/riatzukiza/hormuz-clock-mcp
-	url = file:///home/err/devel/orgs/riatzukiza/hormuz-clock-mcp
-	branch = main
-[submodule "threat-radar-deploy"]
-	path = threat-radar-deploy
-	url = https://github.com/riatzukiza/threat-radar.git
-	branch = main
 [submodule "bevy_replicon"]
 	path = bevy_replicon
 	url = https://github.com/simgine/bevy_replicon.git
@@ -187,25 +132,9 @@
 	path = egregoria
 	url = https://github.com/Uriopass/Egregoria.git
 	branch = master
-[submodule "game_network"]
-	path = game_network
-	url = https://github.com/jakalope/game_network.git
-	branch = master
-[submodule "gates-pr35-hardening-main"]
-	path = gates-pr35-hardening-main
-	url = git@github.com:octave-commons/gates-of-aker.git
-	branch = fix/colony-regression-hardening
 [submodule "ggrs"]
 	path = ggrs
 	url = https://github.com/gschup/ggrs.git
-	branch = main
-[submodule "lightyear"]
-	path = lightyear
-	url = https://github.com/cBournhonesque/lightyear.git
-	branch = main
-[submodule "mcp-social-publisher-live"]
-	path = mcp-social-publisher-live
-	url = https://github.com/riatzukiza/mcp-social-publisher
 	branch = main
 [submodule "orgs/anomalyco/opencode"]
 	path = orgs/anomalyco/opencode
@@ -215,13 +144,6 @@
 	path = orgs/badlogic/pi-mono
 	url = git@github.com:badlogic/pi-mono.git
 	branch = main
-[submodule "verathar-server"]
-	path = verathar-server
-	url = https://github.com/isaacsaancheez/verathar-server.git
-	branch = master
-[submodule "orgs/open-hax/eta-mu-github"]
-	path = orgs/open-hax/eta-mu-github
-	url = https://github.com/open-hax/eta-mu-github.git
 [submodule "orgs/open-hax/eta-mu"]
 	path = orgs/open-hax/eta-mu
 	url = https://github.com/open-hax/eta-mu.git
