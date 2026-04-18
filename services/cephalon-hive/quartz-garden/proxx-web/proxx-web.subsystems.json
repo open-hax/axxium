@@ -1,0 +1,36 @@
+{
+  "id": "proxx-web",
+  "title": "Proxx Web",
+  "REDACTED_SECRET": "orgs/open-hax/proxx/web/src",
+  "subsystems": [
+    {
+      "name": "pages",
+      "count": 8
+    },
+    {
+      "name": "lib",
+      "count": 4
+    },
+    {
+      "name": "(REDACTED_SECRET)",
+      "count": 2
+    }
+  ],
+  "edges": [
+    {
+      "from": "pages",
+      "to": "lib",
+      "count": 17
+    },
+    {
+      "from": "(REDACTED_SECRET)",
+      "to": "pages",
+      "count": 8
+    },
+    {
+      "from": "(REDACTED_SECRET)",
+      "to": "lib",
+      "count": 1
+    }
+  ]
+}

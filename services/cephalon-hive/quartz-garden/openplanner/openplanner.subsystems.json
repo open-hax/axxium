@@ -1,0 +1,50 @@
+{
+  "id": "openplanner",
+  "title": "OpenPlanner",
+  "REDACTED_SECRET": "services/openplanner/src",
+  "subsystems": [
+    {
+      "name": "lib",
+      "count": 12
+    },
+    {
+      "name": "routes",
+      "count": 7
+    },
+    {
+      "name": "(REDACTED_SECRET)",
+      "count": 3
+    },
+    {
+      "name": "plugins",
+      "count": 3
+    }
+  ],
+  "edges": [
+    {
+      "from": "routes",
+      "to": "lib",
+      "count": 12
+    },
+    {
+      "from": "plugins",
+      "to": "lib",
+      "count": 8
+    },
+    {
+      "from": "(REDACTED_SECRET)",
+      "to": "plugins",
+      "count": 3
+    },
+    {
+      "from": "(REDACTED_SECRET)",
+      "to": "lib",
+      "count": 2
+    },
+    {
+      "from": "(REDACTED_SECRET)",
+      "to": "routes",
+      "count": 1
+    }
+  ]
+}
