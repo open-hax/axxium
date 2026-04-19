@@ -345,6 +345,78 @@ services:
       default: {}
       ai-infra: {}
     user: ${DOCKER_USER:-1000:1000}
+
+  # ─── openplanner-mcp ───────────────────────────────────────────────────────
+  # MCP (Model Context Protocol) server that exposes openplanner's epistemic
+  # kernel — search, ingest, recall, graph — as tool-call endpoints for any
+  # MCP-capable client (Knoxx agents, Claude Desktop, opencode, etc.).
+  #
+  # Transport: stdio (default, for local agent sidecars) and
+  #            HTTP/SSE on port 7778 (for network clients like Knoxx).
+  #
+  # Depends on openplanner being healthy; does NOT need its own DB.
+  # Source lives in packages/openplanner-mcp inside the openplanner monorepo.
+  openplanner-mcp:
+    build:
+      context: ../../orgs/open-hax/openplanner
+      dockerfile: packages/openplanner-mcp/Dockerfile
+    cpus: 1
+    cpuset: 2-21
+    depends_on:
+      openplanner:
+        condition: service_healthy
+    ports:
+    - 127.0.0.1:${OPENPLANNER_MCP_PORT:-7778}:7778
+    environment:
+      NODE_ENV: production
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: '7778'
+      # Transport: 'http' exposes SSE endpoint; 'stdio' for local sidecar use.
+      MCP_TRANSPORT: ${OPENPLANNER_MCP_TRANSPORT:-http}
+      # Bearer token required on every MCP request.
+      MCP_AUTH_TOKEN: ${OPENPLANNER_MCP_AUTH_TOKEN:-change-me-mcp-token}
+      # Upstream openplanner REST API.
+      OPENPLANNER_BASE_URL: http://openplanner:7777
+      OPENPLANNER_API_KEY: ${OPENPLANNER_API_KEY:-change-me}
+      # Which project/lake namespace MCP tool calls operate against by default.
+      # Clients may override per-call via tool arguments.
+      MCP_DEFAULT_PROJECT: ${OPENPLANNER_MCP_DEFAULT_PROJECT:-devel}
+      # Max tokens returned in a single recall/search tool response.
+      MCP_MAX_RESULT_TOKENS: ${OPENPLANNER_MCP_MAX_RESULT_TOKENS:-8192}
+      # Ingest: allow agents to write obs/fact into the epistemic store.
+      MCP_INGEST_ENABLED: ${OPENPLANNER_MCP_INGEST_ENABLED:-true}
+      # Graph: expose graph-weaver query tools.
+      MCP_GRAPH_ENABLED: ${OPENPLANNER_MCP_GRAPH_ENABLED:-true}
+      GRAPH_WEAVER_BASE_URL: ${GRAPH_WEAVER_BASE_URL:-http://graph-weaver:8796}
+      # OTEL (optional)
+      OTEL_SERVICE_NAME: ${OPENPLANNER_MCP_OTEL_SERVICE_NAME:-openplanner-mcp}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    volumes:
+    - ../../orgs/open-hax/openplanner/packages/openplanner-mcp/dist:/app/dist:ro
+    - ../../orgs/open-hax/openplanner/node_modules:/app/node_modules:ro
+    extra_hosts:
+    - host.docker.internal:host-gateway
+    healthcheck:
+      test:
+      - CMD
+      - node
+      - -e
+      - >-
+        fetch('http://127.0.0.1:7778/health',
+          {headers:{Authorization:'Bearer '+(process.env.MCP_AUTH_TOKEN||'')}}
+        ).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      default: {}
+      ai-infra:
+        aliases:
+        - openplanner-mcp
+    user: ${DOCKER_USER:-1000:1000}
+
   graph-weaver:
     profiles:
     - graph-20
@@ -2189,8 +2261,7 @@ volumes:
   shibboleth-data: null
   openplanner-atlas-data: null
 networks:
+  default: {}
   ai-infra:
     external: true
-    name: ai-infra
-  knoxx-internal:
-    driver: bridge
+    name: ${AI_INFRA_NETWORK:-ai-infra}
