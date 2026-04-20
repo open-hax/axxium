@@ -2262,6 +2262,12 @@ volumes:
   openplanner-atlas-data: null
 networks:
   default: {}
+  # Local bridge used by the Knoxx/OpenPlanner dev stack services.
+  # Some services attach explicitly to this network (e.g. shibboleth-backend,
+  # knoxx-nginx, knoxx-frontend-dev). It must exist even if you only start a
+  # subset of services.
+  knoxx-internal:
+    name: ${KNOXX_INTERNAL_NETWORK:-knoxx-internal}
   ai-infra:
     external: true
     name: ${AI_INFRA_NETWORK:-ai-infra}
