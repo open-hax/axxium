@@ -2283,8 +2283,18 @@ volumes:
   knoxx-frontend-node-modules: null
   knoxx-knoxx-node-modules: null
   shibboleth-data: null
-  openplanner-atlas-data: null
-  openplanner-atlas-config: null
+  # Critical durability: Atlas Local volumes are external + explicitly named.
+  # This prevents accidental data loss when running compose with a different
+  # project name, and avoids `docker compose down -v` removing the data.
+  # Bootstrap once with:
+  #   docker volume create openplanner_openplanner-atlas-data
+  #   docker volume create openplanner_openplanner-atlas-config
+  openplanner-atlas-data:
+    external: true
+    name: openplanner_openplanner-atlas-data
+  openplanner-atlas-config:
+    external: true
+    name: openplanner_openplanner-atlas-config
 networks:
   default: {}
   # Local bridge used by the Knoxx/OpenPlanner dev stack services.
