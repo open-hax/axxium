@@ -1,11 +1,29 @@
 services:
   secrets-init:
-    image: busybox:1.36
+    # Init container: generate MongoDB replica-set keyfile for Atlas Local.
+    # Runs as root by design (init container exception) to ensure perms are correct.
+    image: alpine:3.20
     command:
-    - echo
-    - 'Atlas Local: secrets-init skipped'
-    volumes: []
-    user: 0:0
+    - sh
+    - -lc
+    - |
+        set -euo pipefail
+        apk add --no-cache openssl >/dev/null
+        mkdir -p /data/configdb
+        if [ ! -f /data/configdb/keyfile ]; then
+          echo "[secrets-init] generating /data/configdb/keyfile"
+          # MongoDB keyFile must be sufficiently random and not world-readable.
+          openssl rand -base64 756 > /data/configdb/keyfile
+        else
+          echo "[secrets-init] /data/configdb/keyfile already exists"
+        fi
+        # mongodb/mongodb-atlas-local runs as uid=1000 (mongod) and requires
+        # a keyfile that is not world-readable.
+        chown -R 1000:1000 /data/configdb
+        chmod 600 /data/configdb/keyfile
+    volumes:
+    - openplanner-atlas-config:/data/configdb
+    user: "0:0"
   vexx:
     profiles:
     - container-vexx
@@ -54,6 +72,9 @@ services:
     # Vector search indexes created by atlas-init.sh
     image: mongodb/mongodb-atlas-local:latest
     command: []
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     ports:
     - 127.0.0.1:${OPENPLANNER_MONGODB_PORT:-27017}:27017
     environment:
@@ -61,6 +82,7 @@ services:
       MONGODB_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-change-me-root-password}
     volumes:
     - openplanner-atlas-data:/data/db
+    - openplanner-atlas-config:/data/configdb
     healthcheck:
       test:
       - CMD
@@ -148,11 +170,13 @@ services:
       EMBED_PROVIDER_BATCH_WINDOW_MS: ${EMBED_PROVIDER_BATCH_WINDOW_MS:-5}
       EMBED_PROVIDER_MAX_BATCH_ITEMS: ${EMBED_PROVIDER_MAX_BATCH_ITEMS:-32}
       EMBED_PROVIDER_CACHE_PATH: ${EMBED_PROVIDER_CACHE_PATH:-/app/openplanner-lake/cache/embed-provider-cache.jsonl}
-      VEXX_BASE_URL: ${VEXX_BASE_URL:-http://host.docker.internal:8787}
+      # Vexx is optional (behind the container-vexx profile). Leaving this unset
+      # keeps /v1/health green when Vexx isn't running.
+      VEXX_BASE_URL: ${VEXX_BASE_URL:-}
       VEXX_API_KEY: ${VEXX_API_KEY:-}
       VEXX_DEVICE: ${VEXX_DEVICE:-NPU}
-      VEXX_REQUIRE_ACCEL: ${VEXX_REQUIRE_ACCEL:-true}
-      VEXX_ENFORCE: ${VEXX_ENFORCE:-true}
+      VEXX_REQUIRE_ACCEL: ${VEXX_REQUIRE_ACCEL:-false}
+      VEXX_ENFORCE: ${VEXX_ENFORCE:-false}
       VEXX_MIN_CANDIDATES: ${VEXX_MIN_CANDIDATES:-1}
       VEXX_TIMEOUT_MS: ${VEXX_TIMEOUT_MS:-30000}
     volumes:
@@ -356,66 +380,66 @@ services:
   #
   # Depends on openplanner being healthy; does NOT need its own DB.
   # Source lives in packages/openplanner-mcp inside the openplanner monorepo.
-  openplanner-mcp:
-    build:
-      context: ../../orgs/open-hax/openplanner
-      dockerfile: packages/openplanner-mcp/Dockerfile
-    cpus: 1
-    cpuset: 2-21
-    depends_on:
-      openplanner:
-        condition: service_healthy
-    ports:
-    - 127.0.0.1:${OPENPLANNER_MCP_PORT:-7778}:7778
-    environment:
-      NODE_ENV: production
-      MCP_HOST: 0.0.0.0
-      MCP_PORT: '7778'
-      # Transport: 'http' exposes SSE endpoint; 'stdio' for local sidecar use.
-      MCP_TRANSPORT: ${OPENPLANNER_MCP_TRANSPORT:-http}
-      # Bearer token required on every MCP request.
-      MCP_AUTH_TOKEN: ${OPENPLANNER_MCP_AUTH_TOKEN:-change-me-mcp-token}
-      # Upstream openplanner REST API.
-      OPENPLANNER_BASE_URL: http://openplanner:7777
-      OPENPLANNER_API_KEY: ${OPENPLANNER_API_KEY:-change-me}
-      # Which project/lake namespace MCP tool calls operate against by default.
-      # Clients may override per-call via tool arguments.
-      MCP_DEFAULT_PROJECT: ${OPENPLANNER_MCP_DEFAULT_PROJECT:-devel}
-      # Max tokens returned in a single recall/search tool response.
-      MCP_MAX_RESULT_TOKENS: ${OPENPLANNER_MCP_MAX_RESULT_TOKENS:-8192}
-      # Ingest: allow agents to write obs/fact into the epistemic store.
-      MCP_INGEST_ENABLED: ${OPENPLANNER_MCP_INGEST_ENABLED:-true}
-      # Graph: expose graph-weaver query tools.
-      MCP_GRAPH_ENABLED: ${OPENPLANNER_MCP_GRAPH_ENABLED:-true}
-      GRAPH_WEAVER_BASE_URL: ${GRAPH_WEAVER_BASE_URL:-http://graph-weaver:8796}
-      # OTEL (optional)
-      OTEL_SERVICE_NAME: ${OPENPLANNER_MCP_OTEL_SERVICE_NAME:-openplanner-mcp}
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-    volumes:
-    - ../../orgs/open-hax/openplanner/packages/openplanner-mcp/dist:/app/dist:ro
-    - ../../orgs/open-hax/openplanner/node_modules:/app/node_modules:ro
-    extra_hosts:
-    - host.docker.internal:host-gateway
-    healthcheck:
-      test:
-      - CMD
-      - node
-      - -e
-      - >-
-        fetch('http://127.0.0.1:7778/health',
-          {headers:{Authorization:'Bearer '+(process.env.MCP_AUTH_TOKEN||'')}}
-        ).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      default: {}
-      ai-infra:
-        aliases:
-        - openplanner-mcp
-    user: ${DOCKER_USER:-1000:1000}
+  # openplanner-mcp:
+  #   build:
+  #     context: ../../orgs/open-hax/openplanner
+  #     dockerfile: packages/openplanner-mcp/Dockerfile
+  #   cpus: 1
+  #   cpuset: 2-21
+  #   depends_on:
+  #     openplanner:
+  #       condition: service_healthy
+  #   ports:
+  #   - 127.0.0.1:${OPENPLANNER_MCP_PORT:-7778}:7778
+  #   environment:
+  #     NODE_ENV: production
+  #     MCP_HOST: 0.0.0.0
+  #     MCP_PORT: '7778'
+  #     # Transport: 'http' exposes SSE endpoint; 'stdio' for local sidecar use.
+  #     MCP_TRANSPORT: ${OPENPLANNER_MCP_TRANSPORT:-http}
+  #     # Bearer token required on every MCP request.
+  #     MCP_AUTH_TOKEN: ${OPENPLANNER_MCP_AUTH_TOKEN:-change-me-mcp-token}
+  #     # Upstream openplanner REST API.
+  #     OPENPLANNER_BASE_URL: http://openplanner:7777
+  #     OPENPLANNER_API_KEY: ${OPENPLANNER_API_KEY:-change-me}
+  #     # Which project/lake namespace MCP tool calls operate against by default.
+  #     # Clients may override per-call via tool arguments.
+  #     MCP_DEFAULT_PROJECT: ${OPENPLANNER_MCP_DEFAULT_PROJECT:-devel}
+  #     # Max tokens returned in a single recall/search tool response.
+  #     MCP_MAX_RESULT_TOKENS: ${OPENPLANNER_MCP_MAX_RESULT_TOKENS:-8192}
+  #     # Ingest: allow agents to write obs/fact into the epistemic store.
+  #     MCP_INGEST_ENABLED: ${OPENPLANNER_MCP_INGEST_ENABLED:-true}
+  #     # Graph: expose graph-weaver query tools.
+  #     MCP_GRAPH_ENABLED: ${OPENPLANNER_MCP_GRAPH_ENABLED:-true}
+  #     GRAPH_WEAVER_BASE_URL: ${GRAPH_WEAVER_BASE_URL:-http://graph-weaver:8796}
+  #     # OTEL (optional)
+  #     OTEL_SERVICE_NAME: ${OPENPLANNER_MCP_OTEL_SERVICE_NAME:-openplanner-mcp}
+  #     OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  #   volumes:
+  #   - ../../orgs/open-hax/openplanner/packages/openplanner-mcp/dist:/app/dist:ro
+  #   - ../../orgs/open-hax/openplanner/node_modules:/app/node_modules:ro
+  #   extra_hosts:
+  #   - host.docker.internal:host-gateway
+  #   healthcheck:
+  #     test:
+  #     - CMD
+  #     - node
+  #     - -e
+  #     - >-
+  #       fetch('http://127.0.0.1:7778/health',
+  #         {headers:{Authorization:'Bearer '+(process.env.MCP_AUTH_TOKEN||'')}}
+  #       ).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 15s
+  #   restart: unless-stopped
+  #   networks:
+  #     default: {}
+  #     ai-infra:
+  #       aliases:
+  #       - openplanner-mcp
+  #   user: ${DOCKER_USER:-1000:1000}
 
   graph-weaver:
     profiles:
@@ -2095,95 +2119,95 @@ services:
     - knoxx-internal
     - ai-infra
     user: ${DOCKER_USER:-1000:1000}
-  kms-ingestion:
-    image: knoxx-kms-ingestion:latest
-    cpus: 2
-    cpuset: 2-21
-    ports:
-    - 127.0.0.1:3003:3003
-    expose:
-    - '3003'
-    environment:
-      PORT: '3003'
-      DATABASE_URL: postgresql://${POSTGRES_USER:${DATABASE_PASSWORD}@knoxx-postgres:5432/${POSTGRES_DB:-knoxx}
-      REDIS_URL: redis://knoxx-redis:6379
-      RAGUSSY_BASE_URL: ${RAGUSSY_BASE_URL:-http://host.docker.internal:8000}
-      PROXX_BASE_URL: ${OPENPLANNER_PROXX_BASE_URL:-http://openplanner-proxx:8789}
-      PROXX_AUTH_TOKEN: ${OPENPLANNER_PROXX_AUTH_TOKEN:-change-me-openplanner-proxx-token}
-      PROXX_DEFAULT_MODEL: ${PROXX_DEFAULT_MODEL:-glm-5}
-      PROXX_CONNECTION_TIMEOUT_MS: ${PROXX_CONNECTION_TIMEOUT_MS:-15000}
-      PROXX_SOCKET_TIMEOUT_MS: ${PROXX_SOCKET_TIMEOUT_MS:-180000}
-      OPENPLANNER_BASE_URL: ${KNOXX_OPENPLANNER_BASE_URL:-http://openplanner:7777}
-      OPENPLANNER_API_KEY: ${KNOXX_OPENPLANNER_API_KEY:-change-me}
-      WORKSPACE_PATH: /app/workspace/devel
-      INGEST_SCHEDULER_POLL_MS: ${INGEST_SCHEDULER_POLL_MS:-15000}
-      PASSIVE_WATCH_ENABLED: ${PASSIVE_WATCH_ENABLED:-true}
-      PASSIVE_WATCH_POLL_MS: ${PASSIVE_WATCH_POLL_MS:-15000}
-      PASSIVE_WATCH_DEBOUNCE_MS: ${PASSIVE_WATCH_DEBOUNCE_MS:-1000}
-      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-24}
-      INGEST_BATCH_PARALLELISM: ${INGEST_BATCH_PARALLELISM:-2}
-      INGEST_THROTTLE_ENABLED: ${INGEST_THROTTLE_ENABLED:-true}
-      INGEST_MAX_LOAD_PER_CORE: ${INGEST_MAX_LOAD_PER_CORE:-1.35}
-      INGEST_THROTTLE_SLEEP_MS: ${INGEST_THROTTLE_SLEEP_MS:-500}
-      INGEST_BATCH_DELAY_MS: ${INGEST_BATCH_DELAY_MS:-1000}
-      SEMANTIC_EDGE_BUILD_ENABLED: ${SEMANTIC_EDGE_BUILD_ENABLED:-false}
-      TRANSLATION_AGENT_ENABLED: ${TRANSLATION_AGENT_ENABLED:-true}
-      TRANSLATION_POLL_MS: ${TRANSLATION_POLL_MS:-5000}
-      KNOXX_BACKEND_URL: ${KNOXX_BACKEND_URL:-http://host.docker.internal:8000}
-      KNOXX_API_KEY: ${KNOXX_API_KEY:-}
-      KNOXX_USER_EMAIL: ${KNOXX_USER_EMAIL:-system-admin@open-hax.local}
-      PI_SESSIONS_ROOT: ${PI_SESSIONS_ROOT:-/app/pi-sessions}
-      PI_SESSION_PROJECT: ${PI_SESSION_PROJECT:-knoxx-session}
-    extra_hosts:
-    - host.docker.internal:host-gateway
-    volumes:
-    - ${WORKSPACE_PATH:-../../..}:/app/workspace
-    - ${PI_SESSIONS_HOST_PATH:-/home/err/.pi/agent/sessions}:/app/pi-sessions:ro
-    depends_on:
-      knoxx-postgres:
-        condition: service_healthy
-      knoxx-redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:3003/health
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-    - knoxx-internal
-    - ai-infra
-    user: ${DOCKER_USER:-1000:1000}
-  knoxx-postgres:
-    image: postgres:16-alpine
-    cpus: 1
-    cpuset: 2-21
-    ports:
-    - 127.0.0.1:5432:5432
-    expose:
-    - '5432'
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-kms}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-knoxx}
-    volumes:
-    - knoxx-postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test:
-      - CMD-SHELL
-      - pg_isready -U ${POSTGRES_USER:-kms} -d ${POSTGRES_DB:-knoxx}
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-    - knoxx-internal
+  # kms-ingestion:
+  #   image: knoxx-kms-ingestion:latest
+  #   cpus: 2
+  #   cpuset: 2-21
+  #   ports:
+  #   - 127.0.0.1:3003:3003
+  #   expose:
+  #   - '3003'
+  #   environment:
+  #     PORT: '3003'
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:${DATABASE_PASSWORD}@knoxx-postgres:5432/${POSTGRES_DB:-knoxx}
+  #     REDIS_URL: redis://knoxx-redis:6379
+  #     RAGUSSY_BASE_URL: ${RAGUSSY_BASE_URL:-http://host.docker.internal:8000}
+  #     PROXX_BASE_URL: ${OPENPLANNER_PROXX_BASE_URL:-http://openplanner-proxx:8789}
+  #     PROXX_AUTH_TOKEN: ${OPENPLANNER_PROXX_AUTH_TOKEN:-change-me-openplanner-proxx-token}
+  #     PROXX_DEFAULT_MODEL: ${PROXX_DEFAULT_MODEL:-glm-5}
+  #     PROXX_CONNECTION_TIMEOUT_MS: ${PROXX_CONNECTION_TIMEOUT_MS:-15000}
+  #     PROXX_SOCKET_TIMEOUT_MS: ${PROXX_SOCKET_TIMEOUT_MS:-180000}
+  #     OPENPLANNER_BASE_URL: ${KNOXX_OPENPLANNER_BASE_URL:-http://openplanner:7777}
+  #     OPENPLANNER_API_KEY: ${KNOXX_OPENPLANNER_API_KEY:-change-me}
+  #     WORKSPACE_PATH: /app/workspace/devel
+  #     INGEST_SCHEDULER_POLL_MS: ${INGEST_SCHEDULER_POLL_MS:-15000}
+  #     PASSIVE_WATCH_ENABLED: ${PASSIVE_WATCH_ENABLED:-true}
+  #     PASSIVE_WATCH_POLL_MS: ${PASSIVE_WATCH_POLL_MS:-15000}
+  #     PASSIVE_WATCH_DEBOUNCE_MS: ${PASSIVE_WATCH_DEBOUNCE_MS:-1000}
+  #     INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-24}
+  #     INGEST_BATCH_PARALLELISM: ${INGEST_BATCH_PARALLELISM:-2}
+  #     INGEST_THROTTLE_ENABLED: ${INGEST_THROTTLE_ENABLED:-true}
+  #     INGEST_MAX_LOAD_PER_CORE: ${INGEST_MAX_LOAD_PER_CORE:-1.35}
+  #     INGEST_THROTTLE_SLEEP_MS: ${INGEST_THROTTLE_SLEEP_MS:-500}
+  #     INGEST_BATCH_DELAY_MS: ${INGEST_BATCH_DELAY_MS:-1000}
+  #     SEMANTIC_EDGE_BUILD_ENABLED: ${SEMANTIC_EDGE_BUILD_ENABLED:-false}
+  #     TRANSLATION_AGENT_ENABLED: ${TRANSLATION_AGENT_ENABLED:-true}
+  #     TRANSLATION_POLL_MS: ${TRANSLATION_POLL_MS:-5000}
+  #     KNOXX_BACKEND_URL: ${KNOXX_BACKEND_URL:-http://host.docker.internal:8000}
+  #     KNOXX_API_KEY: ${KNOXX_API_KEY:-}
+  #     KNOXX_USER_EMAIL: ${KNOXX_USER_EMAIL:-system-admin@open-hax.local}
+  #     PI_SESSIONS_ROOT: ${PI_SESSIONS_ROOT:-/app/pi-sessions}
+  #     PI_SESSION_PROJECT: ${PI_SESSION_PROJECT:-knoxx-session}
+  #   extra_hosts:
+  #   - host.docker.internal:host-gateway
+  #   volumes:
+  #   - ${WORKSPACE_PATH:-../../..}:/app/workspace
+  #   - ${PI_SESSIONS_HOST_PATH:-/home/err/.pi/agent/sessions}:/app/pi-sessions:ro
+  #   depends_on:
+  #     knoxx-postgres:
+  #       condition: service_healthy
+  #     knoxx-redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test:
+  #     - CMD
+  #     - curl
+  #     - -f
+  #     - http://localhost:3003/health
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 30s
+  #   restart: unless-stopped
+  #   networks:
+  #   - knoxx-internal
+  #   - ai-infra
+  #   user: ${DOCKER_USER:-1000:1000}
+  # knoxx-postgres:
+  #   image: postgres:16-alpine
+  #   cpus: 1
+  #   cpuset: 2-21
+  #   ports:
+  #   - 127.0.0.1:5432:5432
+  #   expose:
+  #   - '5432'
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-kms}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  #     POSTGRES_DB: ${POSTGRES_DB:-knoxx}
+  #   volumes:
+  #   - knoxx-postgres-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test:
+  #     - CMD-SHELL
+  #     - pg_isready -U ${POSTGRES_USER:-kms} -d ${POSTGRES_DB:-knoxx}
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+  #   restart: unless-stopped
+  #   networks:
+  #   - knoxx-internal
   knoxx-redis:
     image: redis:7-alpine
     cpus: 0.5
@@ -2260,6 +2284,7 @@ volumes:
   knoxx-knoxx-node-modules: null
   shibboleth-data: null
   openplanner-atlas-data: null
+  openplanner-atlas-config: null
 networks:
   default: {}
   # Local bridge used by the Knoxx/OpenPlanner dev stack services.
