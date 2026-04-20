@@ -20,6 +20,25 @@
 
 set -e
 
+mongosh_retry() {
+  # Atlas Local can briefly accept healthcheck pings and then restart while
+  # replica-set/mongot wiring settles. Wrap all mongosh operations in a retry
+  # loop so init doesn't fail spuriously on ECONNREFUSED.
+  local js="$1"
+  local attempts="${2:-60}"
+  local delay_s="${3:-2}"
+
+  for ((i=1; i<=attempts; i++)); do
+    if mongosh "$MONGODB_URI" --quiet --eval "$js"; then
+      return 0
+    fi
+    echo "      mongosh failed (attempt ${i}/${attempts}); retrying in ${delay_s}s..." >&2
+    sleep "$delay_s"
+  done
+  echo "      mongosh failed after ${attempts} attempts" >&2
+  return 1
+}
+
 MONGODB_URI="mongodb://${MONGODB_ROOT_USERNAME}:${MONGODB_ROOT_PASSWORD}@mongodb:27017/?authSource=admin"
 APP_USER="${OPENPLANNER_MONGO_APP_USERNAME:-openplanner}"
 APP_PASSWORD="${OPENPLANNER_MONGO_APP_PASSWORD:-change-me-openplanner-password}"
@@ -31,17 +50,16 @@ echo "App User: ${APP_USER}"
 
 # Wait for MongoDB to be ready
 echo "[1/5] Waiting for MongoDB..."
-for i in {1..30}; do
-  if mongosh "$MONGODB_URI" --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; then
-    echo "      MongoDB is ready"
-    break
-  fi
-  sleep 1
-done
+if mongosh_retry 'db.adminCommand({ping:1})' 60 1 >/dev/null 2>&1; then
+  echo "      MongoDB is ready"
+else
+  echo "      MongoDB did not become ready in time" >&2
+  exit 1
+fi
 
 # Create app user if it doesn't exist
 echo "[2/5] Ensuring app user exists..."
-mongosh "$MONGODB_URI" --quiet --eval '
+mongosh_retry '
 var appDb = db.getSiblingDB("'"${APP_DB}"'");
 var existingUsers = appDb.getUsers();
 if (existingUsers.users.length === 0) {
@@ -58,7 +76,7 @@ if (existingUsers.users.length === 0) {
 
 # Create collections
 echo "[3/5] Creating collections..."
-mongosh "$MONGODB_URI" --quiet --eval '
+mongosh_retry '
 var appDb = db.getSiblingDB("'"${APP_DB}"'");
 var collections = ["events", "event_chunks", "graph_edges", "graph_semantic_edges",
                    "graph_layout_overrides", "graph_node_embeddings", "gardens"];
@@ -74,7 +92,7 @@ print("      Collections ready: " + appDb.getCollectionNames().length);
 
 # Create indexes
 echo "[4/5] Creating indexes..."
-mongosh "$MONGODB_URI" --quiet --eval '
+mongosh_retry '
 var appDb = db.getSiblingDB("'"${APP_DB}"'");
 
 // Graph layout indexes
@@ -120,7 +138,7 @@ print("      Indexes ready");
 # Create vector search index for semantic search
 echo "[5/5] Creating vector search index..."
 EMBEDDING_DIMS="${EMBEDDING_DIMENSIONS:-1024}"
-mongosh "$MONGODB_URI" --quiet --eval '
+mongosh_retry '
 var appDb = db.getSiblingDB("'"${APP_DB}"'");
 var embeddingDims = '"${EMBEDDING_DIMS}"';
 
