@@ -87,8 +87,15 @@ services:
       test:
       - CMD
       - mongosh
+      - --quiet
+      - -u
+      - "${MONGODB_ROOT_USERNAME:-openplannerRoot}"
+      - -p
+      - "${MONGODB_ROOT_PASSWORD:-change-me-root-password}"
+      - --authenticationDatabase
+      - admin
       - --eval
-      - db.adminCommand('ping')
+      - "quit(db.hello().isWritablePrimary ? 0 : 1)"
       interval: 15s
       timeout: 10s
       retries: 10
@@ -127,7 +134,9 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
     volumes:
     - ./scripts/atlas-init.sh:/scripts/atlas-init.sh:ro
-    restart: 'no'
+    # Atlas Local can briefly restart while replica-set/mongot wiring settles.
+    # atlas-init.sh is idempotent, so retry on transient failures.
+    restart: on-failure
   openplanner:
     build:
       context: ../../orgs/open-hax/openplanner
@@ -254,7 +263,7 @@ services:
       PROXY_ALLOW_UNAUTHENTICATED: 'false'
       DATABASE_URL: postgresql://${OPENPLANNER_PROXX_DB_USER:${DATABASE_PASSWORD}@openplanner-proxx-db:5432/${OPENPLANNER_PROXX_DB_NAME:-openai_proxy}
       UPSTREAM_PROVIDER_ID: ${OPENPLANNER_PROXX_UPSTREAM_PROVIDER_ID:-zai}
-      UPSTREAM_FALLBACK_PROVIDER_IDS: ${OPENPLANNER_PROXX_UPSTREAM_FALLBACK_PROVIDER_IDS:-rotussy,llamacpp,requesty}
+      UPSTREAM_FALLBACK_PROVIDER_IDS: ${OPENPLANNER_PROXX_UPSTREAM_FALLBACK_PROVIDER_IDS:-llamacpp,ollama,ollama-cloud,requesty}
       UPSTREAM_BASE_URL: ${OPENPLANNER_PROXX_UPSTREAM_BASE_URL:-https://api.z.ai/api/paas/v4}
       UPSTREAM_PROVIDER_BASE_URLS: ${OPENPLANNER_PROXX_UPSTREAM_PROVIDER_BASE_URLS:-llamacpp=http://llamacpp-chat:8080,llamacpp-embed=http://llamacpp-embed:8081,openai=https://chatgpt.com/backend-api,vivgrid=https://api.vivgrid.com,requesty=https://router.requesty.ai/v1,zai=https://api.z.ai/api/paas/v4}
       REQUESTY_API_TOKEN: ${REQUESTY_API_TOKEN:-}
