@@ -24,6 +24,11 @@ services:
     volumes:
     - openplanner-atlas-config:/data/configdb
     user: "0:0"
+
+  # NOTE: We intentionally do NOT run `runner init` in a separate init container.
+  # Atlas Local performs one-time initialization on first start when /data/db is empty.
+  # An init container would create WiredTiger files early and prevent the image from
+  # creating the root user, leading to auth + bootstrap loops.
   vexx:
     profiles:
     - container-vexx
@@ -71,7 +76,6 @@ services:
     # Atlas Local includes MongoDB + mongot (vector search) in single container
     # Vector search indexes created by atlas-init.sh
     image: mongodb/mongodb-atlas-local:latest
-    command: []
     depends_on:
       secrets-init:
         condition: service_completed_successfully
@@ -84,18 +88,13 @@ services:
     - openplanner-atlas-data:/data/db
     - openplanner-atlas-config:/data/configdb
     healthcheck:
+      # Allow health to go green both before auth is fully enabled (transitionToAuth)
+      # and after the root user exists.
       test:
-      - CMD
-      - mongosh
-      - --quiet
-      - -u
-      - "${MONGODB_ROOT_USERNAME:-openplannerRoot}"
-      - -p
-      - "${MONGODB_ROOT_PASSWORD:-change-me-root-password}"
-      - --authenticationDatabase
-      - admin
-      - --eval
-      - "quit(db.hello().isWritablePrimary ? 0 : 1)"
+      - CMD-SHELL
+      - >-
+        mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' \
+        || mongosh --quiet -u "$$MONGODB_INITDB_ROOT_USERNAME" -p "$$MONGODB_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)'
       interval: 15s
       timeout: 10s
       retries: 10
