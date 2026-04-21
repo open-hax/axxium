@@ -327,6 +327,14 @@ services:
       FEDERATION_SELF_PUBLIC_BASE_URL: ${OPENPLANNER_PROXX_FEDERATION_SELF_PUBLIC_BASE_URL:-http://openplanner-proxx:8789}
       FEDERATION_DEFAULT_OWNER_SUBJECT: ${OPENPLANNER_PROXX_FEDERATION_DEFAULT_OWNER_SUBJECT:-did:web:openplanner.proxx.local}
       FEDERATION_REQUEST_TIMEOUT_MS: ${OPENPLANNER_PROXX_FEDERATION_REQUEST_TIMEOUT_MS:-30000}
+      # Bridge agent: connect to canonical proxx relay
+      FEDERATION_BRIDGE_RELAY_URL: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_RELAY_URL:-ws://proxx:8789/api/ui/federation/bridge/ws}
+      FEDERATION_BRIDGE_AUTH_TOKEN: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_AUTH_TOKEN:-${PROXY_AUTH_TOKEN:-change-me-open-hax-proxy-token}}
+      FEDERATION_BRIDGE_AUTH_MODE: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_AUTH_MODE:-admin_key}
+      FEDERATION_BRIDGE_OWNER_SUBJECT: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_OWNER_SUBJECT:-did:web:proxx.local}
+      FEDERATION_BRIDGE_AGENT_ID: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_AGENT_ID:-openplanner-proxx}
+      FEDERATION_BRIDGE_LABELS: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_LABELS:-}
+      FEDERATION_BRIDGE_NODE_LABELS: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_NODE_LABELS:-}
     volumes:
     - ../proxx/models.json:/workspace/service-config/models.json:ro
     - ./openplanner-proxx-seeds:/workspace/service-config/seeds:ro
@@ -350,44 +358,6 @@ services:
         aliases:
         - openplanner-proxx
     user: ${DOCKER_USER:-1000:1000}
-  openplanner-proxx-federation-sync:
-    image: python:3.12-alpine
-    cpus: 0.25
-    cpuset: 2-21
-    depends_on:
-      openplanner-proxx:
-        condition: service_healthy
-    environment:
-      LOCAL_PROXX_BASE_URL: ${OPENPLANNER_PROXX_BASE_URL:-http://openplanner-proxx:8789}
-      LOCAL_PROXX_AUTH_TOKEN: ${OPENPLANNER_PROXX_AUTH_TOKEN:-change-me-openplanner-proxx-token}
-      CANONICAL_PROXX_BASE_URL: ${OPENPLANNER_CANONICAL_PROXX_BASE_URL:-http://proxx:8789}
-      CANONICAL_PROXX_AUTH_TOKEN: ${OPENPLANNER_CANONICAL_PROXX_AUTH_TOKEN:-${OPEN_HAX_OPENAI_PROXY_AUTH_TOKEN:-${PROXY_AUTH_TOKEN:-}}}
-      PROJECTED_IMPORT_PROVIDER_IDS: ${OPENPLANNER_PROXX_PROJECTED_IMPORT_PROVIDER_IDS:-zai,llamacpp}
-      SYNC_INTERVAL_SECONDS: ${OPENPLANNER_PROXX_SYNC_INTERVAL_SECONDS:-300}
-    command:
-    - /bin/sh
-    - -lc
-    - "python - <<'PY'\nimport json, os, sys, time, urllib.error, urllib.request\n\nlocal_base = os.environ[\"LOCAL_PROXX_BASE_URL\"].rstrip(\"/\")\nlocal_token = os.environ[\"LOCAL_PROXX_AUTH_TOKEN\"]\n\
-      canonical_base = os.environ[\"CANONICAL_PROXX_BASE_URL\"].rstrip(\"/\")\ncanonical_token = os.environ.get(\"CANONICAL_PROXX_AUTH_TOKEN\", \"\").strip()\nprovider_ids = [entry.strip() for entry in\
-      \ os.environ.get(\"PROJECTED_IMPORT_PROVIDER_IDS\", \"zai\").split(\",\") if entry.strip()]\ninterval = max(30, int(os.environ.get(\"SYNC_INTERVAL_SECONDS\", \"300\")))\n\nif not canonical_token:\n\
-      \  print(\"openplanner-proxx-federation-sync: missing CANONICAL_PROXX_AUTH_TOKEN\", file=sys.stderr)\n  sys.exit(1)\n\ndef request(url: str, token: str, body: dict | None = None) -> dict:\n  data\
-      \ = None if body is None else json.dumps(body).encode(\"utf-8\")\n  req = urllib.request.Request(url, data=data, method=\"POST\" if body is not None else \"GET\")\n  req.add_header(\"Authorization\"\
-      , f\"Bearer {token}\")\n  if data is not None:\n    req.add_header(\"Content-Type\", \"application/json\")\n  with urllib.request.urlopen(req, timeout=15) as response:\n    payload = response.read().decode(\"\
-      utf-8\")\n    return json.loads(payload) if payload else {}\n\ndef wait_for_health(url: str, token: str) -> None:\n  health_url = f\"{url}/health\"\n  while True:\n    try:\n      request(health_url,\
-      \ token)\n      return\n    except Exception as error:  # noqa: BLE001\n      print(f\"waiting for {health_url}: {error}\", file=sys.stderr)\n      time.sleep(5)\n\npeer_payload = {\n  \"id\": \"\
-      canonical-proxx\",\n  \"ownerCredential\": local_token,\n  \"label\": \"Canonical Proxx\",\n  \"baseUrl\": canonical_base,\n  \"controlBaseUrl\": canonical_base,\n  \"auth\": {\"credential\": canonical_token},\n\
-      \  \"status\": \"active\",\n}\n\nwhile True:\n  try:\n    wait_for_health(local_base, local_token)\n    wait_for_health(canonical_base, canonical_token)\n    request(f\"{local_base}/api/v1/federation/peers\"\
-      , local_token, peer_payload)\n    request(\n      f\"{local_base}/api/v1/federation/sync/pull\",\n      local_token,\n      {\"peerId\": \"canonical-proxx\", \"pullUsage\": False},\n    )\n    for\
-      \ provider_id in provider_ids:\n      request(\n        f\"{local_base}/api/v1/federation/projected-accounts/import-all\",\n        local_token,\n        {\"sourcePeerId\": \"canonical-proxx\", \"\
-      providerId\": provider_id},\n      )\n  except urllib.error.HTTPError as error:\n    detail = error.read().decode(\"utf-8\", errors=\"replace\")\n    print(f\"openplanner-proxx-federation-sync http\
-      \ error: {error.code} {detail}\", file=sys.stderr)\n  except Exception as error:  # noqa: BLE001\n    print(f\"openplanner-proxx-federation-sync error: {error}\", file=sys.stderr)\n  time.sleep(interval)\n\
-      PY\n"
-    restart: unless-stopped
-    networks:
-      default: {}
-      ai-infra: {}
-    user: ${DOCKER_USER:-1000:1000}
-
   # ─── openplanner-mcp ───────────────────────────────────────────────────────
   # MCP (Model Context Protocol) server that exposes openplanner's epistemic
   # kernel — search, ingest, recall, graph — as tool-call endpoints for any
