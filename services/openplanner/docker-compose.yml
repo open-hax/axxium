@@ -465,7 +465,15 @@ services:
     cpuset: 2-21
     user: ${DOCKER_USER:-1000:1000}
     working_dir: /app/workspace/devel
-    command: bash -lc "corepack enable && pnpm -C orgs/open-hax/openplanner/packages/graph/graph-weaver dev"
+    command: >-
+      bash -lc "
+        set -euo pipefail
+        export HOME=/home/node
+        mkdir -p \"$$HOME/.local/bin\"
+        export PATH=\"$$HOME/.local/bin:$$PATH\"
+        corepack enable --install-directory \"$$HOME/.local/bin\"
+        pnpm -C orgs/open-hax/openplanner/packages/graph/graph-weaver dev
+      "
     expose:
     - '8796'
     ports:
@@ -523,7 +531,15 @@ services:
     cpus: 1.5
     cpuset: 2-21
     working_dir: /app/workspace/devel
-    command: bash -lc "corepack enable && pnpm -C orgs/open-hax/openplanner/packages/graph/eros-eris-field-app dev"
+    command: >-
+      bash -lc "
+        set -euo pipefail
+        export HOME=/home/node
+        mkdir -p \"$$HOME/.local/bin\"
+        export PATH=\"$$HOME/.local/bin:$$PATH\"
+        corepack enable --install-directory \"$$HOME/.local/bin\"
+        pnpm -C orgs/open-hax/openplanner/packages/graph/eros-eris-field-app dev
+      "
     environment:
       CI: 'true'
       NPM_CONFIG_CONFIRM_MODULES_PURGE: 'false'
