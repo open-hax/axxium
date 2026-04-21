@@ -1906,7 +1906,7 @@ services:
     cpus: 1
     cpuset: 2-21
     ports:
-    - 127.0.0.1:${MYRMEX_HOST_PORT:-8799}:8799
+    - 127.0.0.1:${MYRMEX_HOST_PORT:-8801}:8799
     working_dir: /app/workspace/devel/orgs/open-hax/openplanner/packages/graph/myrmex
     command: bash -lc "node --loader ts-node/esm src/main.ts"
     environment:
