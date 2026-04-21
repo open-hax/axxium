@@ -325,8 +325,16 @@ services:
       FEDERATION_SELF_CLUSTER_ID: ${OPENPLANNER_PROXX_FEDERATION_SELF_CLUSTER_ID:-openplanner-local}
       FEDERATION_SELF_PEER_DID: ${OPENPLANNER_PROXX_FEDERATION_SELF_PEER_DID:-did:web:openplanner.proxx.local}
       FEDERATION_SELF_PUBLIC_BASE_URL: ${OPENPLANNER_PROXX_FEDERATION_SELF_PUBLIC_BASE_URL:-http://openplanner-proxx:8789}
-      FEDERATION_DEFAULT_OWNER_SUBJECT: ${OPENPLANNER_PROXX_FEDERATION_DEFAULT_OWNER_SUBJECT:-did:web:openplanner.proxx.local}
+      # IMPORTANT: this controls which peer set + projected accounts are considered during
+      # routing-time federated fallback.
+      # For "lease from canonical proxx" behavior, this should match the canonical owner's
+      # subject (aka the credential authority realm).
+      FEDERATION_DEFAULT_OWNER_SUBJECT: ${OPENPLANNER_PROXX_FEDERATION_DEFAULT_OWNER_SUBJECT:-did:web:proxx.promethean.rest:brethren}
       FEDERATION_REQUEST_TIMEOUT_MS: ${OPENPLANNER_PROXX_FEDERATION_REQUEST_TIMEOUT_MS:-30000}
+      # Routing-time peer projection refresh + lease import tuning
+      FEDERATION_ON_DEMAND_PULL_ENABLED: ${OPENPLANNER_PROXX_FEDERATION_ON_DEMAND_PULL_ENABLED:-true}
+      FEDERATION_ON_DEMAND_PULL_TTL_MS: ${OPENPLANNER_PROXX_FEDERATION_ON_DEMAND_PULL_TTL_MS:-60000}
+      FEDERATION_WARM_IMPORT_REQUEST_THRESHOLD: ${OPENPLANNER_PROXX_FEDERATION_WARM_IMPORT_REQUEST_THRESHOLD:-1}
       # Bridge agent: connect to canonical proxx relay
       FEDERATION_BRIDGE_RELAY_URL: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_RELAY_URL:-ws://proxx:8789/api/ui/federation/bridge/ws}
       FEDERATION_BRIDGE_AUTH_TOKEN: ${OPENPLANNER_PROXX_FEDERATION_BRIDGE_AUTH_TOKEN:-${PROXY_AUTH_TOKEN:-change-me-open-hax-proxy-token}}
