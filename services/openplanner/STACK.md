@@ -1,5 +1,7 @@
 # OpenPlanner Stack Documentation
 
+Default local development now uses the canonical `services/proxx` instance on the shared `ai-infra` network for embeddings and model proxying. The bundled `openplanner-proxx` runtime remains available only when explicitly enabled with `--profile bundled-proxx`.
+
 ## Architecture Overview
 
 ```

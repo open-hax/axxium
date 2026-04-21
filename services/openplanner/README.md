@@ -8,7 +8,7 @@
 |------|-------|
 | Compose file | `docker-compose.yml` (THIS IS THE ONLY ONE) |
 | MongoDB image | `mongo:8.0` (Community Server) |
-| Vector search | Handled by `openplanner-proxx` embedding service |
+| Vector search | Handled by canonical `services/proxx` by default; bundled `openplanner-proxx` is opt-in via `--profile bundled-proxx` |
 | Init service | `mongo-init` (runs once, `restart: "no"`) |
 
 ## Architecture
@@ -18,7 +18,8 @@ docker-compose.yml
 ├── mongodb             MongoDB Community Server 8.0 (standalone, no replica set)
 ├── mongo-init          runs mongo-init.sh once, creates user + collections + indexes
 ├── openplanner         main application (depends on mongodb healthy + mongo-init complete)
-├── openplanner-proxx   Embedding service + vector search
+├── proxx (external)    Canonical embedding service on `ai-infra`
+├── openplanner-proxx   Optional bundled Proxx (`--profile bundled-proxx`)
 ├── knoxx-*             Knoxx agent backend, frontend, nginx, postgres, redis
 ├── graph-weaver        graph processing service
 ├── eros-eris-field-app force-directed graph simulation
@@ -39,13 +40,15 @@ MongoDB Community Server in standalone mode (no replica set) allows:
 - Simpler configuration
 - Standard MongoDB 8.0 features
 
-**Trade-off**: No native vector search in MongoDB. Vector search is handled by the `openplanner-proxx` embedding service.
+**Trade-off**: No native vector search in MongoDB. Vector search is handled by Proxx; the default local path is the canonical `services/proxx` stack, with `openplanner-proxx` reserved for opt-in isolated runs.
 
 ## Startup Sequence
 
 ### Quick Start (Full Stack with Dev Frontend)
 
 ```bash
+cd /home/err/devel/services/proxx && docker compose up -d
+
 cd /home/err/devel/services/openplanner
 
 # Start everything with dev profile (includes Vite dev server)
@@ -53,6 +56,12 @@ docker compose --profile dev up -d
 
 # Wait for all services to become healthy (~2 minutes)
 docker compose ps
+```
+
+Default local development now assumes the canonical `services/proxx` stack is already running on the shared `ai-infra` network. Only enable the bundled proxy when you explicitly want an isolated OpenPlanner-local Proxx runtime:
+
+```bash
+docker compose --profile bundled-proxx --profile dev up -d
 ```
 
 ### Core Stack Only
