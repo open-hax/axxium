@@ -15,6 +15,19 @@ Lint all TypeScript and markdown files across the entire workspace, including al
 ### workspace-typecheck
 Type check all TypeScript files across the entire workspace, including all submodules under orgs/**, using strict TypeScript settings
 
+## Creative production skills
+
+Use this suite when the user asks for creative development or production assets:
+
+- `creative-storycraft`: story writing, lore, characters, outlines, scenes, scripts, and prose revision.
+- `music-composition-arrangement`: songs, cues, loops, motifs, chord progressions, arrangements, and music handoffs.
+- `openutau-synthetic-vocals`: OpenUtau/UTAU lyric timing, USTX drafting, phonemizers, voicebank checks, and vocal render handoff.
+- `visual-concept-art-direction`: concept art briefs, palettes, shape language, prompt packs, and visual critique.
+- `graphics-asset-production`: logos, icons, posters, covers, UI graphics, SVG/raster exports, and sprite sheets.
+- `blender-3d-modeling`: Blender scenes, procedural meshes, materials, model exports, and render previews.
+- `animation-production`: storyboards, animatics, keyframes, motion graphics, renders, and ffmpeg assembly.
+- `multimedia-creative-pipeline`: orchestration across story, music, visuals, graphics, 3D, animation, and vocals.
+
 ## Eta-mu runtime shorthand
 
 When the user says things like:
