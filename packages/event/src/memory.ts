@@ -15,11 +15,11 @@ import type {
 import { randomUUID } from 'node:crypto';
 
 function getSubscriptionKey(topic: string, group: string): string {
-  return \`\${topic}:\${group}\`;
+  return `${topic}:${group}`;
 }
 
 function getCursorKey(topic: string, group: string): string {
-  return \`\${topic}:\${group}\`;
+  return `${topic}:${group}`;
 }
 
 export class InMemoryEventBus implements EventBus {
@@ -59,7 +59,7 @@ export class InMemoryEventBus implements EventBus {
 
     // Notify subscribers - correctly handling consumer groups
     const groupEntries = Array.from(this.subscriptions.entries())
-      .filter(([key]) => key.startsWith(\`\${topic}:\`));
+      .filter(([key]) => key.startsWith(`${topic}:`));
 
     for (const [groupKey, allSubs] of groupEntries) {
       const matchingSubs = allSubs.filter(s => !s.opts.filter || s.opts.filter(event));

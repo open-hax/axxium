@@ -1,7 +1,7 @@
 (Π_STATE
-  (time "2026-04-26T18:37:30Z")
+  (time "2026-04-26T18:44:15Z")
   (branch "pi/fork-tax/2026-04-15-170411")
-  (pre_head 8b0ad08b)
+  (pre_head e9417f88)
   (dirty true)
   (checks
     (check (status skipped) (command "No fresh test run during fork-tax; see receipts.log for prior builds/tests"))
@@ -9,8 +9,8 @@
   (repo_notes
     (upstream "git@github.com:riatzukiza/devel.git")
     (note "Fix orphaned gitlinks by adding missing .gitmodules entries; repair nested opencode submodule mapping for tree-sitter-scheme.")
-    (status_snapshot ".ημ/Π_STATUS_2026-04-26_183717.txt")
-    (status_digest "ab3fbbbbd10a0cfa")
+    (status_snapshot ".ημ/Π_STATUS_2026-04-26_184415.txt")
+    (status_digest "4be678d0d7413dde") ; pragma: allowlist secret
     (submodule_mappings_added
       (submodule (path "orgs/code-yeongyu/oh-my-openagent") (url "https://github.com/code-yeongyu/oh-my-openagent.git") (branch "dev"))
       (submodule (path "orgs/mojomast/ragussy") (url "https://github.com/mojomast/ragussy.git") (branch "master"))
