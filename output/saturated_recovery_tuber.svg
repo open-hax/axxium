@@ -1,0 +1,30 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="potatoGrad" cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+      <stop offset="0%" stop-color="#E7C48C" />
+      <stop offset="100%" stop-color="#B8860B" />
+    </radialGradient>
+    <filter id="glint">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="in" />
+    </filter>
+  </defs>
+  <!-- Shadow -->
+  <ellipse cx="200" cy="320" rx="100" ry="30" fill="#4B3621" opacity="0.3" />
+  
+  <!-- Potato Body -->
+  <path d="M 120,200 Q 120,120 200,120 Q 280,120 280,200 Q 280,280 200,280 Q 120,280 120,200" 
+        fill="url(#potatoGrad)" stroke="#8B4513" stroke-width="4" />
+        
+  <!-- Highlights for "Saturation" -->
+  <ellipse cx="160" cy="160" rx="30" ry="15" fill="#FFF" opacity="0.4" transform="rotate(-30 160 160)" />
+  <ellipse cx="240" cy="240" rx="20" ry="10" fill="#FFF" opacity="0.2" transform="rotate(20 240 240)" />
+  
+  <!-- "Saturated" Glow -->
+  <path d="M 120,200 Q 120,120 200,120 Q 280,120 280,200 Q 280,280 200,280 Q 120,280 120,200" 
+        fill="none" stroke="#FFD700" stroke-width="8" stroke-opacity="0.6" filter="url(#glint)" />
+        
+  <text x="200" y="350" font-family="monospace" font-size="16" fill="#8B4513" text-anchor="middle" font-weight="bold">
+    S A T U R A T E D _ R E C O V E R Y _ T U B E R
+  </text>
+</svg>

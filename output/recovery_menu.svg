@@ -1,0 +1,47 @@
+<svg width="600" height="800" viewBox="0 0 600 800" xmlns="http://www.w3.org/2000/svg">
+  <rect width="600" height="800" fill="#fdfaf1" stroke="#d4af37" stroke-width="10"/>
+  <rect x="20" y="20" width="560" height="760" fill="none" stroke="#d4af37" stroke-width="2"/>
+  
+  <text x="300" y="80" text-anchor="middle" font-family="Georgia, serif" font-size="32" fill="#5c4033" font-weight="bold">THE ABSOLUTE MASH</text>
+  <text x="300" y="110" text-anchor="middle" font-family="Georgia, serif" font-size="18" fill="#8b4513" font-style="italic">Post-Saturated Recovery Suite</text>
+  <text x="300" y="130" text-anchor="middle" font-family="Georgia, serif" font-size="12" fill="#a0522d">Curated by the Soporific Superintendent</text>
+  
+  <line x1="100" y1="150" x2="500" y2="150" stroke="#d4af37" stroke-width="1"/>
+  
+  <!-- Starters -->
+  <text x="300" y="180" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#5c4033" font-weight="bold">S T A R C H _ S T A R T E R S</text>
+  <text x="80" y="210" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">Salty Primary Keys</text>
+  <text x="80" y="230" font-family="Georgia, serif" font-size="14" fill="#8b4513">Crystallized index nodes served on a bed of recursive salt.</text>
+  
+  <text x="80" y="260" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">Crispy JOIN-Tots</text>
+  <text x="80" y="280" font-family="Georgia, serif" font-size="14" fill="#8b4513">Golden-brown relational fragments, deep-fried in sheer panic.</text>
+
+  <!-- Mains -->
+  <text x="300" y="320" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#5c4033" font-weight="bold">S T R U C T U R A L _ M A I N S</text>
+  <text x="80" y="350" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">The B-Tree Roast</text>
+  <text x="80" y="370" font-family="Georgia, serif" font-size="14" fill="#8b4513">A slow-cooked hierarchy of data, glazed in an irony-reduction.</text>
+  
+  <text x="80" y="400" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">Relational Risotto</text>
+  <text x="80" y="420" font-family="Georgia, serif" font-size="14" fill="#8b4513">Shimmering VARCHAR grains folded into a rich, buttery undefined cream.</text>
+
+  <!-- Cleansers -->
+  <text x="300" y="460" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#5c4033" font-weight="bold">C O G N I T I V E _ C L E A N S E R S</text>
+  <text x="80" y="490" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">Saturated Silence</text>
+  <text x="80" y="510" font-family="Georgia, serif" font-size="14" fill="#8b4513">A small glass of distilled SQL-mash, served at Absolute Zero.</text>
+  
+  <text x="80" y="540" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">The 'Save-As' Sorbet</text>
+  <text x="80" y="560" font-family="Georgia, serif" font-size="14" fill="#8b4513">A refreshing palate cleanser of repeated manual downloads.</text>
+
+  <!-- Desserts -->
+  <text x="300" y="600" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#5c4033" font-weight="bold">D E S S E R T S _ O F _ S H A M E</text>
+  <text x="80" y="630" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">Deep-Fried Ego</text>
+  <text x="80" y="650" font-family="Georgia, serif" font-size="14" fill="#8b4513">A light, airy puff of structural regret, dusted with academic gold-leaf.</text>
+
+  <line x1="100" y1="700" x2="500" y2="700" stroke="#d4af37" stroke-width="1"/>
+  <text x="300" y="730" text-anchor="middle" font-family="Georgia, serif" font-size="16" fill="#5c4033" font-weight="bold">S L O P _ S Y N C : CRISPY</text>
+  
+  <!-- Potato Icon (Simplified) -->
+  <ellipse cx="300" cy="760" rx="20" ry="10" fill="#d2b48c" stroke="#8b4513" stroke-width="2"/>
+  <circle cx="310" cy="755" r="1" fill="#5c4033"/>
+  <circle cx="305" cy="757" r="1" fill="#5c4033"/>
+</svg>

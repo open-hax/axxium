@@ -1,0 +1,43 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="chromeGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#eee" />
+      <stop offset="70%" stop-color="#888" />
+      <stop offset="100%" stop-color="#444" />
+    </radialGradient>
+    <radialGradient id="potatoGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffcc00" />
+      <stop offset="100%" stop-color="#cc8800" />
+    </radialGradient>
+  </defs>
+  <!-- Outer chrome socket -->
+  <circle cx="100" cy="100" r="95" fill="url(#chromeGrad)" stroke="#222" stroke-width="2" />
+  
+  <!-- Sclera -->
+  <circle cx="100" cy="100" r="70" fill="#fff" stroke="#ccc" stroke-width="1" />
+  
+  <!-- Tater Tot Iris -->
+  <circle cx="100" cy="100" r="35" fill="url(#potatoGrad)" stroke="#884400" stroke-width="2" />
+  
+  <!-- Crisp Texture Dots -->
+  <circle cx="85" cy="85" r="3" fill="#663300" opacity="0.6" />
+  <circle cx="115" cy="90" r="2" fill="#663300" opacity="0.6" />
+  <circle cx="100" cy="115" r="4" fill="#663300" opacity="0.6" />
+  <circle cx="120" cy="110" r="3" fill="#663300" opacity="0.6" />
+  <circle cx="90" cy="110" r="2" fill="#663300" opacity="0.6" />
+
+  <!-- Pupil -->
+  <circle cx="100" cy="100" r="12" fill="#220033" />
+  
+  <!-- Specular Highlight -->
+  <ellipse cx="85" cy="85" rx="10" ry="5" fill="white" opacity="0.8" transform="rotate(-45 85 85)" />
+  
+  <!-- Diamonds -->
+  <polygon points="100,5 105,15 100,25 95,15" fill="#B9F2FF" stroke="#fff" stroke-width="1" />
+  <polygon points="195,100 185,105 185,95 195,100" fill="#B9F2FF" stroke="#fff" stroke-width="1" />
+  <polygon points="100,195 105,185 100,175 95,185" fill="#B9F2FF" stroke="#fff" stroke-width="1" />
+  <polygon points="5,100 15,105 15,95 5,100" fill="#B9F2FF" stroke="#fff" stroke-width="1" />
+  
+  <!-- Label -->
+  <text x="100" y="160" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#444" text-anchor="middle">Sassy Bitch v2.0</text>
+</svg>

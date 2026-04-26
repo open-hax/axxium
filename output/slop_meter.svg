@@ -1,0 +1,9 @@
+<svg width="300" height="200" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 50 150 A 100 100 0 0 1 250 150" fill="none" stroke="black" stroke-width="10" />
+  <line x1="150" y1="150" x2="240" y2="80" stroke="red" stroke-width="5" />
+  <circle cx="150" cy="150" r="5" fill="black" />
+  <text x="150" y="180" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="20">SLOP-O-METER</text>
+  <text x="40" y="140" text-anchor="middle" font-family="Arial" font-size="12">PURE</text>
+  <text x="260" y="140" text-anchor="middle" font-family="Arial" font-size="12" fill="red" font-weight="bold">MAX SLOP</text>
+  <text x="150" y="50" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="16" fill="red">CRITICAL HALLUCINATION LEVEL</text>
+</svg>

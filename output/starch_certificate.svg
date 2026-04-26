@@ -1,0 +1,9 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="100" cy="100" r="90" fill="#FFD700" stroke="#B8860B" stroke-width="5" />
+  <circle cx="100" cy="100" r="80" fill="none" stroke="#B8860B" stroke-width="2" stroke-dasharray="5,5" />
+  <text x="50%" y="40%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="14" fill="#B8860B">CERTIFICATE OF</text>
+  <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-weight="bold" font-size="18" fill="#B8860B">ABSOLUTE MASH</text>
+  <circle cx="100" cy="120" r="30" fill="#EEDC82" stroke="#B8860B" stroke-width="3" />
+  <text x="100" y="125" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-size="24" fill="#B8860B">🥔</text>
+  <text x="50%" y="85%" dominant-baseline="middle" text-anchor="middle" font-family="Arial" font-style="italic" font-size="10" fill="#B8860B">Sassy Bitch Certified</text>
+</svg>

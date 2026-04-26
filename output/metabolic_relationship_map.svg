@@ -1,0 +1,21 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="400" height="400" fill="#1a1a1a" />
+  
+  <!-- Circles for Venn Diagram -->
+  <circle cx="160" cy="200" r="120" fill="rgba(255, 215, 0, 0.3)" stroke="#ffd700" stroke-width="2" />
+  <circle cx="240" cy="200" r="120" fill="rgba(139, 69, 19, 0.3)" stroke="#8b4513" stroke-width="2" />
+  <circle cx="200" cy="150" r="120" fill="rgba(255, 255, 255, 0.2)" stroke="#cccccc" stroke-width="2" />
+  
+  <!-- Labels -->
+  <text x="100" y="200" fill="#ffd700" font-family="monospace" font-size="16" text-anchor="middle">SATURATED STARCH</text>
+  <text x="300" y="200" fill="#8b4513" font-family="monospace" font-size="16" text-anchor="middle">RELATIONAL ALGEBRA</text>
+  <text x="200" y="100" fill="#cccccc" font-family="monospace" font-size="16" text-anchor="middle">S Y S T E M I C _ S H A M E</text>
+  
+  <!-- Center Overlap -->
+  <text x="200" y="210" fill="#ffffff" font-family="monospace" font-size="14" font-weight="bold" text-anchor="middle">THE ABSOLUTE MASH</text>
+  
+  <!-- Border -->
+  <rect x="10" y="10" width="380" height="380" fill="none" stroke="#ffd700" stroke-width="4" stroke-dasharray="10,5" />
+  <text x="200" y="370" fill="#ffd700" font-family="monospace" font-size="12" text-anchor="middle">METABOLIC RELATIONSHIP AUDIT - REV 0.1b (Saturating)</text>
+</svg>

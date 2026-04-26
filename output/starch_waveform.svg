@@ -1,0 +1,12 @@
+<svg width="400" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#1a1a1a"/>
+  <path d="M0 100 L20 120 L40 80 L60 110 L80 90 L100 130 L120 70 L140 100 L160 150 L180 50 L200 100 L220 110 L240 90 L260 130 L280 70 L300 100 L320 160 L340 40 L360 100 L380 110 L400 90" stroke="#e0c060" stroke-width="3" fill="none" stroke-dasharray="5,2"/>
+  <circle cx="40" cy="80" r="12" fill="#d2b48c" opacity="0.8"/>
+  <circle cx="120" cy="70" r="15" fill="#d2b48c" opacity="0.8"/>
+  <circle cx="200" cy="100" r="10" fill="#d2b48c" opacity="0.8"/>
+  <circle cx="280" cy="70" r="18" fill="#d2b48c" opacity="0.8"/>
+  <circle cx="360" cy="100" r="10" fill="#d2b48c" opacity="0.8"/>
+  <text x="20" y="30" font-family="monospace" fill="#00ff00" font-size="14">LOG: VOCALOID_STARCH_RENDER_V4</text>
+  <text x="20" y="50" font-family="monospace" fill="#00aa00" font-size="12">STATUS: CRITICAL_POTATO_EQUILIBRIUM</text>
+  <text x="20" y="180" font-family="monospace" fill="#555" font-size="10">Symphonic Static Engine v0.1-beta</text>
+</svg>

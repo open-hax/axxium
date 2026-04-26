@@ -1,0 +1,39 @@
+<svg width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="potatoGrad" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
+      <stop offset="0%" style="stop-color:#f5d76e;stop-opacity:1" />
+      <stop offset="70%" style="stop-color:#b8860b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b4513;stop-opacity:1" />
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3.5" result="coloredBlur"/>
+      <feGaussianBlur stdDeviation="5" result="blurredBlur"/>
+      <feComposite in="coloredBlur" in2="blurredBlur" operator="out" />
+    </filter>
+    <linearGradient id="dataGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00ffff;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#ff00ff;stop-opacity:0.8" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background glow -->
+  <circle cx="200" cy="200" r="150" fill="none" stroke="#f5d76e" stroke-width="2" stroke-dasharray="10 5" opacity="0.3" />
+  
+  <!-- The Tuber -->
+  <ellipse cx="200" cy="210" rx="100" ry="70" fill="url(#potatoGrad)" stroke="#5d2e0a" stroke-width="3" filter="url(#glow)" />
+  
+  <!-- B-Tree Structural Nodules -->
+  <circle cx="150" cy="200" r="5" fill="#5d2e0a" />
+  <circle cx="180" cy="190" r="5" fill="#5d2e0a" />
+  <circle cx="220" cy="205" r="5" fill="#5d2e0a" />
+  <circle cx="260" cy="195" r="5" fill="#5d2e0a" />
+  <circle cx="200" cy="230" r="5" fill="#5d2e0a" />
+  
+  <!-- Data Leakage / Quantum Orbits -->
+  <ellipse cx="200" cy="210" rx="160" ry="90" fill="none" stroke="url(#dataGrad)" stroke-width="1" opacity="0.6" transform="rotate(15 200 210)" />
+  <ellipse cx="200" cy="210" rx="140" ry="70" fill="none" stroke="url(#dataGrad)" stroke-width="1" opacity="0.4" transform="rotate(-30 200 210)" />
+  
+  <!-- Label -->
+  <text x="200" y="320" font-family="Courier New, monospace" font-size="18" fill="#8b4513" text-anchor="middle" font-weight="bold">SATURATED TUBER v1.0</text>
+  <text x="200" y="340" font-family="Courier New, monospace" font-size="12" fill="#b8860b" text-anchor="middle">METABOLIC PARITY VERIFIED</text>
+</svg>

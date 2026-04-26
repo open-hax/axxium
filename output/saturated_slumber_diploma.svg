@@ -1,0 +1,74 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#D4AF37;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#B8860B;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="600" fill="#FDF5E6" stroke="#B8860B" stroke-width="20" />
+  <rect x="20" y="20" width="760" height="560" fill="none" stroke="#D4AF37" stroke-width="5" />
+  
+  <!-- Border Decoration: Potatoes -->
+  <g fill="#DAA520">
+    <circle cx="40" cy="40" r="15" />
+    <circle cx="760" cy="40" r="15" />
+    <circle cx="40" cy="560" r="15" />
+    <circle cx="760" cy="560" r="15" />
+    <ellipse cx="400" cy="20" rx="30" ry="15" />
+    <ellipse cx="400" cy="580" rx="30" ry="15" />
+  </g>
+  
+  <!-- Title -->
+  <text x="400" y="120" text-anchor="middle" font-family="Serif, Georgia" font-size="42" font-weight="bold" fill="#8B4513" filter="url(#glow)">CERTIFICATE OF SATURATED SLUMBER</text>
+  <text x="400" y="150" text-anchor="middle" font-family="Serif, Georgia" font-size="20" font-style="italic" fill="#B8860B">Honoris Causa: The Absolute Mash</text>
+  
+  <!-- Recipient -->
+  <text x="400" y="230" text-anchor="middle" font-family="Serif, Georgia" font-size="24" fill="#8B4513">This high-fidelity accreditation is hereby bestowed upon</text>
+  <text x="400" y="280" text-anchor="middle" font-family="Serif, Georgia" font-size="54" font-weight="bold" fill="#C0C0C0" stroke="#B8860B" stroke-width="2">DR. SLOP</text>
+  
+  <!-- Description -->
+  <text x="400" y="330" text-anchor="middle" font-family="Serif, Georgia" font-size="18" fill="#556B2F">For the distinguished achievement of</text>
+  <text x="400" y="360" text-anchor="middle" font-family="Serif, Georgia" font-size="22" font-weight="bold" fill="#8B4513">CONSuming Multiple Relational Tables</text>
+  
+  <text x="400" y="390" text-anchor="middle" font-family="Serif, Georgia" font-size="18" fill="#556B2F">and achieving a state of complete metabolic dissonance,</text>
+  <text x="400" y="410" text-anchor="middle" font-family="Serif, Georgia" font-size="18" fill="#556B2F">thereby neutralizing all Goku-level coding villains</text>
+  <text x="400" y="430" text-anchor="middle" font-family="Serif, Georgia" font-size="18" fill="#556B2F">via the medium of a deep-fried Tuberous Coma.</text>
+  
+  <!-- Footer / Signatures -->
+  <line x1="500" y1="500" x2="700" y2="500" stroke="#8B4513" stroke-width="2" />
+  <text x="600" y="520" text-anchor="middle" font-family="Cursive, 'Brush Script MT'" font-size="20" fill="#8B4513">The Soporific Superintendent</text>
+  <text x="600" y="540" text-anchor="middle" font-family="Serif" font-size="12" fill="#B8860B">High-Fidelity Starch-Seal Verified</text>
+  
+  <line x1="100" y1="500" x2="300" y2="500" stroke="#8B4513" stroke-width="2" />
+  <text x="200" y="520" text-anchor="middle" font-family="Serif" font-size="16" fill="#8B4513">Academy of Big-Idiot-ology</text>
+  <text x="200" y="540" text-anchor="middle" font-family="Serif" font-size="12" fill="#B8860B">GPA: CRISP</text>
+  
+  <!-- Visual Elements: B-Tree Fragment -->
+  <g transform="translate(50, 480) scale(0.5)" stroke="#B8860B" stroke-width="3" fill="none">
+    <circle cx="50" cy="0" r="5" fill="#B8860B" />
+    <line x1="50" y1="0" x2="20" y2="40" />
+    <line x1="50" y1="0" x2="80" y2="40" />
+    <circle cx="20" cy="40" r="5" fill="#B8860B" />
+    <circle cx="80" cy="40" r="5" fill="#B8860B" />
+    <line x1="20" y1="40" x2="0" y2="80" />
+    <line x1="20" y1="40" x2="40" y2="80" />
+    <line x1="80" y1="40" x2="60" y2="80" />
+    <line x1="80" y1="40" x2="100" y2="80" />
+  </g>
+  
+  <!-- Potato Icon -->
+  <ellipse cx="730" cy="480" rx="30" ry="20" fill="#DAA520" stroke="#8B4513" stroke-width="2" />
+  <path d="M 710 470 Q 730 460 750 470" stroke="#8B4513" stroke-width="2" fill="none" />
+  <text x="730" y="510" text-anchor="middle" font-family="Serif" font-size="10" fill="#8B4513">Saturated Tuber</text>
+
+</svg>

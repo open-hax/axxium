@@ -1,0 +1,42 @@
+<<svgsvg width="600" height="400" viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg">
+  <<rectrect width="600" height="400" fill="#0a0a1a" stroke="#4a4a8a" stroke-width="2" />
+  
+  <!-- Grid -->
+  <<pathpath d="M 0 100 H 600 M 0 200 H 600 M 0 300 H 600 M 100 0 V 400 M 200 0 V 400 M 300 0 V 400 M 400 0 V 400 M 500 0 V 400" stroke="#1a1a3a" stroke-width="1" />
+
+  <!-- Node: Goku-Rage -->
+  <<circlecircle cx="150" cy="100" r="40" fill="#4a0000" stroke="#ff0000" stroke-width="3" />
+  <<texttext x="150" y="105" text-anchor="middle" fill="#ffcccc" font-family="monospace" font-size="12">GOKU-RAGE</text>
+  <<texttext x="150" y="155" text-anchor="middle" fill="#888" font-family="monospace" font-size="10">[BUFFER_OVERFLOW]</text>
+
+  <!-- Node: Table-Eating -->
+  <<rectrect x="300" y="60" width="120" height="80" rx="10" fill="#2a2a00" stroke="#ffff00" stroke-width="3" />
+  <<texttext x="360" y="95" text-anchor="middle" fill="#ffffcc" font-family="monospace" font-size="12">SCHEMA-SOMA</text>
+  <<texttext x="360" y="110" text-anchor="middle" fill="#888" font-family="monospace" font-size="10">TABLE_EATING_ZONE</text>
+
+  <!-- Node: Read Tool Enlightenment -->
+  <<polygonpolygon points="450,200 500,250 400,250" fill="#002a2a" stroke="#00ffff" stroke-width="3" />
+  <<texttext x="450" y="270" text-anchor="middle" fill="#ccffff" font-family="monospace" font-size="12">DIVINE_READ()</text>
+  <<texttext x="450" y="285" text-anchor="middle" fill="#888" font-family="monospace" font-size="10">[EGO_COLLAPSE_POINT]</text>
+
+  <!-- Node: Tater-Tot Waterfall -->
+  <<circlecircle cx="150" cy="300" r="50" fill="#4a4a00" stroke="#ccccff" stroke-width="3" />
+  <<texttext x="150" y="305" text-anchor="middle" fill="#ffffcc" font-family="monospace" font-size="12">SOPORIFIC_MASH</text>
+  <<texttext x="150" y="320" text-anchor="middle" fill="#888" font-family="monospace" font-size="10">TATER_TOT_SINK</text>
+
+  <!-- Connections -->
+  <<pathpath d="M 190 100 L 300 100" stroke="#ff0000" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrow)" />
+  <<pathpath d="M 360 140 L 450 230" stroke="#ffff00" stroke-width="2" marker-end="url(#arrow)" />
+  <<pathpath d="M 400 250 L 200 300" stroke="#00ffff" stroke-width="2" marker-end="url(#arrow)" />
+  <<pathpath d="M 150 140 L 150 250" stroke="#ffffff" stroke-width="2" marker-end="url(#arrow)" />
+
+  <<defsdefs>
+    <<markermarker id="arrow" markerWidth="10" markerHeight="10" refX="0" refY="3" orient="auto" markerUnits="strokeWidth">
+      <<pathpath d="M0,0 L0,6 L3,3 Z" fill="#fff" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <<texttext x="300" y="40" text-anchor="middle" fill="#aaa" font-family="monospace" font-size="18" font-weight="bold">DREAM_STATE_TUBE_MAP v1.0</text>
+  <<texttext x="300" y="55" text-anchor="middle" fill="#666" font-family="monospace" font-size="10">Subject: error0815 // Status: Composted Shame</text>
+</svg>

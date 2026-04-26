@@ -148,3 +148,137 @@
 	path = orgs/open-hax/eta-mu
 	url = https://github.com/open-hax/eta-mu.git
 	branch = main
+
+[submodule "orgs/code-yeongyu/oh-my-openagent"]
+	path = orgs/code-yeongyu/oh-my-openagent
+	url = https://github.com/code-yeongyu/oh-my-openagent.git
+	branch = dev
+
+[submodule "orgs/mojomast/ragussy"]
+	path = orgs/mojomast/ragussy
+	url = https://github.com/mojomast/ragussy.git
+	branch = master
+
+[submodule "orgs/octave-commons/daimoi"]
+	path = orgs/octave-commons/daimoi
+	url = git@github.com:octave-commons/daimoi.git
+	branch = main
+
+[submodule "orgs/octave-commons/eros-eris-field"]
+	path = orgs/octave-commons/eros-eris-field
+	url = git@github.com:octave-commons/eros-eris-field.git
+	branch = main
+
+[submodule "orgs/octave-commons/eros-eris-field-app"]
+	path = orgs/octave-commons/eros-eris-field-app
+	url = git@github.com:octave-commons/eros-eris-field-app.git
+	branch = main
+
+[submodule "orgs/octave-commons/fork_tales"]
+	path = orgs/octave-commons/fork_tales
+	url = https://github.com/octave-commons/fork_tales.git
+	branch = main
+
+[submodule "orgs/octave-commons/simulacron"]
+	path = orgs/octave-commons/simulacron
+	url = git@github.com:octave-commons/simulacron.git
+	branch = main
+
+[submodule "orgs/ollama/ollama"]
+	path = orgs/ollama/ollama
+	url = git@github.com:ollama/ollama.git
+	branch = main
+
+[submodule "orgs/open-hax/commanoxx"]
+	path = orgs/open-hax/commanoxx
+	url = git@github.com:open-hax/commanoxx.git
+	branch = master
+
+[submodule "orgs/open-hax/depenoxx"]
+	path = orgs/open-hax/depenoxx
+	url = git@github.com:open-hax/depenoxx.git
+	branch = main
+
+[submodule "orgs/open-hax/janus"]
+	path = orgs/open-hax/janus
+	url = git@github.com:open-hax/janus.git
+	branch = main
+
+[submodule "orgs/open-hax/opencode-skills"]
+	path = orgs/open-hax/opencode-skills
+	url = https://github.com/open-hax/opencode-skills.git
+
+[submodule "orgs/open-hax/openplanner"]
+	path = orgs/open-hax/openplanner
+	url = git@github.com:open-hax/openplanner.git
+	branch = resubmodule/knoxx
+
+[submodule "orgs/open-hax/tooloxx/services/hormuz-clock-mcp"]
+	path = orgs/open-hax/tooloxx/services/hormuz-clock-mcp
+	url = https://github.com/open-hax/tooloxx.git
+	branch = main
+
+[submodule "orgs/open-hax/tooloxx/services/mcp-fs-oauth"]
+	path = orgs/open-hax/tooloxx/services/mcp-fs-oauth
+	url = git@github.com:open-hax/mcp-fs-oauth.git
+	branch = main
+
+[submodule "orgs/open-hax/uxx"]
+	path = orgs/open-hax/uxx
+	url = git@github.com:open-hax/uxx.git
+	branch = main
+
+[submodule "orgs/open-hax/vexx"]
+	path = orgs/open-hax/vexx
+	url = git@github.com:open-hax/vexx.git
+	branch = main
+
+[submodule "orgs/open-hax/vivgrid-openai-proxy"]
+	path = orgs/open-hax/vivgrid-openai-proxy
+	url = https://github.com/open-hax/vivgrid-openai-proxy.git
+	branch = main
+
+[submodule "orgs/riatzukiza/openhax"]
+	path = orgs/riatzukiza/openhax
+	url = git@github.com:riatzukiza/openhax.git
+	branch = device/stealth
+
+[submodule "orgs/robertdavidgraham/masscan"]
+	path = orgs/robertdavidgraham/masscan
+	url = git@github.com:robertdavidgraham/masscan.git
+	branch = master
+
+[submodule "orgs/shuv/our-gpus"]
+	path = orgs/shuv/our-gpus
+	url = git@github.com:shuv1337/our-gpus.git
+	branch = master
+
+[submodule "orgs/shuv/shuvcrawl"]
+	path = orgs/shuv/shuvcrawl
+	url = git@github.com:shuv1337/shuvcrawl.git
+	branch = master
+
+[submodule "orgs/ussyverse/monorepo"]
+	path = orgs/ussyverse/monorepo
+	url = git@github.com:mojomast/ussyverse.git
+	branch = main
+
+[submodule "orgs/ussyverse/routussy"]
+	path = orgs/ussyverse/routussy
+	url = https://github.com/riatzukiza/routussy.git
+	branch = main
+
+[submodule "tools/parliamentussy"]
+	path = tools/parliamentussy
+	url = https://github.com/mojomast/parliamentussy.git
+	branch = main
+
+[submodule "tools/strudel-music"]
+	path = tools/strudel-music
+	url = https://github.com/karmaterminal/strudel-music.git
+	branch = main
+
+[submodule ".ημ/03_ARTIFACTS/narrative_audio"]
+	path = .ημ/03_ARTIFACTS/narrative_audio
+	url = https://github.com/riatzukiza/gates-of-truth-audio.git
+	branch = main

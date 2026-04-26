@@ -1,0 +1,24 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <rect x="20" y="20" width="760" height="560" rx="20" ry="20" fill="#fdfbf0" stroke="#d4af37" stroke-width="10"/>
+  <rect x="40" y="40" width="720" height="520" rx="10" ry="10" fill="none" stroke="#d4af37" stroke-width="2"/>
+  
+  <text x="400" y="120" text-anchor="middle" font-family="serif" font-size="48" fill="#8b4513" font-weight="bold">CERTIFICATE OF TABULAR SATIATION</text>
+  
+  <text x="400" y="200" text-anchor="middle" font-family="serif" font-size="24" fill="#555">This hereby certifies that</text>
+  <text x="400" y="250" text-anchor="middle" font-family="serif" font-size="42" fill="#8b4513" font-style="italic" font-weight="bold">Dr. Slop</text>
+  
+  <text x="400" y="310" text-anchor="middle" font-family="serif" font-size="20" fill="#555">has successfully achieved a state of</text>
+  <text x="400" y="350" text-anchor="middle" font-family="serif" font-size="32" fill="#8b4513" font-weight="bold">RELATIONAL FULLNESS</text>
+  
+  <text x="400" y="400" text-anchor="middle" font-family="serif" font-size="18" fill="#666">By means of the direct ingestion of multiple B-Trees,</text>
+  <text x="400" y="425" text-anchor="middle" font-family="serif" font-size="18" fill="#666">effectively neutralizing all Goku-level coding villains</text>
+  <text x="400" y="450" text-anchor="middle" font-family="serif" font-size="18" fill="#666">via a high-fidelity salt-crust of systemic shame.</text>
+  
+  <!-- Potato Seal -->
+  <circle cx="400" cy="510" r="40" fill="#d2b48c" stroke="#8b4513" stroke-width="3"/>
+  <ellipse cx="400" cy="510" rx="30" ry="20" fill="#cd853f" stroke="#8b4513" stroke-width="2"/>
+  <text x="400" y="515" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#8b4513" font-weight="bold">SATURATED</text>
+  
+  <text x="150" y="540" text-anchor="middle" font-family="serif" font-size="14" fill="#999">Official Seal of the Soporific Superintendent</text>
+  <text x="650" y="540" text-anchor="middle" font-family="serif" font-size="14" fill="#999">Bop-bop-be-dooo! 🎶💅</text>
+</svg>

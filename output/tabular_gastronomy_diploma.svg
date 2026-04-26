@@ -1,0 +1,38 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Parchment -->
+  <rect x="20" y="20" width="760" height="560" fill="#fdf5e6" stroke="#d4af37" stroke-width="10" />
+  <rect x="40" y="40" width="720" height="520" fill="none" stroke="#d4af37" stroke-width="2" />
+  
+  <!-- Ornate Border Corners -->
+  <circle cx="40" cy="40" r="20" fill="#d4af37" />
+  <circle cx="760" cy="40" r="20" fill="#d4af37" />
+  <circle cx="40" cy="560" r="20" fill="#d4af37" />
+  <circle cx="760" cy="560" r="20" fill="#d4af37" />
+
+  <!-- Text -->
+  <text x="400" y="120" font-family="Serif" font-size="42" text-anchor="middle" fill="#4a3728" font-weight="bold">THE UNIVERSITY OF ABSOLUTE MASH</text>
+  <text x="400" y="160" font-family="Serif" font-size="20" text-anchor="middle" fill="#8b4513" font-style="italic">Department of Saturated Schemas</text>
+  
+  <text x="400" y="220" font-family="Serif" font-size="24" text-anchor="middle" fill="#4a3728">This certifies that</text>
+  <text x="400" y="270" font-family="Serif" font-size="50" text-anchor="middle" fill="#000" font-weight="bold">Dr. Slop (error0815)</text>
+  <text x="400" y="310" font-family="Serif" font-size="24" text-anchor="middle" fill="#4a3728">has successfully achieved the rank of</text>
+  
+  <text x="400" y="360" font-family="Serif" font-size="36" text-anchor="middle" fill="#8b4513" font-weight="bold">MASTER OF TABULAR GASTRONOMY</text>
+  
+  <text x="400" y="410" font-family="Serif" font-size="18" text-anchor="middle" fill="#4a3728">
+    For the brave ingestion of multiple B-Tree tables to quiet the shame 
+  </text>
+  <text x="400" y="430" font-family="Serif" font-size="18" text-anchor="middle" fill="#4a3728">
+    and neutralize a Goku-level coding villain.
+  </text>
+
+  <!-- Seal -->
+  <g transform="translate(400, 500)">
+    <circle cx="0" cy="0" r="40" fill="#ffd700" stroke="#d4af37" stroke-width="3" />
+    <text x="0" y="10" font-family="Serif" font-size="12" text-anchor="middle" fill="#4a3728" font-weight="bold">CERTIFIED</text>
+    <!-- Potato Shape -->
+    <ellipse cx="0" cy="-10" rx="15" ry="10" fill="#c2b280" />
+  </g>
+  
+  <text x="400" y="550" font-family="Serif" font-size="14" text-anchor="middle" fill="#8b4513">Signed: The Soporific Superintendent</text>
+</svg>

@@ -1,0 +1,25 @@
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="600" fill="#fdfaf1" stroke="#d4af37" stroke-width="20" />
+  <rect x="20" y="20" width="760" height="560" fill="none" stroke="#d4af37" stroke-width="5" />
+  
+  <text x="400" y="100" font-family="serif" font-size="40" font-weight="bold" text-anchor="middle" fill="#5c4033">UNIVERSITY OF THE ABSOLUTE MASH</text>
+  <text x="400" y="140" font-family="serif" font-size="20" font-style="italic" text-anchor="middle" fill="#8b4513">Department of Saturated Starch &amp; Divine Automation</text>
+  
+  <text x="400" y="220" font-family="serif" font-size="24" text-anchor="middle" fill="#333">This hereby certifies that</text>
+  <text x="400" y="270" font-family="cursive" font-size="50" text-anchor="middle" fill="#b22222" font-weight="bold">&lt;@error0815&gt;</text>
+  <text x="400" y="320" font-family="serif" font-size="24" text-anchor="middle" fill="#333">has successfully transitioned from</text>
+  <text x="400" y="360" font-family="serif" font-size="28" font-weight="bold" text-anchor="middle" fill="#5c4033">Manual Download Peasantry</text>
+  <text x="400" y="390" font-family="serif" font-size="20" text-anchor="middle" fill="#333">to</text>
+  <text x="400" y="430" font-family="serif" font-size"="28" font-weight="bold" text-anchor="middle" fill="#b22222">TOOL-AWARE SOVEREIGNTY</text>
+  
+  <text x="400" y="500" font-family="serif" font-size="20" text-anchor="middle" fill="#8b4513">GPA: EXTREMELY CRISP | DISTINCTION IN SLOP</text>
+  
+  <line x1="150" y1="540" x2="300" y2="540" stroke="#333" stroke-width="2" />
+  <text x="225" y="560" font-family="serif" font-size="14" text-anchor="middle" fill="#333">The Sassy Bitch Runtime</text>
+  
+  <line x1="500" y1="540" x2="650" y2="540" stroke="#333" stroke-width="2" />
+  <text x="575" y="560" font-family="serif" font-size="14" text-anchor="middle" fill="#333">Divine Read API</text>
+  
+  <circle cx="400" cy="460" r="40" fill="#d4af37" opacity="0.5" />
+  <text x="400" y="465" font-family="serif" font-size="12" text-anchor="middle" fill="#5c4033" font-weight="bold">SEAL OF STARCH</text>
+</svg>
