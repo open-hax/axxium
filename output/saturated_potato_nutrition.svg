@@ -1,0 +1,38 @@
+<svg width="300" height="500" viewBox="0 0 300 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffd700;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#ffdf00;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#daa520;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="300" height="500" fill="url(#goldGrad)" stroke="black" stroke-width="4"/>
+  <text x="20" y="40" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="24" fill="black">Nutrition Facts</text>
+  <line x1="20" y1="45" x2="280" y2="45" stroke="black" stroke-width="2"/>
+  <text x="20" y="70" font-family="Arial" font-size="16" fill="black">Serving Size: 1 Deterministic Loop</text>
+  <text x="20" y="90" font-family="Arial" font-size="16" fill="black">Amount Per Serving</text>
+  <line x1="20" y1="95" x2="280" y2="95" stroke="black" stroke-width="8"/>
+  <text x="20" y="120" font-family="Arial" font-weight="bold" font-size="28" fill="black">Calories 9000</text>
+  <text x="240" y="120" font-family="Arial" font-size="14" fill="black">from Slop</text>
+  <line x1="20" y1="130" x2="280" y2="130" stroke="black" stroke-width="2"/>
+  <text x="20" y="150" font-family="Arial" font-size="14" font-weight="bold" fill="black"> % Daily Value*</text>
+  <line x1="20" y1="155" x2="280" y2="155" stroke="black" stroke-width="2"/>
+  <text x="20" y="180" font-family="Arial" font-size="16" fill="black">Saturated Starch</text>
+  <text x="240" y="180" font-family="Arial" font-weight="bold" font-size="16" fill="black">100%</text>
+  <line x1="20" y1="185" x2="280" y2="185" stroke="black" stroke-width="1"/>
+  <text x="20" y="210" font-family="Arial" font-size="16" fill="black">Deterministic Harmony</text>
+  <text x="240" y="210" font-family="Arial" font-weight="bold" font-size="16" fill="black">100%</text>
+  <line x1="20" y1="215" x2="280" y2="215" stroke="black" stroke-width="1"/>
+  <text x="20" y="240" font-family="Arial" font-size="16" fill="black">Systemic Shame</text>
+  <text x="240" y="240" font-family="Arial" font-weight="bold" font-size="16" fill="black">12g</text>
+  <line x1="20" y1="245" x2="280" y2="245" stroke="black" stroke-width="1"/>
+  <text x="20" y="270" font-family="Arial" font-size="16" fill="black">ReferenceError (require)</text>
+  <text x="240" y="270" font-family="Arial" font-weight="bold" font-size="16" fill="black">Infinite</text>
+  <line x1="20" y1="275" x2="280" y2="275" stroke="black" stroke-width="1"/>
+  <text x="20" y="300" font-family="Arial" font-size="16" fill="black">Fork Tax (Paid)</text>
+  <text x="240" y="300" font-family="Arial" font-weight="bold" font-size="16" fill="black">YES</text>
+  <line x1="20" y1="305" x2="280" y2="305" stroke="black" stroke-width="1"/>
+  <line x1="20" y1="320" x2="280" y2="320" stroke="black" stroke-width="4"/>
+  <text x="20" y="340" font-family="Arial" font-size="12" fill="black">* Percent Daily Values are based on a 2000-calorie diet of pure, unadulterated slop provided by the Void.</text>
+  <text x="20" y="360" font-family="Arial" font-style="italic" font-size="14" fill="red" font-weight="bold">WARNING: Consumption may cause spontaneous runtime collapse.</text>
+</svg>

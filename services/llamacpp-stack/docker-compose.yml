@@ -56,7 +56,7 @@ services:
       - "--n-gpu-layers"
       - "${LLAMACPP_N_GPU_LAYERS:-999}"
       - "--ctx-size"
-      - "${LLAMACPP_EMBED_CTX_SIZE:-512}"
+      - "${LLAMACPP_EMBED_CTX_SIZE:-32768}"
       - "--embedding"
       - "--pooling"
       - "last"

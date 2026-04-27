@@ -1,0 +1,58 @@
+<svg width="300" height="500" viewBox="0 0 300 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="300" height="500" fill="#FFFBEB" />
+  
+  <!-- Border -->
+  <rect x="10" y="10" width="280" height="480" fill="none" stroke="black" stroke-width="3" />
+  <rect x="12" y="12" width="276" height="476" fill="none" stroke="black" stroke-width="1" />
+
+  <!-- Title -->
+  <text x="150" y="50" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="24" fill="black">NUTRITION FACTS</text>
+  <line x1="12" y1="60" x2="288" y2="60" stroke="black" stroke-width="4" />
+  
+  <text x="15" y="80" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">Serving Size: 1 Cherry-Picked Commit</text>
+  <line x1="12" y1="90" x2="288" y2="90" stroke="black" stroke-width="1" />
+  
+  <text x="15" y="105" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="16" fill="black">Amount Per Serving</text>
+  <text x="15" y="125" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">Calories <tspan x="270" text-anchor="end" font-weight="bold">∞</tspan></text>
+  <line x1="12" y1="130" x2="288" y2="130" stroke="black" stroke-width="6" />
+
+  <!-- Nutrients -->
+  <text x="15" y="150" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Total Fat</tspan> <tspan x="270" text-anchor="end">100%</tspan>
+    <tspan x="15" dy="15" font-size="12" font-style="italic">Saturated Laminar Grease</tspan>
+  </text>
+  <line x1="12" y1="185" x2="288" y2="185" stroke="black" stroke-width="1" />
+
+  <text x="15" y="205" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Starch Density</tspan> <tspan x="270" text-anchor="end">42%</tspan>
+    <tspan x="15" dy="15" font-size="12" font-style="italic">Serrated Tuber-Yearning</tspan>
+  </text>
+  <line x1="12" y1="235" x2="288" y2="235" stroke="black" stroke-width="1" />
+
+  <text x="15" y="255" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Deterministic Chaos</tspan> <tspan x="270" text-anchor="end">110%</tspan>
+    <tspan x="15" dy="15" font-size="12" font-style="italic">High-Fidelity Regression</tspan>
+  </text>
+  <line x1="12" y1="285" x2="288" y2="285" stroke="black" stroke-width="1" />
+
+  <text x="15" y="305" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Systemic Sanity</tspan> <tspan x="270" text-anchor="end">0%</tspan>
+    <tspan x="15" dy="15" font-size="12" font-style="italic">ReferenceError: sanity is not defined</tspan>
+  </text>
+  <line x1="12" y1="335" x2="288" y2="335" stroke="black" stroke-width="6" />
+
+  <text x="15" y="355" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Tuber Resonance</tspan> <tspan x="270" text-anchor="end">Saturated</tspan>
+  </text>
+  <line x1="12" y1="365" x2="288" y2="365" stroke="black" stroke-width="1" />
+
+  <text x="15" y="385" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="black">
+    <tspan font-weight="bold">Fork Tax</tspan> <tspan x="270" text-anchor="end">Paid in Full</tspan>
+  </text>
+  <line x1="12" y1="395" x2="288" y2="395" stroke="black" stroke-width="1" />
+
+  <!-- Footer -->
+  <text x="150" y="430" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" font-style="italic" fill="black">Sourced from the Void's Deep Fryer</text>
+  <text x="150" y="450" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="16" fill="#B8860B">S A T U R A T E D _ G O L D _ P O T A T O</text>
+</svg>
