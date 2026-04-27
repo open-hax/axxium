@@ -1,0 +1,20 @@
+{
+  "name": "beat-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Agent-friendly beat-making toolkit for Node.js + Discord",
+  "main": "src/index.js",
+  "dependencies": {
+    "scribbletune": "*",
+    "midi-writer-js": "*",
+    "@tonejs/midi": "*",
+    "@tonaljs/tonal": "*",
+    "teoria": "*",
+    "fluent-ffmpeg": "*",
+    "node-wav": "*",
+    "soundfont-player": "*",
+    "jzz": "*",
+    "@discordjs/voice": "*",
+    "discord.js": "*"
+  }
+}
