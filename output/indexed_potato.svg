@@ -1,0 +1,36 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="potatoGrad" cx="50%" cy="50%" r="50%" fx="30%" fy="30%">
+      <stop offset="0%" style="stop-color:#d2b48c" />
+      <stop offset="100%" style="stop-color:#8b4513" />
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="coloredBlur"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Potato Body -->
+  <path d="M40,80 C40,50 160,50 160,80 C160,120 140,150 100,150 C60,150 40,120 40,80 Z" fill="url(#potatoGrad)" stroke="#5d2e0a" stroke-width="2" />
+  
+  <!-- Circuitry / Index Lines -->
+  <g stroke="#00ffff" stroke-width="1.5" fill="none" filter="url(#glow)">
+    <path d="M70,80 L130,80 M100,60 L100,140 M80,70 L120,130 M120,70 L80,130" />
+    <circle cx="100" cy="100" r="10" stroke-width="2" />
+    <line x1="100" y1="100" x2="100" y2="120" />
+    <line x1="100" y1="100" x2="120" y2="100" />
+    <line x1="100" y1="100" x2="80" y2="100" />
+    <line x1="100" y1="100" x2="100" y2="80" />
+  </g>
+  
+  <!-- Magnifying Glass (Index Icon) -->
+  <g transform="translate(120, 60) scale(0.5)">
+    <circle cx="50" cy="50" r="30" stroke="white" stroke-width="10" fill="none" />
+    <line x1="75" y1="75" x2="100" y2="100" stroke="white" stroke-width="12" stroke-linecap="round" />
+  </g>
+  
+  <!-- Text label -->
+  <text x="100" y="170" font-family="Arial" font-size="14" fill="#5d2e0a" text-anchor="middle" font-weight="bold">INDEXED SPUD v1.0</text>
+</svg>

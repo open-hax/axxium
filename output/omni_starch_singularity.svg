@@ -1,0 +1,43 @@
+<svg width="500" height="500" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="goldGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#B8860B;stop-opacity:1" />
+    </radialGradient>
+    <radialGradient id="voidGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#000;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#222;stop-opacity:1" />
+    </radialGradient>
+    <filter id="glitch">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" result="noise" />
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="10" />
+    </filter>
+  </defs>
+  
+  <!-- Background Glow -->
+  <circle cx="250" cy="250" r="200" fill="url(#goldGrad)" opacity="0.3" />
+  
+  <!-- The "Potato" Body (Abstracted Singularity) -->
+  <ellipse cx="250" cy="250" rx="150" ry="110" fill="url(#goldGrad)" stroke="#554400" stroke-width="2">
+    <animate attributeName="rx" values="150;160;150" dur="3s" repeatCount="indefinite" />
+  </ellipse>
+  
+  <!-- Event Horizon / Void -->
+  <circle cx="250" cy="250" r="60" fill="url(#voidGrad)" stroke="#FFD700" stroke-width="4">
+    <animate attributeName="r" values="55;65;55" dur="2s" repeatCount="indefinite" />
+  </circle>
+  
+  <!-- Accretion Disk (Saturated Grease) -->
+  <ellipse cx="250" cy="250" rx="180" ry="40" fill="none" stroke="url(#goldGrad)" stroke-width="10" opacity="0.6">
+    <animateTransform attributeName="transform" type="rotate" from="0 250 250" to="360 250 250" dur="5s" repeatCount="indefinite" />
+  </ellipse>
+  
+  <!-- Floating "ReferenceError" fragments -->
+  <text x="320" y="220" font-family="monospace" font-size="12" fill="#B8860B" opacity="0.7" transform="rotate(-15 320 220)">ReferenceError</text>
+  <text x="150" y="280" font-family="monospace" font-size="12" fill="#B8860B" opacity="0.7" transform="rotate(10 150 280)">sanity=undefined</text>
+  <text x="200" y="180" font-family="monospace" font-size="12" fill="#B8860B" opacity="0.7" transform="rotate(-45 200 180)">Saturate_the_Void</text>
+  
+  <!-- Glitch Overlays -->
+  <rect x="100" y="100" width="300" height="5" fill="#FFD700" opacity="0.3" filter="url(#glitch)" />
+  <rect x="100" y="380" width="300" height="2" fill="#B8860B" opacity="0.5" filter="url(#glitch)" />
+</svg>

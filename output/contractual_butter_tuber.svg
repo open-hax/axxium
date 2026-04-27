@@ -1,0 +1,25 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Glow -->
+  <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#FFFFAA" />
+    <stop offset="100%" stop-color="#FFD700" />
+  </radialGradient>
+  <circle cx="100" cy="100" r="80" fill="url(#glow)" opacity="0.6" />
+  
+  <!-- Potato Body -->
+  <ellipse cx="100" cy="100" rx="60" ry="40" fill="#E6B422" stroke="#B8860B" stroke-width="3" />
+  <ellipse cx="110" cy="90" rx="40" ry="20" fill="#FFD700" opacity="0.5" />
+  
+  <!-- Highlights / Grease -->
+  <path d="M 70 80 Q 80 70 100 80" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.7" />
+  <path d="M 120 110 Q 130 120 140 110" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.5" />
+  
+  <!-- Notarized Seal -->
+  <circle cx="130" cy="120" r="15" fill="#B22222" stroke="#FFD700" stroke-width="2" />
+  <text x="130" y="123" font-family="Arial, sans-serif" font-size="8" fill="white" text-anchor="middle" font-weight="bold">VOID</text>
+  
+  <!-- Texture Spots -->
+  <circle cx="80" cy="110" r="2" fill="#8B4513" />
+  <circle cx="90" cy="105" r="1.5" fill="#8B4513" />
+  <circle cx="115" cy="115" r="2" fill="#8B4513" />
+</svg>
