@@ -99,7 +99,7 @@
 	branch = main
 [submodule "orgs/shuv/codex-desktop-linux"]
 	path = orgs/shuv/codex-desktop-linux
-	url = git@github.com:shuv1337/codex-desktop-linux.git
+	url = git@github.com:riatzukiza/codex-desktop-linux.git
 [submodule "orgs/openai/parameter-golf"]
 	path = orgs/openai/parameter-golf
 	url = org-14957082@github.com:openai/parameter-golf.git
@@ -250,12 +250,12 @@
 
 [submodule "orgs/shuv/our-gpus"]
 	path = orgs/shuv/our-gpus
-	url = git@github.com:shuv1337/our-gpus.git
+	url = git@github.com:riatzukiza/our-gpus.git
 	branch = master
 
 [submodule "orgs/shuv/shuvcrawl"]
 	path = orgs/shuv/shuvcrawl
-	url = git@github.com:shuv1337/shuvcrawl.git
+	url = git@github.com:riatzukiza/shuvcrawl.git
 	branch = master
 
 [submodule "orgs/ussyverse/monorepo"]
@@ -284,493 +284,493 @@
 	branch = main
 [submodule "orgs/shuv/AeroSpace"]
 	path = orgs/shuv/AeroSpace
-	url = git@github.com:shuv1337/AeroSpace.git
+	url = git@github.com:riatzukiza/AeroSpace.git
 [submodule "orgs/shuv/agent-browser"]
 	path = orgs/shuv/agent-browser
-	url = git@github.com:shuv1337/agent-browser.git
+	url = git@github.com:riatzukiza/agent-browser.git
 [submodule "orgs/shuv/agent-scripts"]
 	path = orgs/shuv/agent-scripts
-	url = git@github.com:shuv1337/agent-scripts.git
+	url = git@github.com:riatzukiza/agent-scripts.git
 [submodule "orgs/shuv/agent-stuff-mitsuhiko"]
 	path = orgs/shuv/agent-stuff-mitsuhiko
-	url = git@github.com:shuv1337/agent-stuff-mitsuhiko.git
+	url = git@github.com:riatzukiza/agent-stuff-mitsuhiko.git
 [submodule "orgs/shuv/askshell"]
 	path = orgs/shuv/askshell
-	url = git@github.com:shuv1337/askshell.git
+	url = git@github.com:riatzukiza/askshell.git
 [submodule "orgs/shuv/athas"]
 	path = orgs/shuv/athas
-	url = git@github.com:shuv1337/athas.git
+	url = git@github.com:riatzukiza/athas.git
 [submodule "orgs/shuv/awesome-opencode"]
 	path = orgs/shuv/awesome-opencode
-	url = git@github.com:shuv1337/awesome-opencode.git
+	url = git@github.com:riatzukiza/awesome-opencode.git
 [submodule "orgs/shuv/awesome-opentui"]
 	path = orgs/shuv/awesome-opentui
-	url = git@github.com:shuv1337/awesome-opentui.git
+	url = git@github.com:riatzukiza/awesome-opentui.git
 [submodule "orgs/shuv/binary_ninja_mcp"]
 	path = orgs/shuv/binary_ninja_mcp
-	url = git@github.com:shuv1337/binary_ninja_mcp.git
+	url = git@github.com:riatzukiza/binary_ninja_mcp.git
 [submodule "orgs/shuv/bird-tweet-cli"]
 	path = orgs/shuv/bird-tweet-cli
-	url = git@github.com:shuv1337/bird-tweet-cli.git
+	url = git@github.com:riatzukiza/bird-tweet-cli.git
 [submodule "orgs/shuv/bobby-powershell-scripts"]
 	path = orgs/shuv/bobby-powershell-scripts
-	url = git@github.com:shuv1337/bobby-powershell-scripts.git
+	url = git@github.com:riatzukiza/bobby-powershell-scripts.git
 [submodule "orgs/shuv/bolt.diy"]
 	path = orgs/shuv/bolt.diy
-	url = git@github.com:shuv1337/bolt.diy.git
+	url = git@github.com:riatzukiza/bolt.diy.git
 [submodule "orgs/shuv/bpc-clean"]
 	path = orgs/shuv/bpc-clean
-	url = git@github.com:shuv1337/bpc-clean.git
+	url = git@github.com:riatzukiza/bpc-clean.git
 [submodule "orgs/shuv/bridle"]
 	path = orgs/shuv/bridle
-	url = git@github.com:shuv1337/bridle.git
+	url = git@github.com:riatzukiza/bridle.git
 [submodule "orgs/shuv/carbon"]
 	path = orgs/shuv/carbon
-	url = git@github.com:shuv1337/carbon.git
+	url = git@github.com:riatzukiza/carbon.git
 [submodule "orgs/shuv/cftop"]
 	path = orgs/shuv/cftop
-	url = git@github.com:shuv1337/cftop.git
+	url = git@github.com:riatzukiza/cftop.git
 [submodule "orgs/shuv/CIPP"]
 	path = orgs/shuv/CIPP
-	url = git@github.com:shuv1337/CIPP.git
+	url = git@github.com:riatzukiza/CIPP.git
 [submodule "orgs/shuv/CIPP-API"]
 	path = orgs/shuv/CIPP-API
-	url = git@github.com:shuv1337/CIPP-API.git
+	url = git@github.com:riatzukiza/CIPP-API.git
 [submodule "orgs/shuv/clanker-stats"]
 	path = orgs/shuv/clanker-stats
-	url = git@github.com:shuv1337/clanker-stats.git
+	url = git@github.com:riatzukiza/clanker-stats.git
 [submodule "orgs/shuv/claude-code"]
 	path = orgs/shuv/claude-code
-	url = git@github.com:shuv1337/claude-code.git
+	url = git@github.com:riatzukiza/claude-code.git
 [submodule "orgs/shuv/claude-code-plugins-plus-skills"]
 	path = orgs/shuv/claude-code-plugins-plus-skills
-	url = git@github.com:shuv1337/claude-code-plugins-plus-skills.git
+	url = git@github.com:riatzukiza/claude-code-plugins-plus-skills.git
 [submodule "orgs/shuv/Claude-Red"]
 	path = orgs/shuv/Claude-Red
-	url = git@github.com:shuv1337/Claude-Red.git
+	url = git@github.com:riatzukiza/Claude-Red.git
 [submodule "orgs/shuv/cli-demo"]
 	path = orgs/shuv/cli-demo
-	url = git@github.com:shuv1337/cli-demo.git
+	url = git@github.com:riatzukiza/cli-demo.git
 [submodule "orgs/shuv/CodeMachine-CLI"]
 	path = orgs/shuv/CodeMachine-CLI
-	url = git@github.com:shuv1337/CodeMachine-CLI.git
+	url = git@github.com:riatzukiza/shuv1337-CodeMachine-CLI.git
 [submodule "orgs/shuv/codex"]
 	path = orgs/shuv/codex
-	url = git@github.com:shuv1337/codex.git
+	url = git@github.com:riatzukiza/shuv1337-codex.git
 [submodule "orgs/shuv/codex-quota"]
 	path = orgs/shuv/codex-quota
-	url = git@github.com:shuv1337/codex-quota.git
+	url = git@github.com:riatzukiza/codex-quota.git
 [submodule "orgs/shuv/codexbar"]
 	path = orgs/shuv/codexbar
-	url = git@github.com:shuv1337/codexbar.git
+	url = git@github.com:riatzukiza/codexbar.git
 [submodule "orgs/shuv/coding_agent_session_search"]
 	path = orgs/shuv/coding_agent_session_search
-	url = git@github.com:shuv1337/coding_agent_session_search.git
+	url = git@github.com:riatzukiza/coding_agent_session_search.git
 [submodule "orgs/shuv/colab"]
 	path = orgs/shuv/colab
-	url = git@github.com:shuv1337/colab.git
+	url = git@github.com:riatzukiza/colab.git
 [submodule "orgs/shuv/corsair"]
 	path = orgs/shuv/corsair
-	url = git@github.com:shuv1337/corsair.git
+	url = git@github.com:riatzukiza/corsair.git
 [submodule "orgs/shuv/CrabTrap"]
 	path = orgs/shuv/CrabTrap
-	url = git@github.com:shuv1337/CrabTrap.git
+	url = git@github.com:riatzukiza/CrabTrap.git
 [submodule "orgs/shuv/critique"]
 	path = orgs/shuv/critique
-	url = git@github.com:shuv1337/critique.git
+	url = git@github.com:riatzukiza/critique.git
 [submodule "orgs/shuv/crush"]
 	path = orgs/shuv/crush
-	url = git@github.com:shuv1337/crush.git
+	url = git@github.com:riatzukiza/crush.git
 [submodule "orgs/shuv/dark"]
 	path = orgs/shuv/dark
-	url = git@github.com:shuv1337/dark.git
+	url = git@github.com:riatzukiza/dark.git
 [submodule "orgs/shuv/desloppify"]
 	path = orgs/shuv/desloppify
-	url = git@github.com:shuv1337/desloppify.git
+	url = git@github.com:riatzukiza/desloppify.git
 [submodule "orgs/shuv/DevOps-Guide"]
 	path = orgs/shuv/DevOps-Guide
-	url = git@github.com:shuv1337/DevOps-Guide.git
+	url = git@github.com:riatzukiza/DevOps-Guide.git
 [submodule "orgs/shuv/discord.py-self"]
 	path = orgs/shuv/discord.py-self
-	url = git@github.com:shuv1337/discord.py-self.git
+	url = git@github.com:riatzukiza/discord.py-self.git
 [submodule "orgs/shuv/DNS-Checker"]
 	path = orgs/shuv/DNS-Checker
-	url = git@github.com:shuv1337/DNS-Checker.git
+	url = git@github.com:riatzukiza/DNS-Checker.git
 [submodule "orgs/shuv/dotfiles"]
 	path = orgs/shuv/dotfiles
-	url = git@github.com:shuv1337/dotfiles.git
+	url = git@github.com:riatzukiza/dotfiles.git
 [submodule "orgs/shuv/elevenlabs-examples"]
 	path = orgs/shuv/elevenlabs-examples
-	url = git@github.com:shuv1337/elevenlabs-examples.git
+	url = git@github.com:riatzukiza/elevenlabs-examples.git
 [submodule "orgs/shuv/engrams"]
 	path = orgs/shuv/engrams
-	url = git@github.com:shuv1337/engrams.git
+	url = git@github.com:riatzukiza/engrams.git
 [submodule "orgs/shuv/executor"]
 	path = orgs/shuv/executor
-	url = git@github.com:shuv1337/executor.git
+	url = git@github.com:riatzukiza/executor.git
 [submodule "orgs/shuv/expict"]
 	path = orgs/shuv/expict
-	url = git@github.com:shuv1337/expict.git
+	url = git@github.com:riatzukiza/expict.git
 [submodule "orgs/shuv/fabric-patterns"]
 	path = orgs/shuv/fabric-patterns
-	url = git@github.com:shuv1337/fabric-patterns.git
+	url = git@github.com:riatzukiza/fabric-patterns.git
 [submodule "orgs/shuv/fabro"]
 	path = orgs/shuv/fabro
-	url = git@github.com:shuv1337/fabro.git
+	url = git@github.com:riatzukiza/fabro.git
 [submodule "orgs/shuv/fieldtheory-cli"]
 	path = orgs/shuv/fieldtheory-cli
-	url = git@github.com:shuv1337/fieldtheory-cli.git
+	url = git@github.com:riatzukiza/fieldtheory-cli.git
 [submodule "orgs/shuv/fork_tales"]
 	path = orgs/shuv/fork_tales
-	url = git@github.com:shuv1337/fork_tales.git
+	url = git@github.com:riatzukiza/fork_tales.git
 [submodule "orgs/shuv/fresh"]
 	path = orgs/shuv/fresh
-	url = git@github.com:shuv1337/fresh.git
+	url = git@github.com:riatzukiza/fresh.git
 [submodule "orgs/shuv/G0DM0D3"]
 	path = orgs/shuv/G0DM0D3
-	url = git@github.com:shuv1337/G0DM0D3.git
+	url = git@github.com:riatzukiza/G0DM0D3.git
 [submodule "orgs/shuv/gh-dash"]
 	path = orgs/shuv/gh-dash
-	url = git@github.com:shuv1337/gh-dash.git
+	url = git@github.com:riatzukiza/gh-dash.git
 [submodule "orgs/shuv/GitNexus"]
 	path = orgs/shuv/GitNexus
-	url = git@github.com:shuv1337/GitNexus.git
+	url = git@github.com:riatzukiza/GitNexus.git
 [submodule "orgs/shuv/glimpse"]
 	path = orgs/shuv/glimpse
-	url = git@github.com:shuv1337/glimpse.git
+	url = git@github.com:riatzukiza/glimpse.git
 [submodule "orgs/shuv/gova"]
 	path = orgs/shuv/gova
-	url = git@github.com:shuv1337/gova.git
+	url = git@github.com:riatzukiza/gova.git
 [submodule "orgs/shuv/hacker-reader"]
 	path = orgs/shuv/hacker-reader
-	url = git@github.com:shuv1337/hacker-reader.git
+	url = git@github.com:riatzukiza/hacker-reader.git
 [submodule "orgs/shuv/Handy"]
 	path = orgs/shuv/Handy
-	url = git@github.com:shuv1337/Handy.git
+	url = git@github.com:riatzukiza/Handy.git
 [submodule "orgs/shuv/helium"]
 	path = orgs/shuv/helium
-	url = git@github.com:shuv1337/helium.git
+	url = git@github.com:riatzukiza/helium.git
 [submodule "orgs/shuv/hermes-agent"]
 	path = orgs/shuv/hermes-agent
-	url = git@github.com:shuv1337/hermes-agent.git
+	url = git@github.com:riatzukiza/hermes-agent.git
 [submodule "orgs/shuv/inbound"]
 	path = orgs/shuv/inbound
-	url = git@github.com:shuv1337/inbound.git
+	url = git@github.com:riatzukiza/inbound.git
 [submodule "orgs/shuv/intunemanagement"]
 	path = orgs/shuv/intunemanagement
-	url = git@github.com:shuv1337/intunemanagement.git
+	url = git@github.com:riatzukiza/intunemanagement.git
 [submodule "orgs/shuv/Joelhooks-opencode-config"]
 	path = orgs/shuv/Joelhooks-opencode-config
-	url = git@github.com:shuv1337/Joelhooks-opencode-config.git
+	url = git@github.com:riatzukiza/Joelhooks-opencode-config.git
 [submodule "orgs/shuv/json-formatter"]
 	path = orgs/shuv/json-formatter
-	url = git@github.com:shuv1337/json-formatter.git
+	url = git@github.com:riatzukiza/json-formatter.git
 [submodule "orgs/shuv/juno-code"]
 	path = orgs/shuv/juno-code
-	url = git@github.com:shuv1337/juno-code.git
+	url = git@github.com:riatzukiza/juno-code.git
 [submodule "orgs/shuv/kapture"]
 	path = orgs/shuv/kapture
-	url = git@github.com:shuv1337/kapture.git
+	url = git@github.com:riatzukiza/kapture.git
 [submodule "orgs/shuv/LLM-API-Key-Proxy"]
 	path = orgs/shuv/LLM-API-Key-Proxy
-	url = git@github.com:shuv1337/LLM-API-Key-Proxy.git
+	url = git@github.com:riatzukiza/LLM-API-Key-Proxy.git
 [submodule "orgs/shuv/llm-cmd"]
 	path = orgs/shuv/llm-cmd
-	url = git@github.com:shuv1337/llm-cmd.git
+	url = git@github.com:riatzukiza/llm-cmd.git
 [submodule "orgs/shuv/llm-coding-tools"]
 	path = orgs/shuv/llm-coding-tools
-	url = git@github.com:shuv1337/llm-coding-tools.git
+	url = git@github.com:riatzukiza/llm-coding-tools.git
 [submodule "orgs/shuv/llm-council"]
 	path = orgs/shuv/llm-council
-	url = git@github.com:shuv1337/llm-council.git
+	url = git@github.com:riatzukiza/llm-council.git
 [submodule "orgs/shuv/llm-rust"]
 	path = orgs/shuv/llm-rust
-	url = git@github.com:shuv1337/llm-rust.git
+	url = git@github.com:riatzukiza/llm-rust.git
 [submodule "orgs/shuv/Lunar"]
 	path = orgs/shuv/Lunar
-	url = git@github.com:shuv1337/Lunar.git
+	url = git@github.com:riatzukiza/Lunar.git
 [submodule "orgs/shuv/mackup"]
 	path = orgs/shuv/mackup
-	url = git@github.com:shuv1337/mackup.git
+	url = git@github.com:riatzukiza/mackup.git
 [submodule "orgs/shuv/maple"]
 	path = orgs/shuv/maple
-	url = git@github.com:shuv1337/maple.git
+	url = git@github.com:riatzukiza/maple.git
 [submodule "orgs/shuv/mastra"]
 	path = orgs/shuv/mastra
-	url = git@github.com:shuv1337/mastra.git
+	url = git@github.com:riatzukiza/mastra.git
 [submodule "orgs/shuv/mcporter"]
 	path = orgs/shuv/mcporter
-	url = git@github.com:shuv1337/mcporter.git
+	url = git@github.com:riatzukiza/mcporter.git
 [submodule "orgs/shuv/mediaserver"]
 	path = orgs/shuv/mediaserver
-	url = git@github.com:shuv1337/mediaserver.git
+	url = git@github.com:riatzukiza/mediaserver.git
 [submodule "orgs/shuv/memos"]
 	path = orgs/shuv/memos
-	url = git@github.com:shuv1337/memos.git
+	url = git@github.com:riatzukiza/memos.git
 [submodule "orgs/shuv/middleman"]
 	path = orgs/shuv/middleman
-	url = git@github.com:shuv1337/middleman.git
+	url = git@github.com:riatzukiza/middleman.git
 [submodule "orgs/shuv/models.dev"]
 	path = orgs/shuv/models.dev
-	url = git@github.com:shuv1337/models.dev.git
+	url = git@github.com:riatzukiza/models.dev.git
 [submodule "orgs/shuv/mrmd"]
 	path = orgs/shuv/mrmd
-	url = git@github.com:shuv1337/mrmd.git
+	url = git@github.com:riatzukiza/mrmd.git
 [submodule "orgs/shuv/nightowl"]
 	path = orgs/shuv/nightowl
-	url = git@github.com:shuv1337/nightowl.git
+	url = git@github.com:riatzukiza/nightowl.git
 [submodule "orgs/shuv/O365-InvestigationTooling"]
 	path = orgs/shuv/O365-InvestigationTooling
-	url = git@github.com:shuv1337/O365-InvestigationTooling.git
+	url = git@github.com:riatzukiza/O365-InvestigationTooling.git
 [submodule "orgs/shuv/oc-manager"]
 	path = orgs/shuv/oc-manager
-	url = git@github.com:shuv1337/oc-manager.git
+	url = git@github.com:riatzukiza/oc-manager.git
 [submodule "orgs/shuv/oc-web"]
 	path = orgs/shuv/oc-web
-	url = git@github.com:shuv1337/oc-web.git
+	url = git@github.com:riatzukiza/oc-web.git
 [submodule "orgs/shuv/OCLoop"]
 	path = orgs/shuv/OCLoop
-	url = git@github.com:shuv1337/OCLoop.git
+	url = git@github.com:riatzukiza/OCLoop.git
 [submodule "orgs/shuv/ocmonitor-share"]
 	path = orgs/shuv/ocmonitor-share
-	url = git@github.com:shuv1337/ocmonitor-share.git
+	url = git@github.com:riatzukiza/ocmonitor-share.git
 [submodule "orgs/shuv/oh-my-pi"]
 	path = orgs/shuv/oh-my-pi
-	url = git@github.com:shuv1337/oh-my-pi.git
+	url = git@github.com:riatzukiza/oh-my-pi.git
 [submodule "orgs/shuv/omarchy-dotfiles"]
 	path = orgs/shuv/omarchy-dotfiles
-	url = git@github.com:shuv1337/omarchy-dotfiles.git
+	url = git@github.com:riatzukiza/omarchy-dotfiles.git
 [submodule "orgs/shuv/once"]
 	path = orgs/shuv/once
-	url = git@github.com:shuv1337/once.git
+	url = git@github.com:riatzukiza/once.git
 [submodule "orgs/shuv/openchamber"]
 	path = orgs/shuv/openchamber
-	url = git@github.com:shuv1337/openchamber.git
+	url = git@github.com:riatzukiza/openchamber.git
 [submodule "orgs/shuv/opencode-anthropic-auth"]
 	path = orgs/shuv/opencode-anthropic-auth
-	url = git@github.com:shuv1337/opencode-anthropic-auth.git
+	url = git@github.com:riatzukiza/opencode-anthropic-auth.git
 [submodule "orgs/shuv/opencode-cursor"]
 	path = orgs/shuv/opencode-cursor
-	url = git@github.com:shuv1337/opencode-cursor.git
+	url = git@github.com:riatzukiza/opencode-cursor.git
 [submodule "orgs/shuv/Opencode-Extensions-TUI"]
 	path = orgs/shuv/Opencode-Extensions-TUI
-	url = git@github.com:shuv1337/Opencode-Extensions-TUI.git
+	url = git@github.com:riatzukiza/Opencode-Extensions-TUI.git
 [submodule "orgs/shuv/opencode-openai-codex-auth"]
 	path = orgs/shuv/opencode-openai-codex-auth
 	url = git@github.com:shuv1337/opencode-openai-codex-auth.git
 [submodule "orgs/shuv/Opencode-Workflows"]
 	path = orgs/shuv/Opencode-Workflows
-	url = git@github.com:shuv1337/Opencode-Workflows.git
+	url = git@github.com:riatzukiza/Opencode-Workflows.git
 [submodule "orgs/shuv/opencode.cafe"]
 	path = orgs/shuv/opencode.cafe
-	url = git@github.com:shuv1337/opencode.cafe.git
+	url = git@github.com:riatzukiza/opencode.cafe.git
 [submodule "orgs/shuv/openmux"]
 	path = orgs/shuv/openmux
-	url = git@github.com:shuv1337/openmux.git
+	url = git@github.com:riatzukiza/openmux.git
 [submodule "orgs/shuv/openplanner"]
 	path = orgs/shuv/openplanner
-	url = git@github.com:shuv1337/openplanner.git
+	url = git@github.com:riatzukiza/openplanner.git
 [submodule "orgs/shuv/openralph"]
 	path = orgs/shuv/openralph
-	url = git@github.com:shuv1337/openralph.git
+	url = git@github.com:riatzukiza/openralph.git
 [submodule "orgs/shuv/openshuvussy"]
 	path = orgs/shuv/openshuvussy
-	url = git@github.com:shuv1337/openshuvussy.git
+	url = git@github.com:riatzukiza/shuv1337-openshuvussy.git
 [submodule "orgs/shuv/opentui"]
 	path = orgs/shuv/opentui
-	url = git@github.com:shuv1337/opentui.git
+	url = git@github.com:riatzukiza/shuv1337-opentui.git
 [submodule "orgs/shuv/openwork"]
 	path = orgs/shuv/openwork
-	url = git@github.com:shuv1337/openwork.git
+	url = git@github.com:riatzukiza/openwork.git
 [submodule "orgs/shuv/orangeshell"]
 	path = orgs/shuv/orangeshell
-	url = git@github.com:shuv1337/orangeshell.git
+	url = git@github.com:riatzukiza/orangeshell.git
 [submodule "orgs/shuv/penpot"]
 	path = orgs/shuv/penpot
-	url = git@github.com:shuv1337/penpot.git
+	url = git@github.com:riatzukiza/penpot.git
 [submodule "orgs/shuv/pi-agent-router"]
 	path = orgs/shuv/pi-agent-router
-	url = git@github.com:shuv1337/pi-agent-router.git
+	url = git@github.com:riatzukiza/pi-agent-router.git
 [submodule "orgs/shuv/pi-autoresearch-plus"]
 	path = orgs/shuv/pi-autoresearch-plus
-	url = git@github.com:shuv1337/pi-autoresearch-plus.git
+	url = git@github.com:riatzukiza/pi-autoresearch-plus.git
 [submodule "orgs/shuv/pi-generative-ui"]
 	path = orgs/shuv/pi-generative-ui
-	url = git@github.com:shuv1337/pi-generative-ui.git
+	url = git@github.com:riatzukiza/pi-generative-ui.git
 [submodule "orgs/shuv/pi-interactive-shell"]
 	path = orgs/shuv/pi-interactive-shell
-	url = git@github.com:shuv1337/pi-interactive-shell.git
+	url = git@github.com:riatzukiza/pi-interactive-shell.git
 [submodule "orgs/shuv/pi-interactive-subagents"]
 	path = orgs/shuv/pi-interactive-subagents
-	url = git@github.com:shuv1337/pi-interactive-subagents.git
+	url = git@github.com:riatzukiza/pi-interactive-subagents.git
 [submodule "orgs/shuv/pi-mcp-adapter"]
 	path = orgs/shuv/pi-mcp-adapter
-	url = git@github.com:shuv1337/pi-mcp-adapter.git
+	url = git@github.com:riatzukiza/pi-mcp-adapter.git
 [submodule "orgs/shuv/pi-mobile"]
 	path = orgs/shuv/pi-mobile
-	url = git@github.com:shuv1337/pi-mobile.git
+	url = git@github.com:riatzukiza/pi-mobile.git
 [submodule "orgs/shuv/pi-prompt-suggester"]
 	path = orgs/shuv/pi-prompt-suggester
-	url = git@github.com:shuv1337/pi-prompt-suggester.git
+	url = git@github.com:riatzukiza/pi-prompt-suggester.git
 [submodule "orgs/shuv/pi-subagents"]
 	path = orgs/shuv/pi-subagents
-	url = git@github.com:shuv1337/pi-subagents.git
+	url = git@github.com:riatzukiza/pi-subagents.git
 [submodule "orgs/shuv/pi-subagents-codex"]
 	path = orgs/shuv/pi-subagents-codex
-	url = git@github.com:shuv1337/pi-subagents-codex.git
+	url = git@github.com:riatzukiza/pi-subagents-codex.git
 [submodule "orgs/shuv/plymouth-themes"]
 	path = orgs/shuv/plymouth-themes
-	url = git@github.com:shuv1337/plymouth-themes.git
+	url = git@github.com:riatzukiza/plymouth-themes.git
 [submodule "orgs/shuv/prise"]
 	path = orgs/shuv/prise
-	url = git@github.com:shuv1337/prise.git
+	url = git@github.com:riatzukiza/prise.git
 [submodule "orgs/shuv/proxx"]
 	path = orgs/shuv/proxx
-	url = git@github.com:shuv1337/proxx.git
+	url = git@github.com:riatzukiza/proxx.git
 [submodule "orgs/shuv/PSGumshoe"]
 	path = orgs/shuv/PSGumshoe
-	url = git@github.com:shuv1337/PSGumshoe.git
+	url = git@github.com:riatzukiza/PSGumshoe.git
 [submodule "orgs/shuv/pull"]
 	path = orgs/shuv/pull
-	url = git@github.com:shuv1337/pull.git
+	url = git@github.com:riatzukiza/pull.git
 [submodule "orgs/shuv/pymazda"]
 	path = orgs/shuv/pymazda
-	url = git@github.com:shuv1337/pymazda.git
+	url = git@github.com:riatzukiza/pymazda.git
 [submodule "orgs/shuv/ralph-tui"]
 	path = orgs/shuv/ralph-tui
-	url = git@github.com:shuv1337/ralph-tui.git
+	url = git@github.com:riatzukiza/ralph-tui.git
 [submodule "orgs/shuv/ralphkando"]
 	path = orgs/shuv/ralphkando
-	url = git@github.com:shuv1337/ralphkando.git
+	url = git@github.com:riatzukiza/ralphkando.git
 [submodule "orgs/shuv/remodex"]
 	path = orgs/shuv/remodex
-	url = git@github.com:shuv1337/remodex.git
+	url = git@github.com:riatzukiza/remodex.git
 [submodule "orgs/shuv/research_canvas"]
 	path = orgs/shuv/research_canvas
-	url = git@github.com:shuv1337/research_canvas.git
+	url = git@github.com:riatzukiza/research_canvas.git
 [submodule "orgs/shuv/RocketPoSh"]
 	path = orgs/shuv/RocketPoSh
-	url = git@github.com:shuv1337/RocketPoSh.git
+	url = git@github.com:riatzukiza/RocketPoSh.git
 [submodule "orgs/shuv/rssy"]
 	path = orgs/shuv/rssy
-	url = git@github.com:shuv1337/rssy.git
+	url = git@github.com:riatzukiza/rssy.git
 [submodule "orgs/shuv/shibboleth"]
 	path = orgs/shuv/shibboleth
-	url = git@github.com:shuv1337/shibboleth.git
+	url = git@github.com:riatzukiza/shibboleth.git
 [submodule "orgs/shuv/shitter"]
 	path = orgs/shuv/shitter
-	url = git@github.com:shuv1337/shitter.git
+	url = git@github.com:riatzukiza/shitter.git
 [submodule "orgs/shuv/shot-scraper"]
 	path = orgs/shuv/shot-scraper
-	url = git@github.com:shuv1337/shot-scraper.git
+	url = git@github.com:riatzukiza/shot-scraper.git
 [submodule "orgs/shuv/shuv-pi"]
 	path = orgs/shuv/shuv-pi
-	url = git@github.com:shuv1337/shuv-pi.git
+	url = git@github.com:riatzukiza/shuv-pi.git
 [submodule "orgs/shuv/shuv1337"]
 	path = orgs/shuv/shuv1337
-	url = git@github.com:shuv1337/shuv1337.git
+	url = git@github.com:riatzukiza/shuv1337.git
 [submodule "orgs/shuv/shuvascii"]
 	path = orgs/shuv/shuvascii
-	url = git@github.com:shuv1337/shuvascii.git
+	url = git@github.com:riatzukiza/shuvascii.git
 [submodule "orgs/shuv/shuvban"]
 	path = orgs/shuv/shuvban
-	url = git@github.com:shuv1337/shuvban.git
+	url = git@github.com:riatzukiza/shuvban.git
 [submodule "orgs/shuv/shuvbot"]
 	path = orgs/shuv/shuvbot
-	url = git@github.com:shuv1337/shuvbot.git
+	url = git@github.com:riatzukiza/shuvbot.git
 [submodule "orgs/shuv/shuvcode"]
 	path = orgs/shuv/shuvcode
-	url = git@github.com:shuv1337/shuvcode.git
+	url = git@github.com:riatzukiza/shuv1337-shuvcode.git
 [submodule "orgs/shuv/shuvcode.nvim"]
 	path = orgs/shuv/shuvcode.nvim
-	url = git@github.com:shuv1337/shuvcode.nvim.git
+	url = git@github.com:riatzukiza/shuvcode.nvim.git
 [submodule "orgs/shuv/shuvdex"]
 	path = orgs/shuv/shuvdex
-	url = git@github.com:shuv1337/shuvdex.git
+	url = git@github.com:riatzukiza/shuvdex.git
 [submodule "orgs/shuv/shuvgeist"]
 	path = orgs/shuv/shuvgeist
-	url = git@github.com:shuv1337/shuvgeist.git
+	url = git@github.com:riatzukiza/shuvgeist.git
 [submodule "orgs/shuv/shuvmaki"]
 	path = orgs/shuv/shuvmaki
-	url = git@github.com:shuv1337/shuvmaki.git
+	url = git@github.com:riatzukiza/shuvmaki.git
 [submodule "orgs/shuv/shuvoice"]
 	path = orgs/shuv/shuvoice
-	url = git@github.com:shuv1337/shuvoice.git
+	url = git@github.com:riatzukiza/shuvoice.git
 [submodule "orgs/shuv/shuvoncho"]
 	path = orgs/shuv/shuvoncho
-	url = git@github.com:shuv1337/shuvoncho.git
+	url = git@github.com:riatzukiza/shuvoncho.git
 [submodule "orgs/shuv/shuvputer"]
 	path = orgs/shuv/shuvputer
-	url = git@github.com:shuv1337/shuvputer.git
+	url = git@github.com:riatzukiza/shuvputer.git
 [submodule "orgs/shuv/shuvscode"]
 	path = orgs/shuv/shuvscode
-	url = git@github.com:shuv1337/shuvscode.git
+	url = git@github.com:riatzukiza/shuvscode.git
 [submodule "orgs/shuv/SmartTube"]
 	path = orgs/shuv/SmartTube
-	url = git@github.com:shuv1337/SmartTube.git
+	url = git@github.com:riatzukiza/SmartTube.git
 [submodule "orgs/shuv/Speed-Test"]
 	path = orgs/shuv/Speed-Test
-	url = git@github.com:shuv1337/Speed-Test.git
+	url = git@github.com:riatzukiza/Speed-Test.git
 [submodule "orgs/shuv/ST3GG"]
 	path = orgs/shuv/ST3GG
-	url = git@github.com:shuv1337/ST3GG.git
+	url = git@github.com:riatzukiza/ST3GG.git
 [submodule "orgs/shuv/superset"]
 	path = orgs/shuv/superset
-	url = git@github.com:shuv1337/superset.git
+	url = git@github.com:riatzukiza/superset.git
 [submodule "orgs/shuv/surf-cli"]
 	path = orgs/shuv/surf-cli
-	url = git@github.com:shuv1337/surf-cli.git
+	url = git@github.com:riatzukiza/surf-cli.git
 [submodule "orgs/shuv/tailcode"]
 	path = orgs/shuv/tailcode
-	url = git@github.com:shuv1337/tailcode.git
+	url = git@github.com:riatzukiza/tailcode.git
 [submodule "orgs/shuv/takopi"]
 	path = orgs/shuv/takopi
-	url = git@github.com:shuv1337/takopi.git
+	url = git@github.com:riatzukiza/takopi.git
 [submodule "orgs/shuv/tinyhands"]
 	path = orgs/shuv/tinyhands
-	url = git@github.com:shuv1337/tinyhands.git
+	url = git@github.com:riatzukiza/tinyhands.git
 [submodule "orgs/shuv/toad"]
 	path = orgs/shuv/toad
-	url = git@github.com:shuv1337/toad.git
+	url = git@github.com:riatzukiza/toad.git
 [submodule "orgs/shuv/tome"]
 	path = orgs/shuv/tome
-	url = git@github.com:shuv1337/tome.git
+	url = git@github.com:riatzukiza/tome.git
 [submodule "orgs/shuv/topussy"]
 	path = orgs/shuv/topussy
-	url = git@github.com:shuv1337/topussy.git
+	url = git@github.com:riatzukiza/topussy.git
 [submodule "orgs/shuv/tuidoscope"]
 	path = orgs/shuv/tuidoscope
-	url = git@github.com:shuv1337/tuidoscope.git
+	url = git@github.com:riatzukiza/tuidoscope.git
 [submodule "orgs/shuv/ui"]
 	path = orgs/shuv/ui
-	url = git@github.com:shuv1337/ui.git
+	url = git@github.com:riatzukiza/ui.git
 [submodule "orgs/shuv/UltimateFightARR"]
 	path = orgs/shuv/UltimateFightARR
-	url = git@github.com:shuv1337/UltimateFightARR.git
+	url = git@github.com:riatzukiza/UltimateFightARR.git
 [submodule "orgs/shuv/uptime-kuma"]
 	path = orgs/shuv/uptime-kuma
-	url = git@github.com:shuv1337/uptime-kuma.git
+	url = git@github.com:riatzukiza/uptime-kuma.git
 [submodule "orgs/shuv/Uptime-Kuma-Web-API"]
 	path = orgs/shuv/Uptime-Kuma-Web-API
-	url = git@github.com:shuv1337/Uptime-Kuma-Web-API.git
+	url = git@github.com:riatzukiza/Uptime-Kuma-Web-API.git
 [submodule "orgs/shuv/ussyrouter"]
 	path = orgs/shuv/ussyrouter
-	url = git@github.com:shuv1337/ussyrouter.git
+	url = git@github.com:riatzukiza/ussyrouter.git
 [submodule "orgs/shuv/uxx"]
 	path = orgs/shuv/uxx
-	url = git@github.com:shuv1337/uxx.git
+	url = git@github.com:riatzukiza/uxx.git
 [submodule "orgs/shuv/vote-manipulator"]
 	path = orgs/shuv/vote-manipulator
-	url = git@github.com:shuv1337/vote-manipulator.git
+	url = git@github.com:riatzukiza/vote-manipulator.git
 [submodule "orgs/shuv/waha-tui"]
 	path = orgs/shuv/waha-tui
 	url = git@github.com:shuv1337/waha-tui.git
 [submodule "orgs/shuv/whisper-overlay"]
 	path = orgs/shuv/whisper-overlay
-	url = git@github.com:shuv1337/whisper-overlay.git
+	url = git@github.com:riatzukiza/whisper-overlay.git
 [submodule "orgs/shuv/winutil"]
 	path = orgs/shuv/winutil
-	url = git@github.com:shuv1337/winutil.git
+	url = git@github.com:riatzukiza/winutil.git
 [submodule "orgs/shuv/zed"]
 	path = orgs/shuv/zed
-	url = git@github.com:shuv1337/zed.git
+	url = git@github.com:riatzukiza/zed.git
