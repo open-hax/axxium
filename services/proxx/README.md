@@ -25,7 +25,13 @@ cd /home/err/devel/services/proxx
 cp .env.example .env   # optional
 cp keys.example.json keys.json
 cp models.example.json models.json
-docker compose -f docker-compose.yml -f docker-compose.factory-auth.override.yml up --build -d
+
+# Production-like container (pm2 + built dist/):
+docker compose --profile prod -f docker-compose.yml -f docker-compose.factory-auth.override.yml up --build -d
+
+# OR bind-mounted dev container (debounced restarts on src/web changes):
+# docker compose --profile dev -f docker-compose.yml -f docker-compose.factory-auth.override.yml up --build -d
+
 docker compose ps
 docker compose logs -f
 ```
