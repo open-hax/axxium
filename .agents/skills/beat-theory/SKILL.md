@@ -1,6 +1,6 @@
 ---
 name: beat-theory
-description: Use @tonaljs/tonal and teoria to resolve music theory queries: scales, chords, intervals, progressions.
+description: "Use @tonaljs/tonal and teoria to resolve music theory queries: scales, chords, intervals, progressions."
 ---
 
 # Skill: beat-theory
