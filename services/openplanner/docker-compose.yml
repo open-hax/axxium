@@ -159,6 +159,8 @@ services:
         condition: service_healthy
       mongo-init:
         condition: service_completed_successfully
+      knoxx-redis:
+        condition: service_healthy
     ports:
     - 127.0.0.1:${OPENPLANNER_PORT:-7777}:7777
     environment:
@@ -188,6 +190,10 @@ services:
       EMBED_PROVIDER_BATCH_WINDOW_MS: ${EMBED_PROVIDER_BATCH_WINDOW_MS:-5}
       EMBED_PROVIDER_MAX_BATCH_ITEMS: ${EMBED_PROVIDER_MAX_BATCH_ITEMS:-32}
       EMBED_PROVIDER_CACHE_PATH: ${EMBED_PROVIDER_CACHE_PATH:-/app/openplanner-lake/cache/embed-provider-cache.jsonl}
+      OPENPLANNER_SOURCE_ROOT: ${OPENPLANNER_SOURCE_ROOT:-/app/workspace}
+      OPENPLANNER_HYDRATION_REDIS_URL: ${OPENPLANNER_HYDRATION_REDIS_URL:-redis://knoxx-redis:6379}
+      OPENPLANNER_HYDRATION_LMDB_PATH: ${OPENPLANNER_HYDRATION_LMDB_PATH:-/app/openplanner-lake/cache/source-hydration-lmdb}
+      OPENPLANNER_HYDRATION_CACHE_TTL_MS: ${OPENPLANNER_HYDRATION_CACHE_TTL_MS:-18000000}
       # Vexx is optional (behind the container-vexx profile). Leaving this unset
       # keeps /v1/health green when Vexx isn't running.
       VEXX_BASE_URL: ${VEXX_BASE_URL:-}
@@ -199,6 +205,7 @@ services:
       VEXX_TIMEOUT_MS: ${VEXX_TIMEOUT_MS:-30000}
     volumes:
     - ./openplanner-lake:/app/openplanner-lake
+    - ${WORKSPACE_PATH:-../../..}:/app/workspace:ro
     - ../../orgs/open-hax/openplanner/dist:/app/dist:ro
     - ../../orgs/open-hax/openplanner/node_modules:/app/node_modules:ro
     extra_hosts:
@@ -216,6 +223,7 @@ services:
     restart: unless-stopped
     networks:
       default: {}
+      knoxx-internal: {}
       ai-infra:
         aliases:
         - openplanner
