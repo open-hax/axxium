@@ -330,6 +330,45 @@ db.getSiblingDB("openplanner").runCommand({
 })'
 ```
 
+### Embedding Provider 404 (model not found)
+
+If you see errors like:
+
+```
+Embed provider failed: 404 Not Found
+... model "qwen3-embedding:0.6b" not found, try pulling it first
+```
+
+that means the Proxx embedding upstream (default: Ollama) does not have the embedding model pulled.
+
+**Fix (recommended): route embeddings through llama.cpp instead of Ollama**
+
+1) Start the llama.cpp embedding server (joins the shared `ai-infra` network):
+
+```bash
+cd /home/err/devel/services/llamacpp-stack
+docker compose up -d llamacpp-embed
+```
+
+2) Tell OpenPlanner to request embeddings via the `llamacpp-embed` provider (Proxx will normalize `:` → `-` for llama.cpp):
+
+```bash
+cd /home/err/devel/services/openplanner
+
+# one-shot override (or put these in your env file)
+EMBED_PROVIDER_MODEL='llamacpp-embed:qwen3-embedding:0.6b' \
+EMBED_PROVIDER_COMPACT_MODEL='llamacpp-embed:qwen3-embedding:0.6b' \
+docker compose up -d openplanner
+```
+
+3) Verify:
+
+```bash
+curl -fsS http://localhost:7777/v1/health
+```
+
+If you prefer the Ollama path, you can instead pull the missing model into the Ollama instance Proxx is pointing at.
+
 ### graph-weaver Crash Loop
 
 **Common causes**:
