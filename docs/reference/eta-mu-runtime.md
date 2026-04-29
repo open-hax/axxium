@@ -24,9 +24,11 @@ This document exists so a human can say:
 | Runtime state (per extension) | `~/.ημ/state/<extension>/` |
 | **Devel build/cache target** (shorthand) | `devel/@.ημ/` |
 | Devel build/cache/state contents | `devel/@.ημ/{.build,.shadow-cljs,state,shadow-cljs.edn}` |
-| Pi deployed extension runtime | `~/.pi/agent/extensions/cljs-<extension>/{index.ts,runtime.js}` |
+| Shared compiled runtime bundle | `…/packages/eta-mu-extensions/dist/runtime/<extension>.cjs` |
+| Pi extension target wrapper | `…/packages/eta-mu-extensions/dist/pi/cljs-<extension>/index.ts` |
+| OpenCode plugin target wrapper | `…/packages/eta-mu-extensions/dist/opencode/<extension>.mjs` |
 | Pi extension enablement list | `~/.pi/agent/settings.json` → `extensions` |
-| OpenCode plugin outputs | `~/.config/opencode/plugins/<extension>.*` |
+| OpenCode plugin enablement list | `~/.config/opencode/opencode.jsonc` → `plugin` |
 
 Devel convention:
 - `devel/@.ημ/` is the **place we want generated artifacts** (build cache + compiled outputs + state) to live.
@@ -40,7 +42,7 @@ Given an extension name like `session-mycology`, `receipt-river`, or `opmf-contr
    - open `…/packages/eta-mu-extensions/manifest.edn`
    - locate `{:name "X" … :path "…"}`
    - edit that CLJS file (usually under `src/eta_mu/extensions/`)
-2. Rebuild and redeploy compiled runtimes:
+2. Rebuild, materialize package-root targets, and sync host config:
 
 ```bash
 pnpm -C devel/orgs/open-hax/eta-mu/packages/eta-mu-extensions run build
@@ -53,9 +55,11 @@ pnpm -C devel/orgs/open-hax/eta-mu/packages/eta-mu-extensions run clean
 pnpm -C devel/orgs/open-hax/eta-mu/packages/eta-mu-extensions run build
 ```
 
-3. Reload Pi so the new runtime is actually used (restart Pi, or `/reload` if supported).
-4. Validate the deployed output exists at:
-   - `~/.pi/agent/extensions/cljs-X/runtime.js`
+3. Reload Pi/OpenCode so the new runtime is actually used (restart, or `/reload` if supported).
+4. Validate the package-root targets exist at:
+   - `…/packages/eta-mu-extensions/dist/runtime/X.cjs`
+   - `…/packages/eta-mu-extensions/dist/pi/cljs-X/index.ts`
+   - `…/packages/eta-mu-extensions/dist/opencode/X.mjs`
 5. If the bug is state-related, inspect:
    - `~/.ημ/state/X/`
 
@@ -69,8 +73,9 @@ If behavior looks “haunted”, check both roots.
 
 ## Don’t edit generated outputs
 
-- Do **not** hand-edit `~/.pi/agent/extensions/cljs-*/runtime.js` — it is generated.
-- Do **not** commit `.build/` or `shadow-cljs.edn` from `eta-mu-extensions` — they’re generated.
+- Do **not** hand-edit `dist/runtime/*.cjs`, `dist/pi/**`, or `dist/opencode/*.mjs` — they are generated.
+- Do **not** copy generated runtimes into `~/.pi/agent/extensions` or `~/.config/opencode/plugins`; host configs should point at package-root targets.
+- Do **not** commit `.build/`, `dist/`, `target/`, or generated `shadow-cljs.edn` from `eta-mu-extensions`.
 
 ## Common extensions
 
