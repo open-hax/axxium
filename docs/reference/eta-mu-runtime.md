@@ -75,6 +75,7 @@ If behavior looks “haunted”, check both roots.
 
 - Do **not** hand-edit `dist/runtime/*.cjs`, `dist/pi/**`, or `dist/opencode/*.mjs` — they are generated.
 - Do **not** copy generated runtimes into `~/.pi/agent/extensions` or `~/.config/opencode/plugins`; host configs should point at package-root targets.
+- If duplicate-tool conflicts mention old `~/.pi/agent/extensions/cljs-*` paths, rerun the eta-mu build; it removes managed legacy host copies after writing package-root targets.
 - Do **not** commit `.build/`, `dist/`, `target/`, or generated `shadow-cljs.edn` from `eta-mu-extensions`.
 
 ## Common extensions
