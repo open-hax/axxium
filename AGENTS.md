@@ -38,3 +38,8 @@ When the user says things like:
 Interpret that as working in the `orgs/open-hax/eta-mu/packages/eta-mu-extensions` build/deploy system.
 
 Reference: `docs/reference/eta-mu-runtime.md` (paths, build steps, and what “extension X” maps to).
+EOFEOF
+EOFEOF
+
+## Knoxx
+Knoxx is located at `orgs/open-hax/openplanner/packages/agents/knoxx`. It is a central and highly important part of the workspace.
