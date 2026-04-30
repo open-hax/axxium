@@ -1,20 +1,20 @@
 ---
 name: list-voices
-description: "Retrieve and list available voices from the Voxx gateway, with optional legacy ElevenLabs direct mode."
+description: "Retrieve voices and TTS postprocess profiles from the Voxx gateway, with optional legacy ElevenLabs direct mode."
 license: GPL-3.0-or-later
 compatibility: opencode
 metadata:
   audience: agents
   workflow: audio-production
-  version: 2
+  version: 3
 ---
 
 # Skill: list-voices
 
 ## Purpose
-Query the local Voxx gateway for provider-agnostic voice IDs, names, categories, labels, and OpenAI-compatible voice shape.
+Query the local Voxx gateway for provider-agnostic voice IDs, names, categories, labels, OpenAI-compatible voice shape, and available TTS postprocess profiles.
 
-Voxx fronts Kokoro, MeloTTS, ElevenLabs, and fallback engines behind one API, so prefer Voxx voice IDs unless you explicitly need a direct provider operation.
+Voxx fronts Kokoro, Xiaomi MiMo, Requesty/OpenAI-compatible remotes, MeloTTS, and fallback engines behind one API, so prefer Voxx voice IDs unless you explicitly need a direct provider operation.
 
 ## Dependencies
 - `curl`, `jq`
@@ -26,6 +26,7 @@ Voxx fronts Kokoro, MeloTTS, ElevenLabs, and fallback engines behind one API, so
 .agents/skills/list-voices/agent-list-voices.sh
 .agents/skills/list-voices/agent-list-voices.sh --filter bright
 .agents/skills/list-voices/agent-list-voices.sh --openai
+.agents/skills/list-voices/agent-list-voices.sh --postprocess-profiles
 .agents/skills/list-voices/agent-list-voices.sh --json
 ```
 
@@ -35,9 +36,19 @@ ELEVENLABS_API_KEY=... .agents/skills/list-voices/agent-list-voices.sh --legacy-
 ```
 
 ## Voxx endpoints
-- `GET /v1/voices` — ElevenLabs-compatible catalog shape
+- `GET /v1/voices` — Voxx provider-agnostic catalog shape
 - `GET /v1/voices/openai` — OpenAI-style voice list
 - `GET /v1/voices/{voice_id}/settings` — voice settings
+- `GET /v1/audio/postprocess-profiles` — final mastering profile IDs, descriptions, and aliases
+
+## Postprocess profiles
+Use these IDs or aliases with `voice-tts` request options:
+
+- `sports-commentator-v1` (`sports`, `commentator`)
+- `broadcast-warm-v1` (`broadcast`, `warm`)
+- `narrator-polish-v1` (`narrator`, `polish`)
+- `crisp-radio-v1` (`radio`, `crisp`)
+- `soft-studio-v1` (`soft`, `studio`)
 
 ## Skill chain
-→ precedes: `elevenlabs-tts`, `voice-tts`
+→ precedes: `voice-tts`

@@ -35,6 +35,8 @@ services:
       OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-ash}
       TTS_POSTPROCESS_ENABLED: ${TTS_POSTPROCESS_ENABLED:-1}
       TTS_POSTPROCESS_PROFILE: ${TTS_POSTPROCESS_PROFILE:-sports-commentator-v1}
+      TTS_PROMPT_AWARE_DEFAULT: ${TTS_PROMPT_AWARE_DEFAULT:-0}
+      TTS_PROMPT_AWARE_STYLE: ${TTS_PROMPT_AWARE_STYLE:-Prompt-aware performance mode is enabled. Interpret bracketed or XML-like tags such as [excited], [whisper], [laugh], [pause], [dramatic], or <break time="500ms" /> as voice performance directions. Do not speak the tags themselves.}
     ports:
       - "${VOXX_BIND_HOST:-127.0.0.1}:${VOXX_PORT:-8787}:8788"
     volumes:

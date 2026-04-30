@@ -31,14 +31,26 @@ Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BAS
 
 Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with its English spaCy model installed at build time. MeloTTS is still optional: if `melo` is selected without the Python package present, Voxx returns 503 or falls through to the next backend.
 
-Voxx also now carries a backend-agnostic sports-commentator postprocess profile by default, so any provider voice can be pushed toward the same high-energy broadcast texture:
+Voxx carries backend-agnostic postprocess profiles by default, so any provider voice can be pushed toward a consistent mastered texture:
 
 ```bash
 TTS_POSTPROCESS_ENABLED=1
 TTS_POSTPROCESS_PROFILE=sports-commentator-v1
 ```
 
-Disable it with `TTS_POSTPROCESS_ENABLED=0` if you want the raw upstream voice back.
+Profiles can also be selected per request, without restarting the stack:
+
+```bash
+curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess_profile=radio&prompt_aware=1' \
+  -H "Authorization: Bearer ${VOICE_GATEWAY_API_KEY:-dev-token}" \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"kokoro","voice":"alloy","input":"[excited] Local Voxx is alive!","response_format":"mp3"}' \
+  --output /tmp/voxx-radio.mp3
+```
+
+Available profile aliases: `sports`, `broadcast`, `narrator`, `radio`, `soft`; list the full catalog at `GET /v1/audio/postprocess-profiles`. Disable final mastering globally with `TTS_POSTPROCESS_ENABLED=0` or per request with `?postprocess=off`.
+
+Prompt-aware performance is opt-in by default. Enable per request with `?prompt_aware=1` or JSON `"prompt_aware": true`; Voxx then asks prompt-capable backends to treat tags like `[excited]`, `[whisper]`, `[pause]`, or `<break time="500ms" />` as performance directions rather than spoken text. Local Kokoro/Melo/eSpeak do not guarantee tag interpretation.
 
 If port `8788` is busy:
 ```bash
