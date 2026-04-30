@@ -1,5 +1,10 @@
 FROM hwdsl2/kokoro-server
 
-RUN /opt/venv/bin/python -m spacy download en_core_web_sm
+ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
+
+RUN /opt/venv/bin/pip install --no-cache-dir --force-reinstall \
+      --index-url "${PYTORCH_CUDA_INDEX_URL}" \
+      torch \
+    && /opt/venv/bin/python -m spacy download en_core_web_sm
 
 USER nobody:nogroup

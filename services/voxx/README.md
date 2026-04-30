@@ -29,7 +29,7 @@ docker compose up --build -d
 
 Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BASE_URL` and `XAIOMI_MIMO_API_KEY` so existing local env files keep working while callers migrate to `XIAOMI_*`.
 
-Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with its English spaCy model installed at build time. MeloTTS is still optional: if `melo` is selected without the Python package present, Voxx returns 503 or falls through to the next backend.
+Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with CUDA-enabled PyTorch (`torch+cu128`) and its English spaCy model installed at build time. MeloTTS is still optional: if `melo` is selected without the Python package present, Voxx returns 503 or falls through to the next backend.
 
 The compose runtime requests NVIDIA GPU access for Voxx/Kokoro and pins both containers to host CPUs `2-21` by default (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. It also enables a conservative Voxx TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
 
