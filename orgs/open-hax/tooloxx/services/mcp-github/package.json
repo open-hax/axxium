@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/mcp-github",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/main.ts",
+    "start": "REDACTED_SECRET dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm run build && REDACTED_SECRET --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "@workspace/hermes": "workspace:*",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/REDACTED_SECRET": "^20.14.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.5"
+  }
+}

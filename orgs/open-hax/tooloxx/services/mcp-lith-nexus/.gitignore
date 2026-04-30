@@ -1,0 +1,3 @@
+dist/
+REDACTED_SECRET_modules/
+*.tsbuildinfo

@@ -12,7 +12,7 @@ export default {
     ts: 'module',
   },
   REDACTED_SECRETArguments: [
-    '--loader=tsx',
+    '--import=tsx',
     '--no-warnings',
   ],
   timeout: '2m',
