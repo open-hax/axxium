@@ -3,10 +3,12 @@
 Canonical source: `../../orgs/open-hax/voxx`
 
 This directory is the workspace-local home for runtime/devops material for `voxx`:
-- Compose stack
-- compose-only Dockerfile
+- canonical runtime Compose stack (`compose.yaml`)
+- Kokoro sidecar Dockerfile (`Dockerfile.kokoro`)
 - env example
 - persistent runtime volume managed by Compose
+
+The Voxx application image Dockerfile is not duplicated here. `compose.yaml` builds it from the source package at `../../orgs/open-hax/voxx/Dockerfile.compose`.
 
 ## Local compose
 ```bash
@@ -29,7 +31,9 @@ docker compose up --build -d
 
 Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BASE_URL` and `XAIOMI_MIMO_API_KEY` so existing local env files keep working while callers migrate to `XIAOMI_*`.
 
-Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with CUDA-enabled PyTorch (`torch+cu128`) and its English spaCy model installed at build time. MeloTTS is still optional: if `melo` is selected without the Python package present, Voxx returns 503 or falls through to the next backend.
+Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with CUDA-enabled PyTorch (`torch+cu128`) and its English spaCy model installed at build time.
+
+MeloTTS runs inside the Voxx application container. The source `Dockerfile.compose` installs Python 3.11, CPU PyTorch/Torchaudio, MeloTTS from GitHub, UniDic, and NLTK assets needed by `melo.api.TTS`. Melo is local and queue-protected by Voxx, so it is a good fallback when remote/free providers are unavailable.
 
 The compose runtime requests NVIDIA GPU access for Voxx/Kokoro and pins both containers to host CPUs `2-21` by default (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. It also enables a conservative Voxx TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
 
@@ -51,6 +55,20 @@ curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess_profile=radio&pr
 ```
 
 Available profile aliases: `sports`, `broadcast`, `narrator`, `radio`, `soft`; list the full catalog at `GET /v1/audio/postprocess-profiles`. Disable final mastering globally with `TTS_POSTPROCESS_ENABLED=0` or per request with `?postprocess=off`.
+
+To force Melo for a single validation run without changing callers:
+
+```bash
+cd /home/err/devel/services/voxx
+VOICE_GATEWAY_TTS_BACKEND_ORDER=melo docker compose up -d --no-build voxx
+curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess=off' \
+  -H "Authorization: Bearer ${VOICE_GATEWAY_API_KEY:-dev-token}" \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"kokoro","voice":"alloy","input":"Melo local fallback check.","response_format":"mp3"}' \
+  --output /tmp/voxx-melo.mp3
+# restore stable local order afterward
+VOICE_GATEWAY_TTS_BACKEND_ORDER=kokoro,melo,espeak docker compose up -d --no-build voxx
+```
 
 Prompt-aware performance is opt-in by default. Enable per request with `?prompt_aware=1` or JSON `"prompt_aware": true`; Voxx then asks prompt-capable backends to treat tags like `[excited]`, `[whisper]`, `[pause]`, or `<break time="500ms" />` as performance directions rather than spoken text. Local Kokoro/Melo/eSpeak do not guarantee tag interpretation.
 
