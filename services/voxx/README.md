@@ -17,13 +17,13 @@ curl http://127.0.0.1:8787/healthz
 
 The compose default now binds Voxx to loopback (`127.0.0.1`) so it can sit behind a reverse proxy without exposing a raw public port. Override with `VOXX_BIND_HOST=0.0.0.0` only when you explicitly want direct network exposure.
 
-For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The local default is Xiaomi MiMo, Kokoro, MeloTTS, then eSpeak; ElevenLabs is intentionally excluded from the default order.
+For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The local default is Kokoro, MeloTTS, then eSpeak. Agents should strongly prefer this local Voxx + Kokoro path and only opt into remote providers when explicitly required.
 
 ```bash
 cd /home/err/devel/services/voxx
 XIAOMI_MIMO_API_BASE_URL=https://api.xiaomimimo.com/v1 \
 XIAOMI_MIMO_API_KEY=... \
-VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak \
+VOICE_GATEWAY_TTS_BACKEND_ORDER=kokoro,xiaomi_mimo,melo,espeak \
 docker compose up --build -d
 ```
 
