@@ -14,7 +14,7 @@ metadata:
 ## Purpose
 Query the local Voxx gateway for provider-agnostic voice IDs, names, categories, labels, OpenAI-compatible voice shape, and available TTS postprocess profiles.
 
-Voxx fronts Kokoro, Xiaomi MiMo, Requesty/OpenAI-compatible remotes, MeloTTS, and fallback engines behind one API, so prefer Voxx voice IDs unless you explicitly need a direct provider operation.
+Voxx fronts Kokoro, Xiaomi MiMo, Requesty/OpenAI-compatible remotes, MeloTTS, and fallback engines behind one API, so prefer Voxx voice IDs unless you explicitly need a direct provider operation. If a remote provider is quota-limited or returns auth/status-code errors, keep using Voxx and configure local fallbacks after it (for example `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak`) rather than changing agent prompts or bypassing Voxx.
 
 ## Dependencies
 - `curl`, `jq`

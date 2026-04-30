@@ -17,19 +17,21 @@ curl http://127.0.0.1:8787/healthz
 
 The compose default now binds Voxx to loopback (`127.0.0.1`) so it can sit behind a reverse proxy without exposing a raw public port. Override with `VOXX_BIND_HOST=0.0.0.0` only when you explicitly want direct network exposure.
 
-For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The local default is Kokoro, MeloTTS, then eSpeak. Agents should strongly prefer this local Voxx + Kokoro path and only opt into remote providers when explicitly required.
+For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The local default is Kokoro, MeloTTS, then eSpeak. If you opt into a remote/free provider such as Xiaomi MiMo, keep local providers after it so quota, auth, status-code, or outage failures degrade to Kokoro/Melo/eSpeak instead of requiring prompt edits.
 
 ```bash
 cd /home/err/devel/services/voxx
 XIAOMI_MIMO_API_BASE_URL=https://api.xiaomimimo.com/v1 \
 XIAOMI_MIMO_API_KEY=... \
-VOICE_GATEWAY_TTS_BACKEND_ORDER=kokoro,xiaomi_mimo,melo,espeak \
+VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak \
 docker compose up --build -d
 ```
 
 Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BASE_URL` and `XAIOMI_MIMO_API_KEY` so existing local env files keep working while callers migrate to `XIAOMI_*`.
 
 Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with its English spaCy model installed at build time. MeloTTS is still optional: if `melo` is selected without the Python package present, Voxx returns 503 or falls through to the next backend.
+
+The compose runtime requests NVIDIA GPU access for Voxx/Kokoro and pins both containers to host CPUs `2-21` by default (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. It also enables a conservative Voxx TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
 
 Voxx carries backend-agnostic postprocess profiles by default, so any provider voice can be pushed toward a consistent mastered texture:
 
@@ -51,6 +53,8 @@ curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess_profile=radio&pr
 Available profile aliases: `sports`, `broadcast`, `narrator`, `radio`, `soft`; list the full catalog at `GET /v1/audio/postprocess-profiles`. Disable final mastering globally with `TTS_POSTPROCESS_ENABLED=0` or per request with `?postprocess=off`.
 
 Prompt-aware performance is opt-in by default. Enable per request with `?prompt_aware=1` or JSON `"prompt_aware": true`; Voxx then asks prompt-capable backends to treat tags like `[excited]`, `[whisper]`, `[pause]`, or `<break time="500ms" />` as performance directions rather than spoken text. Local Kokoro/Melo/eSpeak do not guarantee tag interpretation.
+
+If a request hits provider status-code failures such as quota/rate limit/auth/5xx, do not rewrite prompts for a new provider. Keep the caller pointed at Voxx and set the runtime backend order with local fallbacks, e.g. `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak`.
 
 If port `8788` is busy:
 ```bash
