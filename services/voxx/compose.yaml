@@ -3,8 +3,8 @@ services:
     container_name: openhax-voxx
     image: ${VOXX_IMAGE:-openhax/voxx:compose}
     build:
-      context: ../..
-      dockerfile: services/voxx/Dockerfile.compose
+      context: ../../orgs/open-hax/voxx
+      dockerfile: Dockerfile.compose
     env_file:
       - .env.example
     environment:
