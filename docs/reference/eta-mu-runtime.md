@@ -27,7 +27,7 @@ This document exists so a human can say:
 | Shared compiled runtime bundle | `…/packages/eta-mu-extensions/dist/runtime/<extension>.cjs` |
 | Pi extension target wrapper | `…/packages/eta-mu-extensions/dist/pi/cljs-<extension>/index.ts` |
 | OpenCode plugin target wrapper | `…/packages/eta-mu-extensions/dist/opencode/<extension>.mjs` |
-| Pi extension enablement list | `~/.pi/agent/settings.json` → `extensions` |
+| Pi built-in extension list | `package.json` → `pi.extensions` (do not sync into host settings) |
 | OpenCode plugin enablement list | `~/.config/opencode/opencode.jsonc` → `plugin` |
 
 Devel convention:
@@ -42,7 +42,7 @@ Given an extension name like `session-mycology`, `receipt-river`, or `opmf-contr
    - open `…/packages/eta-mu-extensions/manifest.edn`
    - locate `{:name "X" … :path "…"}`
    - edit that CLJS file (usually under `src/eta_mu/extensions/`)
-2. Rebuild, materialize package-root targets, and sync host config:
+2. Rebuild and materialize package-root targets. Pi uses eta-mu's built-in package metadata, so this must not edit `~/.pi/agent/settings.json` or `~/.ημ/agent/settings.json`:
 
 ```bash
 pnpm -C devel/orgs/open-hax/eta-mu/packages/eta-mu-extensions run build
@@ -74,7 +74,7 @@ If behavior looks “haunted”, check both roots.
 ## Don’t edit generated outputs
 
 - Do **not** hand-edit `dist/runtime/*.cjs`, `dist/pi/**`, or `dist/opencode/*.mjs` — they are generated.
-- Do **not** copy generated runtimes into `~/.pi/agent/extensions` or `~/.config/opencode/plugins`; host configs should point at package-root targets.
+- Do **not** copy generated runtimes into `~/.pi/agent/extensions` or `~/.config/opencode/plugins`; OpenCode host config should point at package-root targets, while Pi uses built-in eta-mu package metadata.
 - If duplicate-tool conflicts mention old `~/.pi/agent/extensions/cljs-*` paths, rerun the eta-mu build; it removes managed legacy host copies after writing package-root targets.
 - Do **not** commit `.build/`, `dist/`, `target/`, or generated `shadow-cljs.edn` from `eta-mu-extensions`.
 

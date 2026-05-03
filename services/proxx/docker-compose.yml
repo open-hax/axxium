@@ -51,6 +51,10 @@ services:
       PROXY_KEYS_FILE: /workspace/service-config/seeds/keys.json
       PROXY_MODELS_FILE: /workspace/service-config/models.json
       PROXY_REQUEST_LOGS_FILE: /app/data/request-logs.jsonl
+      PROXX_CLJS_RUNTIME_REQUIRED: "${PROXX_CLJS_RUNTIME_REQUIRED:-true}"
+      PROXX_CLJS_POLICY_SHADOW: "${PROXX_CLJS_POLICY_SHADOW:-true}"
+      PROXX_CLJS_POLICY_AUTHORITATIVE: "${PROXX_CLJS_POLICY_AUTHORITATIVE:-true}"
+      PROXX_CLJS_POLICY_MANIFEST: /etc/proxx/policies/runtime/00-manifest.edn
       PROXY_REQUEST_LOGS_MAX_ENTRIES: "${PROXY_REQUEST_LOGS_MAX_ENTRIES:-100000}"
       PROXY_REQUEST_LOGS_FLUSH_MS: "${PROXY_REQUEST_LOGS_FLUSH_MS:-1000}"
       PROXY_PROMPT_AFFINITY_FLUSH_MS: "${PROXY_PROMPT_AFFINITY_FLUSH_MS:-250}"
@@ -65,6 +69,17 @@ services:
       # Use the official OpenAI Platform API base URL for image generation (recommended).
       OPENAI_API_BASE_URL: "${OPENAI_API_BASE_URL:-https://api.openai.com}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      XIAOMI_PROVIDER_ID: "${XIAOMI_PROVIDER_ID:-xiaomi}"
+      MIMO_PROVIDER_ID: "${MIMO_PROVIDER_ID:-}"
+      XAIOMI_API_KEY: "${XAIOMI_API_KEY:-}"
+      XIaOMI_API_KEY: "${XIaOMI_API_KEY:-}"
+      XAIOMI_MIMO_API_KEY: "${XAIOMI_MIMO_API_KEY:-}"
+      XAIOMI_API_BASE_URL: "${XAIOMI_API_BASE_URL:-}"
+      XAIOMI_MIMO_API_BASE_URL: "${XAIOMI_MIMO_API_BASE_URL:-}"
+      XIAOMI_API_KEY: "${XIAOMI_API_KEY:-${MIMO_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+      MIMO_API_KEY: "${MIMO_API_KEY:-${XIAOMI_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+      XIAOMI_BASE_URL: "${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${MIMO_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}}}}"
+      MIMO_BASE_URL: "${MIMO_BASE_URL:-${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-}}}}}"
 
       # Where to send OpenAI image generation requests:
       # - platform: api.openai.com (Images API; requires Platform scopes for OAuth)
@@ -152,6 +167,7 @@ services:
       - ./models.json:/workspace/service-config/models.json:ro
       - ./seeds:/workspace/service-config/seeds:ro
       - ./data:/app/data
+      - ./policies:/etc/proxx/policies:ro
       - ./:/workspace/runtime-repo:ro
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
@@ -193,7 +209,7 @@ services:
       [
         "bash",
         "-lc",
-        "pnpm install --no-frozen-lockfile && pnpm add -g nodemon@3 && nodemon --delay 750ms --signal SIGTERM --watch src --watch web --watch package.json --ext ts,tsx,js,jsx,json --exec 'node --env-file-if-exists=.env --import tsx src/main.ts'",
+        "pnpm install --no-frozen-lockfile && pnpm add -g nodemon@3 && pnpm build:cljs && nodemon --delay 750ms --signal SIGTERM --watch src --watch web --watch package.json --ext ts,tsx,js,jsx,json,cljs,edn --exec \"pnpm build:cljs && node --env-file-if-exists=.env --import tsx src/main.ts\"",
       ]
     ports:
       - "0.0.0.0:${PROXY_PORT:-8789}:8789"
@@ -209,6 +225,10 @@ services:
       PROXY_KEYS_FILE: /workspace/service-config/seeds/keys.json
       PROXY_MODELS_FILE: /workspace/service-config/models.json
       PROXY_REQUEST_LOGS_FILE: /app/data/request-logs.jsonl
+      PROXX_CLJS_RUNTIME_REQUIRED: "${PROXX_CLJS_RUNTIME_REQUIRED:-true}"
+      PROXX_CLJS_POLICY_SHADOW: "${PROXX_CLJS_POLICY_SHADOW:-true}"
+      PROXX_CLJS_POLICY_AUTHORITATIVE: "${PROXX_CLJS_POLICY_AUTHORITATIVE:-true}"
+      PROXX_CLJS_POLICY_MANIFEST: /etc/proxx/policies/runtime/00-manifest.edn
       PROXY_REQUEST_LOGS_MAX_ENTRIES: "${PROXY_REQUEST_LOGS_MAX_ENTRIES:-100000}"
       PROXY_REQUEST_LOGS_FLUSH_MS: "${PROXY_REQUEST_LOGS_FLUSH_MS:-1000}"
       PROXY_PROMPT_AFFINITY_FLUSH_MS: "${PROXY_PROMPT_AFFINITY_FLUSH_MS:-250}"
@@ -222,6 +242,17 @@ services:
       OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://chatgpt.com/backend-api}"
       OPENAI_API_BASE_URL: "${OPENAI_API_BASE_URL:-https://api.openai.com}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      XIAOMI_PROVIDER_ID: "${XIAOMI_PROVIDER_ID:-xiaomi}"
+      MIMO_PROVIDER_ID: "${MIMO_PROVIDER_ID:-}"
+      XAIOMI_API_KEY: "${XAIOMI_API_KEY:-}"
+      XIaOMI_API_KEY: "${XIaOMI_API_KEY:-}"
+      XAIOMI_MIMO_API_KEY: "${XAIOMI_MIMO_API_KEY:-}"
+      XAIOMI_API_BASE_URL: "${XAIOMI_API_BASE_URL:-}"
+      XAIOMI_MIMO_API_BASE_URL: "${XAIOMI_MIMO_API_BASE_URL:-}"
+      XIAOMI_API_KEY: "${XIAOMI_API_KEY:-${MIMO_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+      MIMO_API_KEY: "${MIMO_API_KEY:-${XIAOMI_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+      XIAOMI_BASE_URL: "${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${MIMO_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}}}}"
+      MIMO_BASE_URL: "${MIMO_BASE_URL:-${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-}}}}}"
       OPENAI_IMAGES_UPSTREAM_MODE: "${OPENAI_IMAGES_UPSTREAM_MODE:-auto}"
       OPENAI_OAUTH_CLIENT_ID: "${OPENAI_OAUTH_CLIENT_ID:-app_EMoamEEZ73f0CkXaXp7hrann}"
       OPENAI_OAUTH_CLIENT_SECRET: "${OPENAI_OAUTH_CLIENT_SECRET:-}"
@@ -297,6 +328,7 @@ services:
       - ./models.json:/workspace/service-config/models.json:ro
       - ./seeds:/workspace/service-config/seeds:ro
       - ./data:/app/data
+      - ./policies:/etc/proxx/policies:ro
       - ./:/workspace/runtime-repo:ro
       - /var/run/docker.sock:/var/run/docker.sock
     stop_signal: SIGTERM

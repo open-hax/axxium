@@ -65,6 +65,8 @@ If you do not need Factory auth mounts, omit the override file.
 
 If you want z.ai/GLM routing in the local compose stack, set `ZAI_API_KEY` (or `ZHIPU_API_KEY`) in `services/proxx/.env` before `docker compose up`; `docker-compose.yml` passes those vars through to the running proxy container.
 
+Pricing override commandment: if token pricing is missing/incorrect for a model (for example open-weights models like `gemma4:31b`), overrides must be added as EDN policy contracts under `services/proxx/policies/runtime/15-model-pricing-overrides.edn`. Do not add pricing override JSON files and do not hard-code one-off token prices in TypeScript.
+
 Optional factory-auth secret mounts live in `docker-compose.factory-auth.override.yml`; include that file only when you have the matching host paths/env vars.
 
 ## Host fleet dashboard

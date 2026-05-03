@@ -1,5 +1,26 @@
 # Π handoff (continuation)
 
+- time: 2026-05-03T03:14:33Z
+- branch: pi/fork-tax/2026-04-15-170411
+
+## Summary
+- Captured large workspace snapshot (skills, docs, services, audio/creative artifacts) into git staging.
+- Secret hygiene before Π commit:
+  - removed junk staged files (`$LOG_FILE` and two empty "Please stop..." sentinel files)
+  - restored accidental `packages/beat-agent/src/index.js` corruption (ImageMagick PostScript output)
+  - unstaged runtime/page-dump artifacts that tripped detect-secrets (`@.ημ/state/output-contract-gate/runs/**`, Twitch/page dumps)
+  - redacted Discord bot token in `packages/beat-agent/trigger_drop.js` (now env-driven)
+- Recorded best-effort submodule dirt inventory (not resolved/pushed in this Π step).
+
+## Artifacts
+- status snapshot: `.ημ/Π_STATUS_2026-05-03_031433.txt`
+- submodule snapshot: `.ημ/Π_SUBMODULE_RECURSION_2026-05-03_031433.md`
+
+## Verification
+- skipped: workspace lint/typecheck/test would be non-minimal for this snapshot; rerun targeted checks later.
+
+---
+
 - time: 2026-04-26T18:44:15Z
 - branch: pi/fork-tax/2026-04-15-170411
 

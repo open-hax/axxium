@@ -1,5 +1,6 @@
 import MidiWriter from 'midi-writer-js';
-import { Midi } from '@tonejs/midi';
+import pkg from '@tonejs/midi';
+const { Midi } = pkg;
 import fs from 'fs';
 
 export function writeClipsToMidi(clips, outPath) {

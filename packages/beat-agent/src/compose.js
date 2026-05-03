@@ -1,7 +1,7 @@
-import scribble from 'scribbletune';
+import * as scribble from 'scribbletune';
 import { Scale, Chord } from '@tonaljs/tonal';
 
-export function drumClip({ pattern = 'x-x-x-x-', instrument = 36, sclip = {} } = {}) {
+export function drumClip({ pattern = 'x-x-x-x-', instrument = 'C2', sclip = {} } = {}) {
   return scribble.clip({ notes: [instrument], pattern, ...sclip });
 }
 

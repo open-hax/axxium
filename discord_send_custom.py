@@ -1,3 +1,4 @@
+
 import discord
 import asyncio
 import os
@@ -7,11 +8,17 @@ TOKEN = os.environ.get('DISCORD_BOT_TOKEN')
 
 async def main():
     if len(sys.argv) < 3:
-        print('Usage: python3 discord_send_custom.py <channel_id> "<message>"')
+        print('Usage: python3 discord_send_custom.py <channel_id> "<message>" [file_path]')
         return
 
-    channel_id = int(sys.argv[1])
+    try:
+        channel_id = int(sys.argv[1])
+    except ValueError:
+        print('Invalid channel ID')
+        return
+        
     message_text = sys.argv[2]
+    file_path = sys.argv[3] if len(sys.argv) > 3 else None
     
     intents = discord.Intents.default()
     client = discord.Client(intents=intents)
@@ -23,8 +30,13 @@ async def main():
         print(f'Logged in as {client.user}')
         channel = client.get_channel(channel_id)
         if channel:
-            await channel.send(message_text)
-            print(f'Sent: {message_text}')
+            if file_path and os.path.exists(file_path):
+                with open(file_path, 'rb') as f:
+                    await channel.send(message_text, file=discord.File(f))
+                print(f'Sent: {message_text} with file {file_path}')
+            else:
+                await channel.send(message_text)
+                print(f'Sent: {message_text}')
         else:
             print('Channel not found')
         ready_future.set_result(True)
@@ -36,5 +48,5 @@ async def main():
     finally:
         await client.close()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())

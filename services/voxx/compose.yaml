@@ -1,10 +1,10 @@
 services:
   voxx:
     container_name: openhax-voxx
-    image: ${VOXX_IMAGE:-openhax/voxx:compose}
+    image: ${VOXX_IMAGE:-openhax/voxx-clj:compose}
     build:
-      context: ../../orgs/open-hax/voxx
-      dockerfile: Dockerfile.compose
+      context: ../../orgs/open-hax/voxx-clj
+      dockerfile: Dockerfile
     env_file:
       - .env.example
     environment:
@@ -12,7 +12,7 @@ services:
       VOICE_GATEWAY_DATA_DIR: /app/data
       VOICE_GATEWAY_HOST: 0.0.0.0
       VOICE_GATEWAY_PORT: 8788
-      VOICE_GATEWAY_TTS_BACKEND_ORDER: ${VOICE_GATEWAY_TTS_BACKEND_ORDER:-kokoro,melo,espeak}
+      VOICE_GATEWAY_TTS_BACKEND_ORDER: ${VOICE_GATEWAY_TTS_BACKEND_ORDER:-xiaomi_mimo,kokoro,espeak}
       VOICE_GATEWAY_TTS_REMOTE_TIMEOUT_SECONDS: ${VOICE_GATEWAY_TTS_REMOTE_TIMEOUT_SECONDS:-45}
       XIAOMI_MIMO_API_BASE_URL: ${XIAOMI_MIMO_API_BASE_URL:-}
       XIAOMI_MIMO_API_KEY: ${XIAOMI_MIMO_API_KEY:-}
@@ -35,11 +35,12 @@ services:
       OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-ash}
       TTS_POSTPROCESS_ENABLED: ${TTS_POSTPROCESS_ENABLED:-1}
       TTS_POSTPROCESS_PROFILE: ${TTS_POSTPROCESS_PROFILE:-sports-commentator-v1}
-      TTS_PROMPT_AWARE_DEFAULT: ${TTS_PROMPT_AWARE_DEFAULT:-0}
-      TTS_PROMPT_AWARE_STYLE: ${TTS_PROMPT_AWARE_STYLE:-Prompt-aware performance mode is enabled. Interpret bracketed or XML-like tags such as [excited], [whisper], [laugh], [pause], [dramatic], or <break time="500ms" /> as voice performance directions. Do not speak the tags themselves.}
+      TTS_PROMPT_AWARE_DEFAULT: ${TTS_PROMPT_AWARE_DEFAULT:-1}
+      TTS_PROMPT_AWARE_STYLE: ${TTS_PROMPT_AWARE_STYLE:-Prompt-aware performance mode is enabled. Voxx consumes bracketed or XML-like tags such as [excited], [whisper], [laugh], [pause], [dramatic], [sing], [stretch], [glitch], [suture], or <break time="500ms" /> as voice postprocessing directions. Do not speak the tags themselves.}
       TTS_QUEUE_MAX_CONCURRENT: ${TTS_QUEUE_MAX_CONCURRENT:-1}
       TTS_QUEUE_MAX_PENDING: ${TTS_QUEUE_MAX_PENDING:-32}
       TTS_QUEUE_TIMEOUT_SECONDS: ${TTS_QUEUE_TIMEOUT_SECONDS:-120}
+      VOICE_GATEWAY_STT_ENABLED: ${VOICE_GATEWAY_STT_ENABLED:-0}
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
     ports:
@@ -50,13 +51,7 @@ services:
       - voxx-data:/app/data
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import json, urllib.request; data = json.load(urllib.request.urlopen('http://127.0.0.1:8788/healthz')); assert data['ok'] is True and data['service'] == 'voxx'",
-        ]
+      test: ["CMD", "curl", "-f", "http://localhost:8788/healthz"]
       interval: 30s
       timeout: 5s
       retries: 5

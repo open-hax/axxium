@@ -19,13 +19,13 @@ curl http://127.0.0.1:8787/healthz
 
 The compose default now binds Voxx to loopback (`127.0.0.1`) so it can sit behind a reverse proxy without exposing a raw public port. Override with `VOXX_BIND_HOST=0.0.0.0` only when you explicitly want direct network exposure.
 
-For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The local default is Kokoro, MeloTTS, then eSpeak. If you opt into a remote/free provider such as Xiaomi MiMo, keep local providers after it so quota, auth, status-code, or outage failures degrade to Kokoro/Melo/eSpeak instead of requiring prompt edits.
+For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The current runtime default is Xiaomi MiMo first, Kokoro as the one local voice fallback, then eSpeak as the last-resort tiny fallback. MeloTTS is installed in the Voxx image for explicit tests, but is not in the default provider order because its warm system-memory footprint is larger than Kokoro's on this host.
 
 ```bash
 cd /home/err/devel/services/voxx
 XIAOMI_MIMO_API_BASE_URL=https://api.xiaomimimo.com/v1 \
 XIAOMI_MIMO_API_KEY=... \
-VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak \
+VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak \
 docker compose up --build -d
 ```
 
@@ -33,7 +33,9 @@ Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BAS
 
 Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with CUDA-enabled PyTorch (`torch+cu128`) and its English spaCy model installed at build time.
 
-MeloTTS runs inside the Voxx application container. The source `Dockerfile.compose` installs Python 3.11, CPU PyTorch/Torchaudio, MeloTTS from GitHub, UniDic, and NLTK assets needed by `melo.api.TTS`. Melo is local and queue-protected by Voxx, so it is a good fallback when remote/free providers are unavailable.
+MeloTTS runs inside the Voxx application container when explicitly selected with `VOICE_GATEWAY_TTS_BACKEND_ORDER=melo`. The source `Dockerfile.compose` installs Python 3.11, CPU PyTorch/Torchaudio, MeloTTS from GitHub, UniDic, and NLTK assets needed by `melo.api.TTS`, but Melo is intentionally not part of the default local fallback path.
+
+Voxx STT/Whisper is gated off by default with `VOICE_GATEWAY_STT_ENABLED=0`. Use the host Knoxx NPU STT service on `http://127.0.0.1:8010` for transcription. Set `VOICE_GATEWAY_STT_ENABLED=1` only for an explicit local Voxx STT test.
 
 The compose runtime requests NVIDIA GPU access for Voxx/Kokoro and pins both containers to host CPUs `2-21` by default (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. It also enables a conservative Voxx TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
 
@@ -54,7 +56,7 @@ curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess_profile=radio&pr
   --output /tmp/voxx-radio.mp3
 ```
 
-Available profile aliases: `sports`, `broadcast`, `narrator`, `radio`, `soft`; list the full catalog at `GET /v1/audio/postprocess-profiles`. Disable final mastering globally with `TTS_POSTPROCESS_ENABLED=0` or per request with `?postprocess=off`.
+Available profile aliases: `sports`, `broadcast`, `narrator`, `radio`, `soft`, and the opt-in expressive `sutured` / `autotune` profile; list the full catalog at `GET /v1/audio/postprocess-profiles`. Disable final mastering globally with `TTS_POSTPROCESS_ENABLED=0` or per request with `?postprocess=off`.
 
 To force Melo for a single validation run without changing callers:
 
@@ -67,12 +69,12 @@ curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess=off' \
   --data '{"model":"kokoro","voice":"alloy","input":"Melo local fallback check.","response_format":"mp3"}' \
   --output /tmp/voxx-melo.mp3
 # restore stable local order afterward
-VOICE_GATEWAY_TTS_BACKEND_ORDER=kokoro,melo,espeak docker compose up -d --no-build voxx
+VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak docker compose up -d --no-build voxx
 ```
 
-Prompt-aware performance is opt-in by default. Enable per request with `?prompt_aware=1` or JSON `"prompt_aware": true`; Voxx then asks prompt-capable backends to treat tags like `[excited]`, `[whisper]`, `[pause]`, or `<break time="500ms" />` as performance directions rather than spoken text. Local Kokoro/Melo/eSpeak do not guarantee tag interpretation.
+Prompt-aware performance is enabled by default in the current Voxx source and can be set per request with `?prompt_aware=1` / JSON `"prompt_aware": true` or disabled with `prompt_aware=false`. Voxx consumes tags like `[excited]`, `[whisper]`, `[pause]`, `[dramatic]`, `[sing]`, `[stretch]`, `[glitch]`, `[suture]`, `[laugh]`, or `<break time="500ms" />` itself: the backend receives clean segment text, then Voxx stitches segments together with tag-driven inflection filters, explicit silence for pause/break tags, a short nonverbal laugh effect, and the final postprocess/mastering profile. Musical tags emit `performance_directive` logs with pitch/tempo ratios and contour labels under the request `render_id`.
 
-If a request hits provider status-code failures such as quota/rate limit/auth/5xx, do not rewrite prompts for a new provider. Keep the caller pointed at Voxx and set the runtime backend order with local fallbacks, e.g. `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,melo,espeak`.
+If a request hits provider status-code failures such as quota/rate limit/auth/5xx, do not rewrite prompts for a new provider. Keep the caller pointed at Voxx and set the runtime backend order with the one local voice fallback, e.g. `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak`.
 
 If port `8788` is busy:
 ```bash

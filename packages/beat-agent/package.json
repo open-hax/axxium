@@ -5,16 +5,16 @@
   "description": "Agent-friendly beat-making toolkit for Node.js + Discord",
   "main": "src/index.js",
   "dependencies": {
-    "scribbletune": "*",
-    "midi-writer-js": "*",
-    "@tonejs/midi": "*",
-    "@tonaljs/tonal": "*",
-    "teoria": "*",
-    "fluent-ffmpeg": "*",
-    "node-wav": "*",
-    "soundfont-player": "*",
-    "jzz": "*",
     "@discordjs/voice": "*",
-    "discord.js": "*"
+    "@tonaljs/tonal": "^4.10.0",
+    "@tonejs/midi": "*",
+    "discord.js": "*",
+    "fluent-ffmpeg": "*",
+    "jzz": "*",
+    "midi-writer-js": "^3.2.1",
+    "node-wav": "*",
+    "scribbletune": "^5.5.5",
+    "soundfont-player": "*",
+    "teoria": "*"
   }
 }

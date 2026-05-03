@@ -43,9 +43,11 @@ MONGODB_URI="mongodb://${MONGODB_ROOT_USERNAME}:${MONGODB_ROOT_PASSWORD}@mongodb
 APP_USER="${OPENPLANNER_MONGO_APP_USERNAME:-openplanner}"
 APP_PASSWORD="${OPENPLANNER_MONGO_APP_PASSWORD:-change-me-openplanner-password}"
 APP_DB="${MONGODB_DB:-openplanner}"
+DEV_DB="${OPENPLANNER_DEV_MONGODB_DB:-openplanner_dev}"
 
 echo "=== Atlas Local Initialization ==="
 echo "Database: ${APP_DB}"
+echo "Dev Database: ${DEV_DB}"
 echo "App User: ${APP_USER}"
 
 # Wait for MongoDB to be ready
@@ -62,14 +64,30 @@ echo "[2/5] Ensuring app user exists..."
 mongosh_retry '
 var appDb = db.getSiblingDB("'"${APP_DB}"'");
 var existingUsers = appDb.getUsers();
+var desiredRoles = [{role: "readWrite", db: "'"${APP_DB}"'"}];
+if ("'"${DEV_DB}"'" !== "'"${APP_DB}"'") {
+  desiredRoles.push({role: "readWrite", db: "'"${DEV_DB}"'"});
+}
 if (existingUsers.users.length === 0) {
   appDb.createUser({
     user: "'"${APP_USER}"'",
     pwd: "'"${APP_PASSWORD}"'",
-    roles: [{role: "readWrite", db: "'"${APP_DB}"'"}]
+    roles: desiredRoles
   });
   print("      Created app user: '"${APP_USER}"'");
 } else {
+  var user = appDb.getUser("'"${APP_USER}"'");
+  if (user) {
+    desiredRoles.forEach(function(role) {
+      var hasRole = user.roles.some(function(existing) {
+        return existing.role === role.role && existing.db === role.db;
+      });
+      if (!hasRole) {
+        appDb.grantRolesToUser("'"${APP_USER}"'", [role]);
+        print("      Granted " + role.role + " on " + role.db + " to '"${APP_USER}"'");
+      }
+    });
+  }
   print("      App user already exists: '"${APP_USER}"'");
 }
 '

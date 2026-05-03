@@ -418,15 +418,22 @@ curl -X POST http://localhost:7777/v1/jobs/seed-layout \
   -d '{"targetRadius": 5000}'
 ```
 
-## Profiles
+## Compose Files and Profiles
+
+`docker-compose.yml` is a small include/root file. Service definitions live in `compose/*.yml`; see `README.md` and `compose/README.md` for the fragment map.
 
 | Profile | Services | Use Case |
 |---------|----------|----------|
-| (none) | mongodb, mongot, openplanner, proxx | Core API only |
-| `dev` | + knoxx-frontend-dev (Vite) | Development with hot reload |
-| `graph` | + graph-weaver, eros-eris-field-app | Force-directed simulation (1 worker) |
-| `graph-20` | + graph-weaver, 20 shards | Force-directed simulation (20 workers) |
-| `knoxx` | + knoxx-backend, knoxx-frontend | Agent UI (production build) |
+| (none) | mongodb, mongot, mongo-init, openplanner, default workers | Main API; no prod profile required |
+| `dev` | openplanner-dev | Optional watch-mode backend on `${OPENPLANNER_DEV_PORT:-7778}` |
+| `bundled-proxx` | openplanner-proxx, openplanner-proxx-db | Isolated local embedding proxy |
+| `container-vexx` | vexx | Containerized Vexx |
+| `graph` | graph-weaver, semantic/field graph workers | Force-directed simulation (1 worker) |
+| `graph-2`, `graph-3`, `graph-20` | sharded graph workers | Parallel graph processing |
+| `jobs` | semantic-graph-builder | Optional background graph build job |
+| `legacy-translation-worker` | translation-worker | Legacy translation worker |
+
+There is intentionally no `prod`/`production` profile for the main OpenPlanner API.
 
 ## Health Check Commands
 

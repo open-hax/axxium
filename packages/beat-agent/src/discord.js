@@ -5,7 +5,7 @@ import {
 import fs from 'fs';
 
 export async function playInVoice({ client, guildId, channelId, audioPath }) {
-  const channel = client.channels.cache.get(channelId);
+  const channel = await client.channels.fetch(channelId);
   const connection = joinVoiceChannel({
     channelId, guildId,
     adapterCreator: channel.guild.voiceAdapterCreator,

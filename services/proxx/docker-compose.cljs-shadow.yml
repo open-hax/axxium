@@ -36,13 +36,18 @@ services:
       PROXX_CLJS_POLICY_AUTHORITATIVE: "true"
       PROXX_CLJS_RUNTIME_REQUIRED: "true"
       PROXX_CLJS_POLICY_MANIFEST: /etc/proxx/policies/runtime/00-manifest.edn
-      UPSTREAM_PROVIDER_BASE_URLS: "${CLJS_SHADOW_UPSTREAM_PROVIDER_BASE_URLS:-ollama-cloud=https://ollama.com,openai=https://chatgpt.com/backend-api,vivgrid=https://api.vivgrid.com,requesty=https://router.requesty.ai/v1,llamacpp=http://llamacpp-chat:8080,llamacpp-embed=http://llamacpp-embed:8081,xiaomi=${XIAOMI_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}}"
+      UPSTREAM_PROVIDER_BASE_URLS: "${CLJS_SHADOW_UPSTREAM_PROVIDER_BASE_URLS:-ollama-cloud=https://ollama.com,openai=https://chatgpt.com/backend-api,vivgrid=https://api.vivgrid.com,requesty=https://router.requesty.ai/v1,llamacpp=http://llamacpp-chat:8080,llamacpp-embed=http://llamacpp-embed:8081}"
       XIAOMI_PROVIDER_ID: "${XIAOMI_PROVIDER_ID:-xiaomi}"
       MIMO_PROVIDER_ID: "${MIMO_PROVIDER_ID:-}"
-      XIAOMI_BASE_URL: "${XIAOMI_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}"
-      MIMO_BASE_URL: "${MIMO_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-}}"
-      XIAOMI_API_KEY: "${XIAOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}"
-      MIMO_API_KEY: "${MIMO_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}"
+      XAIOMI_API_KEY: "${XAIOMI_API_KEY:-}"
+      XIaOMI_API_KEY: "${XIaOMI_API_KEY:-}"
+      XAIOMI_MIMO_API_KEY: "${XAIOMI_MIMO_API_KEY:-}"
+      XAIOMI_API_BASE_URL: "${XAIOMI_API_BASE_URL:-}"
+      XAIOMI_MIMO_API_BASE_URL: "${XAIOMI_MIMO_API_BASE_URL:-}"
+      XIAOMI_BASE_URL: "${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${MIMO_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}}}}"
+      MIMO_BASE_URL: "${MIMO_BASE_URL:-${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-}}}}}"
+      XIAOMI_API_KEY: "${XIAOMI_API_KEY:-${MIMO_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+      MIMO_API_KEY: "${MIMO_API_KEY:-${XIAOMI_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
       PROXY_REQUEST_LOGS_FILE: /app/data/request-logs.jsonl
       OTEL_SERVICE_NAME: proxx-cljs-shadow
       OTEL_RESOURCE_ATTRIBUTES: service.name=proxx-cljs-shadow

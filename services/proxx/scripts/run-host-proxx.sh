@@ -9,6 +9,13 @@ set -a
 . "$SERVICE_ROOT/.env"
 set +a
 
+# Canonicalize Xiaomi/MiMo env aliases from legacy spellings in services/proxx/.env.
+export XIAOMI_API_KEY="${XIAOMI_API_KEY:-${MIMO_API_KEY:-${XAIOMI_API_KEY:-${XIaOMI_API_KEY:-${XAIOMI_MIMO_API_KEY:-}}}}}"
+export MIMO_API_KEY="${MIMO_API_KEY:-${XIAOMI_API_KEY:-}}"
+export XIAOMI_BASE_URL="${XIAOMI_BASE_URL:-${XIAOMI_API_BASE_URL:-${MIMO_BASE_URL:-${XAIOMI_API_BASE_URL:-${XAIOMI_MIMO_API_BASE_URL:-https://api.xiaomimimo.com/v1}}}}}"
+export MIMO_BASE_URL="${MIMO_BASE_URL:-${XIAOMI_BASE_URL:-}}"
+export XIAOMI_PROVIDER_ID="${XIAOMI_PROVIDER_ID:-xiaomi}"
+
 export NODE_ENV="development"
 export PROXY_HOST="127.0.0.1"
 export PROXY_PORT="${PROXX_HOST_PROXY_PORT:-18789}"
