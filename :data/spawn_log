@@ -1,0 +1,4 @@
+# Spawn Log
+timestamp,role_spawned,contract_id
+2026-05-03T21:22:42Z,singer,session_vox-presence_20260503T2122
+{"timestamp": "2026-05-03T21:56:29Z", "role_spawned": "singer", "contract_id": "session_singer_20260503T2200"}
