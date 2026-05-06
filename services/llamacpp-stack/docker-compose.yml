@@ -9,23 +9,21 @@ services:
       CUDA_VISIBLE_DEVICES: "${CUDA_VISIBLE_DEVICES:-0}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
-    command:
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "8080"
-      - "--n-gpu-layers"
-      - "${LLAMACPP_N_GPU_LAYERS:-999}"
-      - "--ctx-size"
-      - "${LLAMACPP_CHAT_CTX_SIZE:-4096}"
-      - "--parallel"
-      - "${LLAMACPP_PARALLEL:-2}"
-      - "--model"
-      - "/models/${LLAMACPP_CHAT_MODEL:-google_gemma-4-E4B-it-Q4_K_M.gguf}"
-      - "--alias"
-      - "${LLAMACPP_CHAT_ALIAS:-gemma4-e4b}"
+      LLAMACPP_N_GPU_LAYERS: "${LLAMACPP_N_GPU_LAYERS:-999}"
+      LLAMACPP_CHAT_CTX_SIZE: "${LLAMACPP_CHAT_CTX_SIZE:-16384}"
+      LLAMACPP_PARALLEL: "${LLAMACPP_PARALLEL:-1}"
+      LLAMACPP_CHAT_MODEL: "${LLAMACPP_CHAT_MODEL:-google_gemma-4-E4B-it-Q4_K_M.gguf}"
+      LLAMACPP_CHAT_ALIAS: "${LLAMACPP_CHAT_ALIAS:-gemma4-e4b}"
+      LLAMACPP_CHAT_MMPROJ: "${LLAMACPP_CHAT_MMPROJ:-}"
+      LLAMACPP_CHAT_MMPROJ_OFFLOAD: "${LLAMACPP_CHAT_MMPROJ_OFFLOAD:-true}"
+      LLAMACPP_CHAT_BATCH_SIZE: "${LLAMACPP_CHAT_BATCH_SIZE:-256}"
+      LLAMACPP_CHAT_UBATCH_SIZE: "${LLAMACPP_CHAT_UBATCH_SIZE:-256}"
+      LLAMACPP_FLASH_ATTN: "${LLAMACPP_FLASH_ATTN:-false}"
+      LLAMACPP_CACHE_RAM: "${LLAMACPP_CACHE_RAM:-0}"
+    entrypoint: ["/bin/sh", "/opt/llamacpp-stack/run-chat-server.sh"]
     volumes:
       - ${LLAMACPP_MODELS_DIR:-./models}:/models:ro
+      - ./bin/run-chat-server.sh:/opt/llamacpp-stack/run-chat-server.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
       interval: 20s
