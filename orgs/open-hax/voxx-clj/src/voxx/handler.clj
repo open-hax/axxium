@@ -181,7 +181,7 @@
           response-format (audio/normalize-audio-format
                            (or (get payload :response_format)
                                (:default-audio-format (:settings service))))
-          speed (safe-float (get payload :speed) 1.0)
+          speed (safe-float (get payload :speed) (:tts-default-speed (:settings service)))
           language (str/trim (str (or (get payload :language) "")))
           tts-options (extract-tts-options request payload)
           result (svc/synthesize-openai service
@@ -205,7 +205,7 @@
           _ (when (str/blank? text)
               (throw (ex-info "Missing required field: text" {})))
           voice-settings (when (map? (get payload :voice_settings)) (get payload :voice_settings))
-          speed (safe-float (or (get voice-settings :speed) (get payload :speed)) 1.0)
+          speed (safe-float (or (get voice-settings :speed) (get payload :speed)) (:tts-default-speed (:settings service)))
           language (str/trim (str (or (get payload :language_code) (get payload :language) "")))
           params (:params request)
           output-format (audio/normalize-voice-output-format

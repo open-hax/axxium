@@ -48,4 +48,4 @@ Assumes neutral base MIDI 62 (D4). Computes per-region semitone offsets → Rubb
 
 ## Skill chain
 → precedes: `mix`
-← follows: `voice-tts` dry capture; prefer `--postprocess off` before pitch correction, then add Voxx profile mastering after tuning if needed. If a remote Voxx-backed provider returns quota/rate-limit/auth/status-code errors, keep the request behind Voxx and rely on local fallbacks (`kokoro,melo,espeak`) instead of changing prompts or issuing parallel retries.
+← follows: `voice-tts` dry capture; prefer `--postprocess off` before pitch correction, then add Voxx profile mastering after tuning if needed. Current dry spoken default is Kokoro `af_jessica` at speed `1.15`; override voice/speed only when the vocal plan requires it. If a remote Voxx-backed provider returns quota/rate-limit/auth/status-code errors, keep the request behind Voxx and rely on local fallbacks (`kokoro,espeak`) instead of changing prompts or issuing parallel retries.

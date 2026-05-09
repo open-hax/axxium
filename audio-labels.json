@@ -11,6 +11,9 @@
   "singularity_radio.mp3": [
     "monotone"
   ],
+  "./Audio/broadcasts/ForkTales_Vocal_Kokoro_Direct.mp3": [
+    "good_voice"
+  ],
   "errorcoded_singularity_hype.mp3": [
     "what"
   ],

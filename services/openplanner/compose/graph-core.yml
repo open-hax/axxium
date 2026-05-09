@@ -59,11 +59,15 @@ services:
       default: {}
       ai-infra: {}
   eros-eris-field-app:
+    profiles:
+    - graph-single
     image: node:22-bookworm
     cpus: 1.5
     cpuset: 2-21
-    ports:
-    - 127.0.0.1:${EROS_ERIS_HOST_PORT:-8786}:8786
+    # NOTE: do not publish a fixed host port if you want horizontal scaling.
+    # Scale this service with: docker compose up -d --scale eros-eris-field-app=<n>
+    expose:
+    - '8786'
     working_dir: /app/workspace/devel
     command: "bash -lc \"\n  set -euo pipefail\n  export HOME=/home/node\n  mkdir -p \\\"$$HOME/.local/bin\\\"\n  export PATH=\\\"$$HOME/.local/bin:$$PATH\\\"\n  corepack enable --install-directory \\\"$$HOME/.local/bin\\\"\n  pnpm -C orgs/open-hax/openplanner/packages/graph/eros-eris-field-app dev\n\""
     environment:
@@ -119,7 +123,8 @@ services:
       SEMANTIC_REPEL_RADIUS: ${EROS_ERIS_SEMANTIC_REPEL_RADIUS:-150}
       SEMANTIC_REST: ${EROS_ERIS_SEMANTIC_REST:-56}
       GRAPH_VIEW_COMPONENT_COUNT: ${EROS_ERIS_GRAPH_VIEW_COMPONENT_COUNT:-6}
-      SIM_SHARD_INDEX: ${EROS_ERIS_SIM_SHARD_INDEX:-0}
+      # Leave SIM_SHARD_INDEX unset so replicas can derive unique shard indexes
+      # from their container hostname (see eros-eris-field-app src/index.ts).
       SIM_SHARD_COUNT: ${EROS_ERIS_SIM_SHARD_COUNT:-1}
       GRAPH_VIEW_ROTATION_EVERY: ${EROS_ERIS_GRAPH_VIEW_ROTATION_EVERY:-2}
       TARGET_RADIUS: ${EROS_ERIS_TARGET_RADIUS:-5000}

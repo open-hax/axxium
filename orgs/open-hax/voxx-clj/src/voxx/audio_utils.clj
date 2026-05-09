@@ -124,3 +124,56 @@
               (try (Files/deleteIfExists src-path) (catch Exception _))
               (try (Files/deleteIfExists tgt-path) (catch Exception _))
               (try (Files/deleteIfExists temp-dir) (catch Exception _)))))))))
+
+(defn concatenate-audio-bytes
+  "Concatenate multiple audio byte segments into target-format using ffmpeg.
+   Each segment is a map with :bytes and :format. Returns the first segment when
+   there is only one segment, or the original first segment if ffmpeg is absent
+   or concatenation fails."
+  [segments & {:keys [target-format ffmpeg-bin]}]
+  (let [segments (vec (filter #(seq (:bytes %)) segments))
+        target-format (normalize-audio-format target-format)]
+    (cond
+      (empty? segments)
+      (byte-array 0)
+
+      (= 1 (count segments))
+      (convert-audio-bytes (:bytes (first segments))
+                           :source-format (:format (first segments))
+                           :target-format target-format
+                           :ffmpeg-bin ffmpeg-bin)
+
+      (str/blank? (str ffmpeg-bin))
+      (:bytes (first segments))
+
+      :else
+      (let [target-ext (get audio-format-extensions target-format ".mp3")
+            temp-dir (Files/createTempDirectory "voxx_concat_" (into-array java.nio.file.attribute.FileAttribute []))
+            out-path (.resolve temp-dir (str "output" target-ext))
+            input-paths (mapv (fn [idx {:keys [bytes format]}]
+                                (let [ext (get audio-format-extensions (normalize-audio-format format) ".mp3")
+                                      path (.resolve temp-dir (str "input_" idx ext))]
+                                  (Files/write path ^bytes bytes (into-array java.nio.file.OpenOption []))
+                                  path))
+                              (range)
+                              segments)
+            filter-complex (str (apply str (map-indexed (fn [idx _] (str "[" idx ":a]")) input-paths))
+                                "concat=n=" (count input-paths) ":v=0:a=1[out]")]
+        (try
+          (let [command (vec (concat [ffmpeg-bin "-y" "-loglevel" "error"]
+                                     (mapcat (fn [path] ["-i" (str path)]) input-paths)
+                                     ["-filter_complex" filter-complex
+                                      "-map" "[out]"
+                                      "-ar" "24000" "-ac" "1" (str out-path)]))
+                process (.start (ProcessBuilder. ^java.util.List command))
+                exit-code (.waitFor process)]
+            (if (and (= exit-code 0) (.exists ^File (.toFile out-path)))
+              (Files/readAllBytes out-path)
+              (:bytes (first segments))))
+          (catch Exception _
+            (:bytes (first segments)))
+          (finally
+            (doseq [path input-paths]
+              (try (Files/deleteIfExists path) (catch Exception _)))
+            (try (Files/deleteIfExists out-path) (catch Exception _))
+            (try (Files/deleteIfExists temp-dir) (catch Exception _))))))))

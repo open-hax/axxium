@@ -49,7 +49,7 @@
      :description "Neutral OpenAI-compatible default voice"
      :aliases ["rachel" "bella"]
      :labels {:accent "neutral" :provider "voxx-openai-compatible"}
-     :provider-voice-ids {"openai" "alloy" "requesty" "alloy" "xiaomi_mimo" "mimo_default" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "alloy" "requesty" "alloy" "xiaomi_mimo" "mimo_default" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "nova" :name "Nova" :melo-language "EN"
@@ -57,7 +57,7 @@
      :stability 0.62 :style 0.18
      :aliases ["aria" "serena" "ash"]
      :labels {:accent "bright" :provider "voxx-openai-compatible"}
-     :provider-voice-ids {"openai" "ash" "requesty" "ash" "xiaomi_mimo" "Mia" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "ash" "requesty" "ash" "xiaomi_mimo" "Mia" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "onyx" :name "Onyx" :melo-language "EN"
@@ -65,7 +65,7 @@
      :stability 0.68 :style 0.08
      :aliases ["adam" "antoni"]
      :labels {:accent "low" :provider "voxx-openai-compatible"}
-     :provider-voice-ids {"openai" "echo" "requesty" "echo" "xiaomi_mimo" "Dean" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "echo" "requesty" "echo" "xiaomi_mimo" "Dean" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "shimmer" :name "Shimmer" :melo-language "EN"
@@ -73,7 +73,7 @@
      :stability 0.58 :style 0.24
      :aliases ["elli" "dorothy"]
      :labels {:accent "airy" :provider "voxx-openai-compatible"}
-     :provider-voice-ids {"openai" "shimmer" "requesty" "shimmer" "xiaomi_mimo" "Chloe" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "shimmer" "requesty" "shimmer" "xiaomi_mimo" "Chloe" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "echo" :name "Echo" :melo-language "EN"
@@ -81,76 +81,76 @@
      :stability 0.7 :style 0.06
      :aliases ["sam" "josh"]
      :labels {:accent "steady" :provider "voxx-openai-compatible"}
-     :provider-voice-ids {"openai" "echo" "requesty" "echo" "xiaomi_mimo" "Milo" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "echo" "requesty" "echo" "xiaomi_mimo" "Milo" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "sage" :name "Sage" :melo-language "EN"
      :speed-multiplier 0.95 :stability 0.74 :style 0.05
      :aliases ["george"]
      :labels {:accent "measured" :provider "openai-compatible"}
-     :provider-voice-ids {"openai" "sage" "requesty" "sage" "xiaomi_mimo" "白桦" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "sage" "requesty" "sage" "xiaomi_mimo" "白桦" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "kaede" :name "Kaede" :melo-language "JP"
      :stability 0.61 :style 0.16
      :aliases ["ja_default" "sakura"]
      :labels {:accent "jp" :provider "openhax"}
-     :provider-voice-ids {"openai" "alloy" "requesty" "alloy" "xiaomi_mimo" "茉莉" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"openai" "alloy" "requesty" "alloy" "xiaomi_mimo" "茉莉" "kokoro" "jf_alpha"}})
 
    (make-voice-profile
     {:id "mimo_default" :name "MiMo Default" :melo-language "EN"
      :description "Xiaomi MiMo default TTS voice"
      :aliases ["mimo" "xiaomi_mimo"]
      :labels {:accent "neutral" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "mimo_default" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "mimo_default" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "mia" :name "Mia" :melo-language "EN"
      :description "Xiaomi MiMo English voice"
      :labels {:accent "en" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "Mia" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "Mia" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "chloe" :name "Chloe" :melo-language "EN"
      :description "Xiaomi MiMo English voice"
      :labels {:accent "en" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "Chloe" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "Chloe" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "milo" :name "Milo" :melo-language "EN"
      :description "Xiaomi MiMo English voice"
      :labels {:accent "en" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "Milo" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "Milo" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "dean" :name "Dean" :melo-language "EN"
      :description "Xiaomi MiMo English voice"
      :labels {:accent "en" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "Dean" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "Dean" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "bingtang" :name "冰糖" :melo-language "EN"
      :description "Xiaomi MiMo voice"
      :labels {:accent "zh" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "冰糖" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "冰糖" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "moli" :name "茉莉" :melo-language "EN"
      :description "Xiaomi MiMo voice"
      :labels {:accent "zh" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "茉莉" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "茉莉" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "suda" :name "苏打" :melo-language "EN"
      :description "Xiaomi MiMo voice"
      :labels {:accent "zh" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "苏打" "kokoro" "af_bella_725_H"}})
+     :provider-voice-ids {"xiaomi_mimo" "苏打" "kokoro" "af_jessica"}})
 
    (make-voice-profile
     {:id "baihua" :name "白桦" :melo-language "EN"
      :description "Xiaomi MiMo voice"
      :labels {:accent "zh" :provider "xiaomi_mimo"}
-     :provider-voice-ids {"xiaomi_mimo" "白桦" "kokoro" "af_bella_725_H"}})])
+     :provider-voice-ids {"xiaomi_mimo" "白桦" "kokoro" "af_jessica"}})])
 
 ;; ---------------------------------------------------------------------------
 ;; Model catalog

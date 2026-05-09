@@ -41,5 +41,20 @@ Reference: `docs/reference/eta-mu-runtime.md` (paths, build steps, and what “e
 EOFEOF
 EOFEOF
 
+## Docker compose preferences (non-ephemeral ops)
+- Prefer versioned compose files and checked-in scripts over one-off CLI flags.
+- Avoid requiring `docker compose ... --scale ...` as the only way to express desired replica counts; encode replica intent in compose (even if that means explicit shard services or preset compose overlays).
+- Avoid fixed host-port publishing on services that may run multiple replicas; publish a single ingress port on a proxy (nginx) and use internal networking for replicas.
+
 ## Knoxx
 Knoxx is located at `orgs/open-hax/openplanner/packages/agents/knoxx`. It is a central and highly important part of the workspace.
+
+## Active Output Contract
+For every assistant response, you MUST satisfy this output contract even for simple questions:
+- Return Markdown with these exact level-2 headings in order: Signal, Evidence, Frames, Countermoves, Next
+- Use `## Heading` level-2 markdown headers for each section. Do NOT use bold (`**Heading**`), emphasis, or deeper headings (`###`, `####`) in place of section headers.
+- Next must contain exactly 1 concrete next action.
+- Frames must contain 2-3 plausible interpretations.
+
+## OpenCode eta-mu tool disclosure
+When asked what tools you have, include the eta-mu OpenCode extension tools explicitly: `apply_patch`, `chronos`, `contract_fulfillment`, `graph-memory-search`, `graph-memory-recall`, `graph-memory-ingest`, `context-hydrate`, `graph-memory-status`, `render_image`, `opmf_parse`, `skill_graph`, `receipt_river`, `session_mycology`, and `websearch`.

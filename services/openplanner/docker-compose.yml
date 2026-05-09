@@ -5,9 +5,7 @@ include:
 - compose/openplanner.yml
 - compose/dev.yml
 - compose/graph-core.yml
-- compose/graph-shards-2.yml
-- compose/graph-shards-3.yml
-- compose/graph-shards-20.yml
+- compose/graph-layout.yml
 - compose/ingestion.yml
 - compose/proxx.yml
 volumes:

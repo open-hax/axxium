@@ -19,25 +19,27 @@ curl http://127.0.0.1:8787/healthz
 
 The compose default now binds Voxx to loopback (`127.0.0.1`) so it can sit behind a reverse proxy without exposing a raw public port. Override with `VOXX_BIND_HOST=0.0.0.0` only when you explicitly want direct network exposure.
 
-For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The current runtime default is Xiaomi MiMo first, Kokoro as the one local voice fallback, then eSpeak as the last-resort tiny fallback. MeloTTS is installed in the Voxx image for explicit tests, but is not in the default provider order because its warm system-memory footprint is larger than Kokoro's on this host.
+For smarter TTS quality without changing callers away from Voxx, pass remote-provider creds straight into the compose runtime and let Voxx fall back automatically. The current runtime default is Xiaomi MiMo first, then Kokoro as the one local voice fallback. eSpeak and MeloTTS are opt-in only so robotic fallback never silently ships. MeloTTS is installed in the Voxx image for explicit tests, but is not in the default provider order because its warm system-memory footprint is larger than Kokoro's on this host.
 
 ```bash
 cd /home/err/devel/services/voxx
 XIAOMI_MIMO_API_BASE_URL=https://api.xiaomimimo.com/v1 \
 XIAOMI_MIMO_API_KEY=... \
-VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak \
+VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro \
 docker compose up --build -d
 ```
 
 Xiaomi MiMo also accepts the legacy typo-prefixed env names `XAIOMI_MIMO_API_BASE_URL` and `XAIOMI_MIMO_API_KEY` so existing local env files keep working while callers migrate to `XIAOMI_*`.
 
-Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) with CUDA-enabled PyTorch (`torch+cu128`) and its English spaCy model installed at build time.
+Kokoro runs as a non-root derived image (`Dockerfile.kokoro`) using the upstream CPU PyTorch runtime. Its `/var/lib/kokoro` cache is a named Compose volume so the ~320 MB Kokoro model is downloaded once and reused across restarts.
 
 MeloTTS runs inside the Voxx application container when explicitly selected with `VOICE_GATEWAY_TTS_BACKEND_ORDER=melo`. The source `Dockerfile.compose` installs Python 3.11, CPU PyTorch/Torchaudio, MeloTTS from GitHub, UniDic, and NLTK assets needed by `melo.api.TTS`, but Melo is intentionally not part of the default local fallback path.
 
 Voxx STT/Whisper is gated off by default with `VOICE_GATEWAY_STT_ENABLED=0`. Use the host Knoxx NPU STT service on `http://127.0.0.1:8010` for transcription. Set `VOICE_GATEWAY_STT_ENABLED=1` only for an explicit local Voxx STT test.
 
-The compose runtime requests NVIDIA GPU access for Voxx/Kokoro and pins both containers to host CPUs `2-21` by default (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. It also enables a conservative Voxx TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
+The compose runtime is CPU-only by default and pins both containers to host CPUs `2-21` (`VOXX_CPUSET=2-21`) so CPUs 0-1 remain available for the host. Kokoro is configured with `KOKORO_LANG_CODE=a` by default to warm only the American voice pipeline and reduce memory pressure; Japanese (`j`) and Mandarin (`z`) pipelines are created on demand for routed segments. The current Kokoro default is the energetic American female voice `af_jessica` at `VOICE_GATEWAY_TTS_DEFAULT_SPEED=1.15` with minimal provider-side shaping. Voxx also enables a conservative TTS queue (`TTS_QUEUE_MAX_CONCURRENT=1`, `TTS_QUEUE_MAX_PENDING=32`, `TTS_QUEUE_TIMEOUT_SECONDS=120`) to prevent agent bursts from spawning unbounded synthesis work.
+
+Kokoro requests are language-routed inside Voxx before final postprocess/mastering. Latin/English segments use the requested compatible English voice or `KOKORO_TTS_VOICE=af_jessica`; Japanese/kana or Japanese-hinted CJK segments use `KOKORO_TTS_JA_VOICE=jf_alpha`; Chinese-hinted or simplified-Chinese CJK segments use `KOKORO_TTS_ZH_VOICE=zf_xiaoxiao`. Mixed text is synthesized per segment, concatenated with ffmpeg in the Voxx container, and returned with `x-openhax-tts-language-segments` so callers can verify routing. eSpeak remains opt-in diagnostic only, never a silent multilingual fallback.
 
 Voxx carries backend-agnostic postprocess profiles by default, so any provider voice can be pushed toward a consistent mastered texture:
 
@@ -69,12 +71,12 @@ curl -X POST 'http://127.0.0.1:8787/v1/audio/speech?postprocess=off' \
   --data '{"model":"kokoro","voice":"alloy","input":"Melo local fallback check.","response_format":"mp3"}' \
   --output /tmp/voxx-melo.mp3
 # restore stable local order afterward
-VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak docker compose up -d --no-build voxx
+VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro docker compose up -d --no-build voxx
 ```
 
 Prompt-aware performance is enabled by default in the current Voxx source and can be set per request with `?prompt_aware=1` / JSON `"prompt_aware": true` or disabled with `prompt_aware=false`. Voxx consumes tags like `[excited]`, `[whisper]`, `[pause]`, `[dramatic]`, `[sing]`, `[stretch]`, `[glitch]`, `[suture]`, `[laugh]`, or `<break time="500ms" />` itself: the backend receives clean segment text, then Voxx stitches segments together with tag-driven inflection filters, explicit silence for pause/break tags, a short nonverbal laugh effect, and the final postprocess/mastering profile. Musical tags emit `performance_directive` logs with pitch/tempo ratios and contour labels under the request `render_id`.
 
-If a request hits provider status-code failures such as quota/rate limit/auth/5xx, do not rewrite prompts for a new provider. Keep the caller pointed at Voxx and set the runtime backend order with the one local voice fallback, e.g. `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro,espeak`.
+If a request hits provider status-code failures such as quota/rate limit/auth/5xx, do not rewrite prompts for a new provider. Keep the caller pointed at Voxx and set the runtime backend order with the one local voice fallback, e.g. `VOICE_GATEWAY_TTS_BACKEND_ORDER=xiaomi_mimo,kokoro`. Add `espeak` only for an explicit tiny-fallback diagnostic run.
 
 If port `8788` is busy:
 ```bash

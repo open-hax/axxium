@@ -179,6 +179,7 @@
      :tts-eager-load                (env-bool "VOICE_GATEWAY_TTS_EAGER_LOAD" false)
      :tts-backend-order             (env-csv "VOICE_GATEWAY_TTS_BACKEND_ORDER")
      :tts-remote-timeout-seconds    (env-float "VOICE_GATEWAY_TTS_REMOTE_TIMEOUT_SECONDS" 45.0 1.0 300.0)
+     :tts-default-speed             (env-float "VOICE_GATEWAY_TTS_DEFAULT_SPEED" 1.15 0.25 4.0)
 
      ;; TTS queue
      :tts-queue-max-concurrent      (env-int "TTS_QUEUE_MAX_CONCURRENT" 1 1 64)
@@ -208,7 +209,9 @@
      :kokoro-api-key                (str/trim (or (System/getenv "KOKORO_API_KEY") ""))
      :kokoro-tts-base-url           (str/replace (str/trim (or (System/getenv "KOKORO_TTS_BASE_URL") "http://kokoro:8880/v1/audio/speech")) #"/$" "")
      :kokoro-tts-model              (str/trim (or (System/getenv "KOKORO_TTS_MODEL") "kokoro"))
-     :kokoro-tts-voice              (str/trim (or (System/getenv "KOKORO_TTS_VOICE") "af_bella_725_H"))
+     :kokoro-tts-voice              (str/trim (or (System/getenv "KOKORO_TTS_VOICE") "af_jessica"))
+     :kokoro-tts-ja-voice           (str/trim (or (System/getenv "KOKORO_TTS_JA_VOICE") "jf_alpha"))
+     :kokoro-tts-zh-voice           (str/trim (or (System/getenv "KOKORO_TTS_ZH_VOICE") "zf_xiaoxiao"))
 
      ;; TTS postprocess
      :tts-postprocess-enabled       (env-bool "TTS_POSTPROCESS_ENABLED" true)

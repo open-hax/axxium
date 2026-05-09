@@ -80,6 +80,9 @@ See `.env.example` for the complete list. Key variables:
 | `VOICE_GATEWAY_PORT` | `8788` | Server port |
 | `VOICE_GATEWAY_API_KEY` | (empty) | API key (empty = no auth) |
 | `VOICE_GATEWAY_TTS_BACKEND_ORDER` | (auto) | Comma-separated backend priority |
+| `KOKORO_TTS_VOICE` | `af_jessica` | Default Kokoro English voice |
+| `KOKORO_TTS_JA_VOICE` | `jf_alpha` | Kokoro voice for Japanese-routed segments |
+| `KOKORO_TTS_ZH_VOICE` | `zf_xiaoxiao` | Kokoro voice for Chinese-routed segments |
 | `TTS_POSTPROCESS_ENABLED` | `true` | Enable audio postprocessing |
 | `TTS_POSTPROCESS_PROFILE` | `sports-commentator-v1` | Default postprocess profile |
 | `TTS_PROMPT_AWARE_DEFAULT` | `true` | Enable prompt-aware tag parsing |
@@ -89,7 +92,7 @@ See `.env.example` for the complete list. Key variables:
 
 - **No MeloTTS local backend** — Clojure version calls remote APIs only (kokoro, xiaomi_mimo, requesty, openai, espeak)
 - **No WebSocket streaming** — REST-only in initial release (WebSocket TTS/STT planned)
-- **No pydub** — Audio concatenation for prompt-aware per-segment synthesis is simplified
+- **No pydub** — Audio concatenation for prompt-aware and Kokoro multilingual per-segment synthesis uses ffmpeg
 - **Same API surface** — All endpoints and response formats are identical
 - **Same config names** — All environment variable names are preserved
 

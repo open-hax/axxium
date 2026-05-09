@@ -66,6 +66,130 @@
                 (throw (ex-info (str "Failed (" (str/join "; " errors) ")") {}))))))))))
 
 ;; ---------------------------------------------------------------------------
+;; Language/script segmentation for Kokoro multilingual voices
+;; ---------------------------------------------------------------------------
+
+(defn- language-hint-kind
+  [language]
+  (let [value (str/lower-case (str/trim (or language "")))]
+    (cond
+      (or (str/starts-with? value "ja") (= value "jp") (= value "japanese")) "ja"
+      (or (str/starts-with? value "zh") (= value "cn") (= value "chinese") (= value "mandarin")) "zh"
+      :else nil)))
+
+(defn- japanese-codepoint?
+  [cp]
+  (or (<= 0x3040 cp 0x30ff)   ;; Hiragana + Katakana
+      (<= 0x31f0 cp 0x31ff)   ;; Katakana extensions
+      (<= 0xff66 cp 0xff9f))) ;; Half-width Katakana
+
+(defn- cjk-codepoint?
+  [cp]
+  (or (<= 0x3400 cp 0x4dbf)
+      (<= 0x4e00 cp 0x9fff)
+      (<= 0xf900 cp 0xfaff)))
+
+(defn- latin-codepoint?
+  [cp]
+  (or (<= 0x0041 cp 0x005a)
+      (<= 0x0061 cp 0x007a)
+      (<= 0x00c0 cp 0x024f)))
+
+(def ^:private simplified-chinese-signal-chars
+  "Common simplified Chinese characters that are strong signals for zh when no explicit language hint is supplied. Han-only Japanese remains ambiguous, so this is intentionally conservative."
+  (set "们这说语汉吗么过时会来个对开关书见听气爱车门电脑话欢请谢哪为国广东风后发样让读写长无边测语音声实压连远进选欢测试中文今天"))
+
+(defn- inferred-cjk-language
+  [text language]
+  (or (language-hint-kind language)
+      (let [chars (seq (str text))]
+        (cond
+          (some #(japanese-codepoint? (int %)) chars) "ja"
+          (some simplified-chinese-signal-chars chars) "zh"
+          :else "ja"))))
+
+(defn- segment-language-for-char
+  [ch language cjk-language]
+  (let [cp (int ch)
+        hint (language-hint-kind language)]
+    (cond
+      (japanese-codepoint? cp) "ja"
+      (cjk-codepoint? cp) (or hint cjk-language "ja")
+      (latin-codepoint? cp) "en"
+      (Character/isDigit ch) "en"
+      (Character/isWhitespace ch) nil
+      :else nil)))
+
+(defn- append-language-segment
+  [segments language text]
+  (let [cleaned (str/trim (str text))]
+    (if (str/blank? cleaned)
+      segments
+      (conj segments {:language (or language "en") :text cleaned}))))
+
+(defn- language-segments
+  "Split mixed EN/JP/CJK text into synthesis segments.
+   Neutral punctuation/space stays attached to the current segment. CJK defaults
+   to the caller's ja/zh hint; without a hint, kana forces Japanese and a small
+   set of simplified-Chinese signal characters routes Han text to Chinese."
+  [text language]
+  (let [default-lang (or (language-hint-kind language) "en")
+        cjk-language (inferred-cjk-language text language)]
+    (loop [chars (seq (str text))
+           current-lang nil
+           buf ""
+           segments []]
+      (if-not chars
+        (append-language-segment segments (or current-lang default-lang) buf)
+        (let [ch (first chars)
+              ch-lang (segment-language-for-char ch language cjk-language)]
+          (cond
+            (nil? ch-lang)
+            (recur (next chars) current-lang (str buf ch) segments)
+
+            (nil? current-lang)
+            (recur (next chars) ch-lang (str buf ch) segments)
+
+            (= ch-lang current-lang)
+            (recur (next chars) current-lang (str buf ch) segments)
+
+            :else
+            (recur (next chars)
+                   ch-lang
+                   (str ch)
+                   (append-language-segment segments current-lang buf))))))))
+
+(defn- non-english-kokoro-voice
+  [settings language]
+  (case language
+    "ja" (str/trim (or (:kokoro-tts-ja-voice settings) "jf_alpha"))
+    "zh" (str/trim (or (:kokoro-tts-zh-voice settings) "zf_xiaoxiao"))
+    nil))
+
+(defn- english-kokoro-voice-id?
+  [voice-id]
+  (let [v (str/lower-case (str/trim (or voice-id "")))]
+    (or (str/starts-with? v "af_")
+        (str/starts-with? v "am_")
+        (str/starts-with? v "bf_")
+        (str/starts-with? v "bm_")
+        (#{"alloy" "echo" "fable" "onyx" "nova" "shimmer" "ash" "coral" "sage" "verse"} v))))
+
+(defn- segment-kokoro-voice
+  [settings requested-voice-id language]
+  (or (non-english-kokoro-voice settings language)
+      (when (english-kokoro-voice-id? requested-voice-id) (str/trim requested-voice-id))
+      (:kokoro-tts-voice settings)
+      "af_jessica"))
+
+(defn- language-segments-summary
+  [segments]
+  (->> segments
+       (map (fn [{:keys [language text]}]
+              (str language ":" (count text))))
+       (str/join ",")))
+
+;; ---------------------------------------------------------------------------
 ;; Backends
 ;; ---------------------------------------------------------------------------
 
@@ -111,6 +235,36 @@
                        (assoc "Authorization" (str "Bearer " api-key)))
              resp (http-post-json base-url payload {:headers headers :timeout-seconds (:tts-remote-timeout-seconds settings)})]
          [(:body resp) request-format])))))
+
+(defn- synthesize-with-kokoro
+  "Synthesize with Kokoro, routing mixed EN/JP/CJK text to Kokoro language voices.
+   This prevents Japanese text from being phonemized by an English af_* voice."
+  [settings text voice & {:keys [requested-voice-id response-format speed language prompt-aware-style]}]
+  (let [segments (language-segments text language)
+        segmented? (or (> (count segments) 1)
+                       (some #(not= "en" (:language %)) segments))]
+    (if-not segmented?
+      (synthesize-with-openai-compatible settings "kokoro" text voice
+                                         :requested-voice-id requested-voice-id
+                                         :response-format response-format
+                                         :speed speed
+                                         :prompt-aware-style prompt-aware-style)
+      (let [audio-segments
+            (mapv (fn [{:keys [language text]}]
+                    (let [segment-voice (segment-kokoro-voice settings requested-voice-id language)
+                          [bytes fmt] (synthesize-with-openai-compatible settings "kokoro" text voice
+                                                                          :requested-voice-id segment-voice
+                                                                          :response-format response-format
+                                                                          :speed speed
+                                                                          :prompt-aware-style prompt-aware-style)]
+                      {:bytes bytes :format fmt :language language :voice segment-voice}))
+                  segments)
+            output-bytes (audio/concatenate-audio-bytes audio-segments
+                                                        :target-format response-format
+                                                        :ffmpeg-bin (:ffmpeg-bin settings))]
+        (log/info "Kokoro multilingual routing"
+                  {:segments (mapv #(select-keys % [:language :voice]) audio-segments)})
+        [output-bytes response-format]))))
 
 (defn- synthesize-with-xiaomi-mimo
   "Synthesize using Xiaomi MiMo's TTS API."
@@ -180,11 +334,12 @@
   [settings backend text voice & {:keys [normalized-format speed language requested-voice-id prompt-aware-style]}]
   (case backend
     "kokoro"
-    (synthesize-with-openai-compatible settings "kokoro" text voice
-                                       :requested-voice-id requested-voice-id
-                                       :response-format normalized-format
-                                       :speed speed
-                                       :prompt-aware-style prompt-aware-style)
+    (synthesize-with-kokoro settings text voice
+                            :requested-voice-id requested-voice-id
+                            :response-format normalized-format
+                            :speed speed
+                            :language language
+                            :prompt-aware-style prompt-aware-style)
 
     "xiaomi_mimo"
     (synthesize-with-xiaomi-mimo settings text voice
@@ -302,6 +457,9 @@
                     (pa/parse-prompt-aware-segments text))
         pa-segments (first pa-result)
         pa-consumed (second pa-result)
+        kokoro-language-segments (language-segments text language)
+        kokoro-segmented? (or (> (count kokoro-language-segments) 1)
+                              (some #(not= "en" (:language %)) kokoro-language-segments))
         ;; If model is a recognized backend, put it first
         preferred-backends (let [all-backends (config/preferred-tts-backends settings)
                                  model-backend (when (not (str/blank? (str/trim (or model ""))))
@@ -347,7 +505,10 @@
                                                           "x-openhax-tts-postprocess-profile" (or active-profile "none")
                                                           "x-openhax-tts-prompt-aware" (if (not (str/blank? prompt-aware-style)) "1" "0")}
                                                    requested-voice-id
-                                                   (assoc "x-openhax-requested-voice-id" requested-voice-id))]
+                                                   (assoc "x-openhax-requested-voice-id" requested-voice-id)
+
+                                                   (and (= backend "kokoro") kokoro-segmented?)
+                                                   (assoc "x-openhax-tts-language-segments" (language-segments-summary kokoro-language-segments)))]
                                      [true [output-bytes normalized-format headers]])
                                    (catch Exception e
                                      [false e]))]

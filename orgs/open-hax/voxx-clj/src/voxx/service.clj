@@ -89,7 +89,7 @@
       (let [[audio-bytes normalized-format synth-headers]
             (tts/synthesize settings text voice
                             :response-format (or response-format (:default-audio-format settings))
-                            :speed (or speed 1.0)
+                            :speed (or speed (:tts-default-speed settings))
                             :language language
                             :requested-voice-id (or voice-id requested-voice-id)
                             :model model
