@@ -116,7 +116,8 @@
  {:contract/id :provider-route/llamacpp
   :contract/kind :provider-route
   :provider/id "llamacpp"
-  :provider/base-url "http://127.0.0.1:8082"}
+  :provider/base-url "http://127.0.0.1:8082"
+  :auth/required? false}
 
  {:contract/id :provider-route/llamacpp-embed
   :contract/kind :provider-route

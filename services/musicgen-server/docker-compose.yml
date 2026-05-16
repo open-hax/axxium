@@ -10,8 +10,9 @@ services:
       CUDA_VISIBLE_DEVICES: "${CUDA_VISIBLE_DEVICES:-0}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
+      MUSICGEN_MODEL_TTL_SECONDS: "${MUSICGEN_MODEL_TTL_SECONDS:-300}"
     volumes:
-      - musicgen-cache:/root/.cache/huggingface
+      - musicgen-cache:/cache/huggingface
     networks:
       ai-infra:
         aliases:

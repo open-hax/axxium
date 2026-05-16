@@ -22,6 +22,7 @@ Use this suite when the user asks for creative development or production assets:
 - `creative-storycraft`: story writing, lore, characters, outlines, scenes, scripts, and prose revision.
 - `music-composition-arrangement`: songs, cues, loops, motifs, chord progressions, arrangements, and music handoffs.
 - `openutau-synthetic-vocals`: OpenUtau/UTAU lyric timing, USTX drafting, phonemizers, voicebank checks, and vocal render handoff.
+- `audio-reconstruction-audit`: local-only WAV/MP3 reconstruction audits with STT, f0/pitch, spectrogram, Gemma, evidence JSON, and receipts before claiming success.
 - `visual-concept-art-direction`: concept art briefs, palettes, shape language, prompt packs, and visual critique.
 - `graphics-asset-production`: logos, icons, posters, covers, UI graphics, SVG/raster exports, and sprite sheets.
 - `blender-3d-modeling`: Blender scenes, procedural meshes, materials, model exports, and render previews.
