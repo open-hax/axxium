@@ -1590,3 +1590,6 @@
 [submodule "orgs/ussyverse/xcancelussybot"]
 	path = orgs/ussyverse/xcancelussybot
 	url = git@github.com:riatzukiza/xcancelussybot.git
+[submodule "orgs/stakira/OpenUtau"]
+	path = orgs/stakira/OpenUtau
+	url = https://github.com/stakira/OpenUtau.git

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-args="--host 0.0.0.0 --port 8080 \
+args="--host 0.0.0.0 --port ${LLAMACPP_SERVER_PORT:-8080} \
   --n-gpu-layers ${LLAMACPP_N_GPU_LAYERS:-999} \
   --ctx-size ${LLAMACPP_CHAT_CTX_SIZE:-4096} \
   --parallel ${LLAMACPP_PARALLEL:-2} \

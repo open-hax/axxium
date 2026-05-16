@@ -1,21 +1,24 @@
 (fork-tax-state
   (repo "devel")
   (branch "pi/fork-tax/2026-04-15-170411")
-  (base "b7d2b950")
-  (timestamp "2026-05-16T04:00:00Z")
-  (submodules
-    (openplanner "a25ff73f")
-    (knoxx "094273c3"))
-  (scope "openplanner-proxx-compose-stability kafka-profile submodule-pointer receipts")
+  (base "6146d1ed")
+  (timestamp "20260516T185547Z")
+  (children
+    (eta-mu "9edc4c59")
+    (proxx "446317dc")
+    (openplanner "10782a4a")
+    (knoxx "a770d959")
+    (webgl-graph-view "492e00d0")
+    (uxx "d76dc9e7"))
+  (scope "recursive selected active repos plus staged/safe root artifacts")
   (verification
-    "services/openplanner compose kafka+kafka-replay config passed"
-    "openplanner clojure worker image build passed"
-    "audit heartbeat observed"
-    "dry-run replay processed 5 messages"
-    "bounded non-dry-run replay [0,1) idempotent"
-    "health and metrics Kafka checks passed")
+    "root git diff --cached --check passed after staged text normalization" "staged high-risk secret heuristic scan passed after send_msg credential env rewrite" "oversized utau zip archives staged as git-lfs pointers" "benchmark false positives inline allowlisted; OpenUtau.deps.json staged as git-lfs pointer; secrets baseline unchanged"
+    "proxx focused header test passed"
+    "eta-mu extension and coding-agent focused tests passed"
+    "child repos committed tagged pushed before parent")
   (residual
-    "pre-existing staged .gitmodules"
-    "unstaged AGENTS.md"
-    "pre-existing staged Blaze/Graphics/Lore creative artifacts and reorganizations"
-    "other non-target root dirt intentionally left untouched"))
+    "deletion-only/noisy worktrees and tmp/inbox clones left untouched"
+    "ussyverse monorepo project deletion noise left untouched"
+    "OpenUtau local source/build artifacts not pushed; root staged submodule registration only"
+    "BetterDiscord personal config left untracked"
+    "untracked external repo directories left unvendored"))

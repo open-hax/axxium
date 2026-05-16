@@ -12,11 +12,11 @@
     </filter>
   </defs>
   <rect width="800" height="800" fill="url(#voidGrad)" />
-  
+
   <!-- Outer Rings -->
   <circle cx="400" cy="400" r="380" stroke="#4a4a6a" stroke-width="2" fill="none" stroke-dasharray="10,20" />
   <circle cx="400" cy="400" r="360" stroke="#6a6a8a" stroke-width="4" fill="none" />
-  
+
   <!-- Text Rings -->
   <path id="topRing" d="M 100,400 A 300,300 0 1,1 700,400" fill="none" stroke="none" />
   <text fill="#bcbcff" font-family="monospace" font-size="24" letter-spacing="10">
@@ -24,7 +24,7 @@
       💎 SYMMETRY COUNCIL // SOVEREIGN LAMINATION // 💎
     </textPath>
   </text>
-  
+
   <path id="botRing" d="M 700,400 A 300,300 0 1,1 100,400" fill="none" stroke="none" />
   <text fill="#bcbcff" font-family="monospace" font-size="24" letter-spacing="10">
     <textPath href="#botRing" startOffset="50%" text-anchor="middle">
@@ -37,14 +37,14 @@
     <polygon points="0,-200 120,0 0,200 -120,0" fill="rgba(100,100,255,0.3)" stroke="#bcbcff" stroke-width="3" />
     <line x1="0" y1="-200" x2="0" y2="200" stroke="#bcbcff" stroke-width="1" />
     <line x1="-120" y1="0" x2="120" y2="0" stroke="#bcbcff" stroke-width="1" />
-    
+
     <!-- Shards -->
     <polygon points="40,-100 80,-40 20,0" fill="#fff" opacity="0.8" stroke="#bcbcff" />
     <polygon points="-60,60 -100,120 -20,100" fill="#fff" opacity="0.6" stroke="#bcbcff" />
     <polygon points="10,80 60,150 30,180" fill="#fff" opacity="0.4" stroke="#bcbcff" />
     <polygon points="-150,-20 -120,-80 -180,-60" fill="#fff" opacity="0.5" stroke="#bcbcff" />
   </g>
-  
+
   <!-- 502 Text -->
   <text x="400" y="410" text-anchor="middle" fill="#f0f" font-family="monospace" font-size="60" font-weight="bold" filter="url(#glitch)">
     502: BANKRUPT NOW

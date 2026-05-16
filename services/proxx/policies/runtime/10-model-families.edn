@@ -23,6 +23,12 @@
   :match/provider-pattern "^ollama-lan$"
   :alias/model-id "gemma4:e4b-128k"}
 
+ {:contract/id :model-alias/gemma4-e4b-llamacpp
+  :contract/kind :model-alias
+  :match/model-pattern "(?i)^gemma4:e4b$"
+  :match/provider-pattern "^llamacpp$"
+  :alias/model-id "gemma4-e4b"}
+
  {:contract/id :model-family/claude
   :contract/kind :model-family
   :match/model-pattern "^claude-"
