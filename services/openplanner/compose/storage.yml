@@ -11,6 +11,8 @@ services:
   mongodb:
     image: mongodb/mongodb-atlas-local:latest
     hostname: openplanner-mongodb
+    cpus: ${OPENPLANNER_MONGODB_CPUS:-4}
+    cpuset: ${OPENPLANNER_CONTAINER_CPUSET:-2-21}
     command: []
     depends_on:
       secrets-init:

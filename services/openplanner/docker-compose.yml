@@ -2,6 +2,7 @@
 name: openplanner
 include:
 - compose/storage.yml
+- compose/kafka.yml
 - compose/openplanner.yml
 - compose/dev.yml
 - compose/graph-core.yml
@@ -11,6 +12,7 @@ include:
 volumes:
   openplanner-mongodb-data: null
   openplanner-proxx-db-data: null
+  openplanner-redpanda-data: null
   shuvcrawl-data: null
   shuvcrawl-output: null
   knoxx-postgres-data: null

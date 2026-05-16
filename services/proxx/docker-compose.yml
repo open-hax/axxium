@@ -25,6 +25,8 @@ services:
 
   proxx:
     profiles: ["prod"]
+    cpus: ${PROXX_CPUS:-2}
+    cpuset: ${PROXX_CONTAINER_CPUSET:-2-21}
     depends_on:
       proxx-init-data:
         condition: service_completed_successfully
@@ -206,6 +208,8 @@ services:
   # Usage: cd services/proxx && docker compose --profile dev up -d
   proxx-dev:
     profiles: ["dev"]
+    cpus: ${PROXX_DEV_CPUS:-2}
+    cpuset: ${PROXX_CONTAINER_CPUSET:-2-21}
     depends_on:
       proxx-init-data:
         condition: service_completed_successfully
