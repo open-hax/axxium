@@ -47,4 +47,4 @@
   (root-pointers 13)
   (blocked-repo-wipes 96)
   (verification "secret heuristic scan for dirty child commits" "git diff --cached --check for dirty child commits" "push branch+tag attempted for actionable dirty/ahead repos")
-  (residual "monorepo project child repo wipes blocked" "OpenUtau local-only commit due upstream permission" "fork_tales push blocked by >100MB historical blob" "strudel/OpenUtau upstream permission failures" "archived/read-only riatzukiza/openhax"))
+  (residual "ussyverse monorepo child project worktrees rehydrated; mcpussy inaccessible; ralphussy nested gitlinks missing mappings" "OpenUtau local-only commit due upstream permission" "fork_tales push blocked by >100MB historical blob" "strudel/OpenUtau upstream permission failures" "archived/read-only riatzukiza/openhax"))

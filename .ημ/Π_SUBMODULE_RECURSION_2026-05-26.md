@@ -86,3 +86,11 @@
 - `receipts.edn` updated by receipt_river.
 - Raw initial execution result: `.ημ/recursive-submodule-fork-tax-2026-05-26.json`.
 - Post-run recursive inventory: `.ημ/recursive-fork-tax-dirty-inventory.json`.
+
+## Correction: ussyverse monorepo child projects rehydrated
+
+- Follow-up diagnosis showed the `orgs/ussyverse/monorepo/projects/**` entries were intended child submodules with dehydrated/incomplete working trees, not intended remote repo wipes.
+- 96 deletion-only child worktrees were restored path-scoped under `orgs/ussyverse/monorepo`.
+- `orgs/ussyverse/monorepo` is clean after repair.
+- Residual blockers: inaccessible `projects/ai-agents/mcpussy` remote, and 3 nested ralphussy gitlinks without `.gitmodules` mappings.
+- Details: `.ημ/USSYVERSE_MONOREPO_REHYDRATE_2026-05-26.md`.
