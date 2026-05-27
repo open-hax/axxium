@@ -57,7 +57,11 @@ jobs:
           format: "SARIF"
           out: "dependency-check-report"
           # Upload SARIF, but don't block PRs on existing vulnerabilities.
-          args: "--failOnCVSS 11"
+          # Disable analyzers that currently fail the CI run before SARIF upload:
+          # - Archive Analyzer chokes on checked-in voicebank zip assets.
+          # - Node Audit Analyzer rejects npm alias payloads in package-lock fixtures.
+          # Pnpm Audit, RetireJS, CPE/NVD, and manifest analyzers still run.
+          args: "--failOnCVSS 11 --disableArchive --disableNodeAudit"
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3

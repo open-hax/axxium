@@ -61,7 +61,7 @@ jobs:
       - uses: actions/github-script@v8
         with:
           script: |
-            const requiredChecks = ["deploy-staging", "staging-live-verify"];
+            const requiredChecks = ["eta-mu-deploy-staging", "eta-mu-staging-live-verify"];
             const { owner, repo } = context.repo;
             const ref = context.payload.pull_request.head.sha;
             const checks = await github.rest.checks.listForRef({ owner, repo, ref, per_page: 100 });

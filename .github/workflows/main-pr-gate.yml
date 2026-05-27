@@ -107,7 +107,7 @@ jobs:
       - uses: actions/github-script@v8
         with:
           script: |
-            const requiredChecks = ["deploy-staging", "staging-live-e2e"];
+            const requiredChecks = ["proxx-deploy-staging", "proxx-staging-live-e2e"];
             const { owner, repo } = context.repo;
             const ref = context.payload.pull_request.head.sha;
             const checks = await github.rest.checks.listForRef({ owner, repo, ref, per_page: 100 });
