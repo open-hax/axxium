@@ -26,20 +26,6 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'ollama' }}
       MODEL: ${{ vars.MDLINT_MODEL || 'gpt-oss:20b-cloud' }}
 
-    services:
-      # Optional local Ollama for self-hosted or when no remote is configured
-      ollama:
-        image: ollama/ollama:latest
-        ports:
-          - 11434:11434
-        options: >-
-          --health-cmd "curl -sSf http://localhost:11434/api/version || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-        # Skip service if remote OPENAI_BASE_URL is provided
-        if: ${{ !secrets.OPENAI_BASE_URL }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,7 +44,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: (Optional) Pull model
-        if: ${{ !secrets.OPENAI_BASE_URL }}
+        if: ${{ env.OPENAI_BASE_URL == 'http://localhost:11434/v1' }}
         run: |
           echo "Pulling model ${MODEL} from local Ollama"
           curl -sSf http://localhost:11434/api/pull -d "{\"name\":\"${MODEL}\"}" || true

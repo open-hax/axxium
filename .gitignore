@@ -32,6 +32,15 @@ logs/
 # Data volumes
 /data/
 
+# Service runtime data volumes (local-only; never track service state)
+services/*/data/
+services/*/.data/
+services/*/runtime-secrets/
+services/*/secrets/
+services/*/storage/
+services/*/uploads/
+services/*/tmp/
+
 # Secrets (keep patterns, never track contents)
 .env
 .env.*
@@ -100,3 +109,4 @@ services/cephalon-hive/quartz-garden/proxx-api/*.png
 
 # Database archives
 *.duckdb
+.envrc

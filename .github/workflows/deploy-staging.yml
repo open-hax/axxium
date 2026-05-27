@@ -36,7 +36,7 @@ jobs:
       - run: pnpm run web:build
 
   deploy-staging:
-    name: deploy-staging
+    name: proxx-deploy-staging
     runs-on: ubuntu-latest
     timeout-minutes: 45
     needs:
@@ -44,7 +44,32 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v5
+      - name: detect Proxx staging deploy config
+        id: deploy-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in STAGING_HOST STAGING_USER STAGING_PATH STAGING_PUBLIC_HOST STAGING_SSH_PRIVATE_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            missing_csv="$(IFS=,; echo "${missing[*]}")"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Proxx staging deploy; missing environment configuration: ${missing_csv}"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        env:
+          STAGING_HOST: ${{ vars.STAGING_SSH_HOST }}
+          STAGING_USER: ${{ vars.STAGING_SSH_USER }}
+          STAGING_PATH: ${{ vars.STAGING_DEPLOY_PATH }}
+          STAGING_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
       - name: configure staging ssh
+        if: steps.deploy-config.outputs.configured == 'true'
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
@@ -52,40 +77,43 @@ jobs:
           printf 'Host *\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n' > ~/.ssh/config
           chmod 600 ~/.ssh/config
           touch ~/.ssh/known_hosts
-          ssh-keyscan -H "${STAGING_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -H "${STAGING_HOST}" >> ~/.ssh/known_hosts
         env:
-          STAGING_HOST: ${{ vars.STAGING_SSH_HOST || 'ussy3.promethean.rest' }}
+          STAGING_HOST: ${{ vars.STAGING_SSH_HOST }}
           STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
       - run: chmod +x scripts/*.sh
+        if: steps.deploy-config.outputs.configured == 'true'
       - name: deploy staging runtime
+        if: steps.deploy-config.outputs.configured == 'true'
         run: ./scripts/deploy-remote.sh
         env:
-          DEPLOY_HOST: ${{ vars.STAGING_SSH_HOST || 'ussy3.promethean.rest' }}
-          DEPLOY_USER: ${{ vars.STAGING_SSH_USER || 'error' }}
-          DEPLOY_PATH: ${{ vars.STAGING_DEPLOY_PATH || '~/devel/services/proxx-staging' }}
+          DEPLOY_HOST: ${{ vars.STAGING_SSH_HOST }}
+          DEPLOY_USER: ${{ vars.STAGING_SSH_USER }}
+          DEPLOY_PATH: ${{ vars.STAGING_DEPLOY_PATH }}
           DEPLOY_COMPOSE_PROJECT_NAME: ${{ vars.STAGING_COMPOSE_PROJECT_NAME || 'proxx-staging' }}
-          DEPLOY_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST || 'ussy3.promethean.rest' }}
-          DEPLOY_ENABLE_TLS: 'true'
-          DEPLOY_HEALTH_TIMEOUT_SECONDS: '240'
-          DEPLOY_SYNC_RUNTIME_FROM_SOURCE: 'true'
-          DEPLOY_SYNC_DB_FROM_SOURCE: 'true'
-          DEPLOY_SOURCE_HOST: ${{ vars.STAGING_SOURCE_SSH_HOST || 'ussy.promethean.rest' }}
-          DEPLOY_SOURCE_USER: ${{ vars.STAGING_SOURCE_SSH_USER || 'error' }}
-          DEPLOY_SOURCE_PATH: ${{ vars.STAGING_SOURCE_DEPLOY_PATH || '~/devel/services/proxx' }}
-          DEPLOY_SOURCE_COMPOSE_PROJECT_NAME: ${{ vars.STAGING_SOURCE_COMPOSE_PROJECT_NAME || 'open-hax-openai-proxy' }}
+          DEPLOY_PUBLIC_HOST: ${{ vars.STAGING_PUBLIC_HOST }}
+          DEPLOY_ENABLE_TLS: ${{ vars.STAGING_ENABLE_TLS || 'true' }}
+          DEPLOY_HEALTH_TIMEOUT_SECONDS: ${{ vars.STAGING_HEALTH_TIMEOUT_SECONDS || '240' }}
+          DEPLOY_SYNC_RUNTIME_FROM_SOURCE: ${{ vars.STAGING_SYNC_RUNTIME_FROM_SOURCE || 'false' }}
+          DEPLOY_SYNC_DB_FROM_SOURCE: ${{ vars.STAGING_SYNC_DB_FROM_SOURCE || 'false' }}
+          DEPLOY_SOURCE_HOST: ${{ vars.STAGING_SOURCE_SSH_HOST }}
+          DEPLOY_SOURCE_USER: ${{ vars.STAGING_SOURCE_SSH_USER }}
+          DEPLOY_SOURCE_PATH: ${{ vars.STAGING_SOURCE_DEPLOY_PATH }}
+          DEPLOY_SOURCE_COMPOSE_PROJECT_NAME: ${{ vars.STAGING_SOURCE_COMPOSE_PROJECT_NAME }}
           DEPLOY_ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
           DEPLOY_MODELS_JSON: ${{ secrets.STAGING_MODELS_JSON }}
       - name: staging deploy failure logs
-        if: failure()
+        if: failure() && steps.deploy-config.outputs.configured == 'true'
         run: |
-          # shellcheck disable=SC2029,SC2086
-          ssh error@${STAGING_HOST} "cd '${STAGING_PATH}' && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml ps && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml logs --tail=200"
+          # shellcheck disable=SC2029
+          ssh "${STAGING_USER}@${STAGING_HOST}" "cd '${STAGING_PATH}' && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml ps && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml logs --tail=200"
         env:
-          STAGING_HOST: ${{ vars.STAGING_SSH_HOST || 'ussy3.promethean.rest' }}
-          STAGING_PATH: ${{ vars.STAGING_DEPLOY_PATH || '~/devel/services/proxx-staging' }}
+          STAGING_HOST: ${{ vars.STAGING_SSH_HOST }}
+          STAGING_USER: ${{ vars.STAGING_SSH_USER }}
+          STAGING_PATH: ${{ vars.STAGING_DEPLOY_PATH }}
 
   staging-live-e2e:
-    name: staging-live-e2e
+    name: proxx-staging-live-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 90
     needs:
@@ -100,7 +128,29 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: detect Proxx staging live config
+        id: live-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in DEV_PROXY_URL DEV_PROXY_AUTH_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            missing_csv="$(IFS=,; echo "${missing[*]}")"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping Proxx staging live e2e; missing environment configuration: ${missing_csv}"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        env:
+          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL }}
+          DEV_PROXY_AUTH_TOKEN: ${{ secrets.STAGING_PROXY_AUTH_TOKEN }}
       - run: chmod +x scripts/*.sh
+        if: steps.live-config.outputs.configured == 'true'
       - run: |
           for attempt in $(seq 1 40); do
             echo "health-check attempt ${attempt}" >/dev/null
@@ -110,23 +160,48 @@ jobs:
             sleep 10
           done
           exit 1
+        if: steps.live-config.outputs.configured == 'true'
         env:
-          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL || 'https://ussy3.promethean.rest' }}
+          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL }}
           DEV_PROXY_AUTH_TOKEN: ${{ secrets.STAGING_PROXY_AUTH_TOKEN }}
       - run: pnpm install --frozen-lockfile
+        if: steps.live-config.outputs.configured == 'true'
       - run: ./scripts/e2e-test.sh
+        if: steps.live-config.outputs.configured == 'true'
         env:
-          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL || 'https://ussy3.promethean.rest' }}
+          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL }}
           DEV_PROXY_AUTH_TOKEN: ${{ secrets.STAGING_PROXY_AUTH_TOKEN }}
       - run: ./scripts/e2e-multitenancy-smoke.sh
+        if: steps.live-config.outputs.configured == 'true'
         env:
-          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL || 'https://ussy3.promethean.rest' }}
+          DEV_PROXY_URL: ${{ vars.STAGING_BASE_URL }}
           DEV_PROXY_AUTH_TOKEN: ${{ secrets.STAGING_PROXY_AUTH_TOKEN }}
       - name: staging live e2e failure logs
         if: failure()
         run: |
-          # shellcheck disable=SC2029,SC2086
-          ssh error@${STAGING_HOST} "cd '${STAGING_PATH}' && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml ps && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml logs --tail=200"
+          set -euo pipefail
+          missing=()
+          for name in STAGING_HOST STAGING_USER STAGING_PATH STAGING_SSH_PRIVATE_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            missing_csv="$(IFS=,; echo "${missing[*]}")"
+            echo "::notice::Skipping Proxx staging failure logs; missing environment configuration: ${missing_csv}"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf 'Host *\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          touch ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -H "${STAGING_HOST}" >> ~/.ssh/known_hosts
+          # shellcheck disable=SC2029
+          ssh "${STAGING_USER}@${STAGING_HOST}" "cd '${STAGING_PATH}' && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml ps && docker compose -f docker-compose.yml -f deploy/docker-compose.ssl.yml logs --tail=200"
         env:
-          STAGING_HOST: ${{ vars.STAGING_SSH_HOST || 'ussy3.promethean.rest' }}
-          STAGING_PATH: ${{ vars.STAGING_DEPLOY_PATH || '~/devel/services/proxx-staging' }}
+          STAGING_HOST: ${{ vars.STAGING_SSH_HOST }}
+          STAGING_USER: ${{ vars.STAGING_SSH_USER }}
+          STAGING_PATH: ${{ vars.STAGING_DEPLOY_PATH }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}

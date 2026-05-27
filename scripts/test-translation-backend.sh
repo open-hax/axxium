@@ -29,13 +29,13 @@ test_endpoint() {
     
     if [ -z "$data" ]; then
         response=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
-            -X $method \
+            -X "$method" \
             "$OPENPLANNER_URL$path" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json")
     else
         response=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
-            -X $method \
+            -X "$method" \
             "$OPENPLANNER_URL$path" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \

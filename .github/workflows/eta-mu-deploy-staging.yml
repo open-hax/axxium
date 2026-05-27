@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -34,15 +35,48 @@ jobs:
       - run: docker build -f orgs/open-hax/eta-mu/services/eta-mu-truth-workbench/Dockerfile orgs/open-hax/eta-mu
 
   deploy-staging:
-    name: deploy-staging
+    name: eta-mu-deploy-staging
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs:
       - staging-preflight
     environment: eta-mu-staging
+    outputs:
+      deploy-enabled: ${{ steps.deploy-config.outputs.enabled }}
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
+      - name: detect eta-mu staging deploy config
+        id: deploy-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${ETA_MU_STAGING_DEPLOY_ENABLED}" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping eta-mu staging deploy; set ETA_MU_STAGING_DEPLOY_ENABLED=true after staging SSH credentials are rotated and registered."
+            exit 0
+          fi
+
+          missing=()
+          for name in ETA_MU_STAGING_SSH_HOST ETA_MU_STAGING_SSH_USER ETA_MU_STAGING_DEPLOY_PATH ETA_MU_STAGING_SSH_PRIVATE_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            missing_csv="$(IFS=,; echo "${missing[*]}")"
+            echo "::error::ETA_MU_STAGING_DEPLOY_ENABLED=true but required configuration is missing: ${missing_csv}"
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        env:
+          ETA_MU_STAGING_DEPLOY_ENABLED: ${{ vars.ETA_MU_STAGING_DEPLOY_ENABLED || 'false' }}
+          ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST }}
+          ETA_MU_STAGING_SSH_USER: ${{ vars.ETA_MU_STAGING_SSH_USER }}
+          ETA_MU_STAGING_DEPLOY_PATH: ${{ vars.ETA_MU_STAGING_DEPLOY_PATH }}
+          ETA_MU_STAGING_SSH_PRIVATE_KEY: ${{ secrets.ETA_MU_STAGING_SSH_PRIVATE_KEY }}
       - name: configure staging ssh
+        if: steps.deploy-config.outputs.enabled == 'true'
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "${ETA_MU_STAGING_SSH_PRIVATE_KEY}" > ~/.ssh/deploy_key
@@ -50,17 +84,19 @@ jobs:
           printf 'Host *\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n' > ~/.ssh/config
           chmod 600 ~/.ssh/config
           touch ~/.ssh/known_hosts
-          ssh-keyscan -H "${ETA_MU_STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
+          ssh-keyscan -T 10 -H "${ETA_MU_STAGING_SSH_HOST}" >> ~/.ssh/known_hosts
         env:
-          ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST || 'big.ussy.promethean.rest' }}
+          ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST }}
           ETA_MU_STAGING_SSH_PRIVATE_KEY: ${{ secrets.ETA_MU_STAGING_SSH_PRIVATE_KEY }}
       - run: chmod +x orgs/open-hax/eta-mu/services/eta-mu/scripts/deploy-remote.sh
+        if: steps.deploy-config.outputs.enabled == 'true'
       - name: deploy eta-mu staging runtime
+        if: steps.deploy-config.outputs.enabled == 'true'
         run: orgs/open-hax/eta-mu/services/eta-mu/scripts/deploy-remote.sh
         env:
-          DEPLOY_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST || 'big.ussy.promethean.rest' }}
-          DEPLOY_USER: ${{ vars.ETA_MU_STAGING_SSH_USER || 'error' }}
-          DEPLOY_PATH: ${{ vars.ETA_MU_STAGING_DEPLOY_PATH || '/home/error/devel/services/eta-mu-staging' }}
+          DEPLOY_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST }}
+          DEPLOY_USER: ${{ vars.ETA_MU_STAGING_SSH_USER }}
+          DEPLOY_PATH: ${{ vars.ETA_MU_STAGING_DEPLOY_PATH }}
           DEPLOY_COMPOSE_PROJECT_NAME: ${{ vars.ETA_MU_STAGING_COMPOSE_PROJECT_NAME || 'eta-mu-staging' }}
           DEPLOY_CONTAINER_NAME: ${{ vars.ETA_MU_STAGING_CONTAINER_NAME || 'openhax-eta-mu-staging' }}
           DEPLOY_PORT: ${{ vars.ETA_MU_STAGING_PORT || '8791' }}
@@ -70,26 +106,46 @@ jobs:
           DEPLOY_AUTOMATION_INTERVAL_MS: ${{ vars.ETA_MU_STAGING_AUTOMATION_INTERVAL_MS || '300000' }}
           DEPLOY_AUTOMATION_VAULTS: ${{ vars.ETA_MU_STAGING_AUTOMATION_VAULTS || 'proxx' }}
       - name: staging deploy failure logs
-        if: failure()
+        if: failure() && steps.deploy-config.outputs.enabled == 'true'
         run: |
-          ssh ${ETA_MU_STAGING_SSH_USER}@${ETA_MU_STAGING_SSH_HOST} "cd ${ETA_MU_STAGING_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
+          # shellcheck disable=SC2029
+          ssh "${ETA_MU_STAGING_SSH_USER}@${ETA_MU_STAGING_SSH_HOST}" "cd ${ETA_MU_STAGING_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
         env:
-          ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST || 'big.ussy.promethean.rest' }}
-          ETA_MU_STAGING_SSH_USER: ${{ vars.ETA_MU_STAGING_SSH_USER || 'error' }}
-          ETA_MU_STAGING_DEPLOY_PATH: ${{ vars.ETA_MU_STAGING_DEPLOY_PATH || '/home/error/devel/services/eta-mu-staging' }}
+          ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST }}
+          ETA_MU_STAGING_SSH_USER: ${{ vars.ETA_MU_STAGING_SSH_USER }}
+          ETA_MU_STAGING_DEPLOY_PATH: ${{ vars.ETA_MU_STAGING_DEPLOY_PATH }}
           ETA_MU_STAGING_COMPOSE_PROJECT_NAME: ${{ vars.ETA_MU_STAGING_COMPOSE_PROJECT_NAME || 'eta-mu-staging' }}
 
   staging-live-verify:
-    name: staging-live-verify
+    name: eta-mu-staging-live-verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs:
       - deploy-staging
     environment: eta-mu-staging
     steps:
-      - name: wait for health
+      - name: detect eta-mu staging live verify config
+        id: live-config
+        shell: bash
         run: |
-          for attempt in $(seq 1 30); do
+          set -euo pipefail
+          if [[ "${DEPLOY_ENABLED}" != "true" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping eta-mu staging live verify because eta-mu staging deploy is disabled."
+            exit 0
+          fi
+          if [[ -z "${ETA_MU_STAGING_VERIFY_URL}" ]]; then
+            echo "::error::ETA_MU_STAGING_VERIFY_URL is required when eta-mu staging deploy is enabled."
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+        env:
+          DEPLOY_ENABLED: ${{ needs.deploy-staging.outputs.deploy-enabled }}
+          ETA_MU_STAGING_VERIFY_URL: ${{ vars.ETA_MU_STAGING_VERIFY_URL }}
+      - name: wait for health
+        if: steps.live-config.outputs.enabled == 'true'
+        run: |
+          for _ in $(seq 1 30); do
             if curl -fsS "${ETA_MU_STAGING_VERIFY_URL}/health" >/dev/null; then
               exit 0
             fi
@@ -97,8 +153,9 @@ jobs:
           done
           exit 1
         env:
-          ETA_MU_STAGING_VERIFY_URL: ${{ vars.ETA_MU_STAGING_VERIFY_URL || 'https://staging.eta-mu.promethean.rest' }}
+          ETA_MU_STAGING_VERIFY_URL: ${{ vars.ETA_MU_STAGING_VERIFY_URL }}
       - name: verify control plane endpoint
+        if: steps.live-config.outputs.enabled == 'true'
         run: curl -fsS "${ETA_MU_STAGING_VERIFY_URL}/api/control-plane/vaults" >/dev/null
         env:
-          ETA_MU_STAGING_VERIFY_URL: ${{ vars.ETA_MU_STAGING_VERIFY_URL || 'https://staging.eta-mu.promethean.rest' }}
+          ETA_MU_STAGING_VERIFY_URL: ${{ vars.ETA_MU_STAGING_VERIFY_URL }}

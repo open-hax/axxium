@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -42,6 +43,7 @@ jobs:
     environment: eta-mu-production
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
       - name: configure production ssh
         run: |
           install -m 700 -d ~/.ssh
@@ -72,7 +74,8 @@ jobs:
       - name: production deploy failure logs
         if: failure()
         run: |
-          ssh ${ETA_MU_PRODUCTION_SSH_USER}@${ETA_MU_PRODUCTION_SSH_HOST} "cd ${ETA_MU_PRODUCTION_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_PRODUCTION_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_PRODUCTION_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
+          # shellcheck disable=SC2029
+          ssh "${ETA_MU_PRODUCTION_SSH_USER}@${ETA_MU_PRODUCTION_SSH_HOST}" "cd ${ETA_MU_PRODUCTION_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_PRODUCTION_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_PRODUCTION_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
         env:
           ETA_MU_PRODUCTION_SSH_HOST: ${{ vars.ETA_MU_PRODUCTION_SSH_HOST || 'big.ussy.promethean.rest' }}
           ETA_MU_PRODUCTION_SSH_USER: ${{ vars.ETA_MU_PRODUCTION_SSH_USER || 'error' }}
@@ -89,7 +92,7 @@ jobs:
     steps:
       - name: wait for production health
         run: |
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS "${ETA_MU_PRODUCTION_VERIFY_URL}/health" >/dev/null; then
               exit 0
             fi

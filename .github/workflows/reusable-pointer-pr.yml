@@ -33,7 +33,7 @@ jobs:
       - name: Compute SHAs
         id: shas
         run: |
-          echo "child_sha=${GITHUB_SHA}" >> $GITHUB_OUTPUT
+          echo "child_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout parent repo
         uses: actions/checkout@v4
@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
           old_sha=$(git -C parent ls-tree HEAD "$path" | awk '{print $3}')
-          echo "old_sha=$old_sha" >> $GITHUB_OUTPUT
+          echo "old_sha=$old_sha" >> "$GITHUB_OUTPUT"
 
       - name: Update submodule to child SHA
         id: update
@@ -69,10 +69,10 @@ jobs:
             exit 0
           fi
           git -C parent submodule update --init --recursive "$path"
-          git -C parent/$path fetch origin "$new_sha"
-          git -C parent/$path checkout "$new_sha"
+          git -C "parent/$path" fetch origin "$new_sha"
+          git -C "parent/$path" checkout "$new_sha"
           git -C parent add "$path"
-          echo "updated=1" >> $GITHUB_OUTPUT
+          echo "updated=1" >> "$GITHUB_OUTPUT"
 
       - name: Prepare branch
         if: steps.update.outputs.updated == '1'
@@ -82,14 +82,13 @@ jobs:
           path_sanitized=$(echo "${{ inputs.submodule-path }}" | tr '/' '-')
           branch="bot/update-${path_sanitized}-${GITHUB_RUN_ID}"
           git -C parent checkout -b "$branch"
-          echo "name=$branch" >> $GITHUB_OUTPUT
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
 
       - name: Commit pointer bump
         if: steps.update.outputs.updated == '1'
         run: |
           set -e
           path="${{ inputs.submodule-path }}"
-          old_sha="${{ steps.pointer.outputs.old_sha }}"
           new_sha="${GITHUB_SHA}"
           git -C parent commit -m "chore: bump ${path} to ${new_sha}" || true
 
@@ -101,10 +100,12 @@ jobs:
           path="${{ inputs.submodule-path }}"
           old_sha="${{ steps.pointer.outputs.old_sha }}"
           new_sha="${GITHUB_SHA}"
-          git -C parent/$path log --oneline "$old_sha..$new_sha" > /tmp/submodule-changes.txt || true
-          echo "changes<<EOF" >> $GITHUB_OUTPUT
-          cat /tmp/submodule-changes.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          git -C "parent/$path" log --oneline "$old_sha..$new_sha" > /tmp/submodule-changes.txt || true
+          {
+            echo "changes<<EOF"
+            cat /tmp/submodule-changes.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Push branch
         if: steps.update.outputs.updated == '1'
@@ -122,16 +123,16 @@ jobs:
         run: |
           set -e
           body=$(cat <<'EOF'
-Updated submodule `${{ inputs.submodule-path }}` to `${{ github.sha }}`.
+          Updated submodule `${{ inputs.submodule-path }}` to `${{ github.sha }}`.
 
-Changes since previous pointer:
-```
-${{ steps.summary.outputs.changes }}
-```
-EOF
-)
+          Changes since previous pointer:
+          ```
+          ${{ steps.summary.outputs.changes }}
+          ```
+          EOF
+          )
           pr_url=$(gh pr create --repo "${{ inputs.parent-repo }}" --base "${{ inputs.parent-branch }}" --head "${{ steps.branch.outputs.name }}" --title "chore: bump ${{ inputs.submodule-path }}" --body "$body")
-          echo "url=$pr_url" >> $GITHUB_OUTPUT
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
 
       - name: Auto-merge PR
         if: steps.update.outputs.updated == '1' && inputs.allow-auto-merge

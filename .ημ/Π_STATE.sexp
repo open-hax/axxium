@@ -1,22 +1,30 @@
-(Π_STATE
-  (time "2026-03-21T22:17:42Z")
-  (branch "staging")
-  (pre_head "100df62")
-  (dirty true)
-  (checks
-    (check (status passed) (command "pnpm test (325/325) from 2026-03-21T22:13:55Z receipt"))
-    (check (status passed) (command "docker compose up -d --build open-hax-openai-proxy + curl /health + direct z.ai /models/chat/completions + temporary local zai proxy probe from 2026-03-21T22:13:55Z receipt"))
-  )
-  (repo_notes
-    (upstream "https://github.com/open-hax/proxx.git")
-    (status_digest "07a4-2815-e9df-7168")
-    (note "Capture the z.ai live-env validation spec/results plus receipts after verifying compose pass-through, direct upstream probes, and the temporary local zai-pinned proxy.")
-    (note "Keep the latest z.ai catalog-path code snapshot aligned with its supporting docs on the current staging line.")
-    (note "push branch: pi/fork-tax/2026-03-21-211345")
-    (changed_file ".ημ/Π_LAST.md")
-    (changed_file ".ημ/Π_MANIFEST.sha256")
-    (changed_file ".ημ/Π_STATE.sexp")
-    (changed_file "receipts.log")
-    (changed_file "specs/drafts/zai-mistral-env-provider-validation.md")
-  )
-)
+(fork-tax-state
+  (repo "devel")
+  (timestamp "20260526T204054Z")
+  (scope "knoxx host PM2 runtime decoupled into services/openplanner")
+  (mode "bottom-up nested submodule commit; path-scoped root staging; concurrent dirt preserved")
+  (branches
+    (root "pi/fork-tax/20260526T204054Z-knoxx-host-services")
+    (openplanner "pi/fork-tax/20260526T204054Z-openplanner-knoxx-host-services")
+    (knoxx "pi/fork-tax/20260526T204054Z-knoxx-host-services"))
+  (tags-recorded-in ".ημ/Π_LAST.md")
+  (commits
+    (knoxx "c066cf0b2069")
+    (openplanner "56d6effee7a8")
+    (root "pending"))
+  (verification
+    "node -c service and knoxx ecosystem configs"
+    "backend shadow-cljs compile test and server"
+    "frontend typecheck and vitest"
+    "ingestion clojure -M:test"
+    "PM2 service-owned restart, pm2 save, authenticated /health ok"
+    "hardcoded devel path/source scan passed")
+  (staged-root-paths
+    "services/openplanner/ecosystem.host.config.cjs"
+    "services/openplanner/README.md"
+    "orgs/open-hax/openplanner"
+    "receipts.edn"
+    ".ημ/Π_LAST.md"
+    ".ημ/Π_STATE.sexp"
+    ".ημ/Π_MANIFEST.sha256")
+  (residual "unrelated root workspace dirt left untouched; no repo-wide cleanup performed"))

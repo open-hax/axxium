@@ -20,9 +20,11 @@ jobs:
       contents: read
     steps:
       - name: Require staging as merge source
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          if [ "${{ github.head_ref }}" != "staging" ]; then
-            echo "::error::PRs into main must come from staging. Current head: ${{ github.head_ref }}"
+          if [ "${HEAD_REF}" != "staging" ]; then
+            echo "::error::PRs into main must come from staging. Current head: ${HEAD_REF}"
             exit 1
           fi
 

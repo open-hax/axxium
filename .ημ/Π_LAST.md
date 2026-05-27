@@ -1,18 +1,51 @@
-# Π handoff
+# Π fork tax — Knoxx host services decoupling — 20260526T204054Z
 
-- time: 2026-03-21T22:17:42Z
-- branch: staging
-- pre-Π HEAD: 100df62
-- Π HEAD: pending at capture time; resolved by the final commit after artifact assembly
+- Timestamp: 20260526T204054Z
+- Root repo: `/home/err/devel`
+- Scope: path-scoped preservation of Knoxx host PM2 migration into `services/openplanner`.
+- Mode: bottom-up nested submodule commit, non-destructive concurrent-agent staging.
 
-## Summary
-- Capture the z.ai live-env validation spec/results plus receipts after verifying compose pass-through, direct upstream probes, and the temporary local zai-pinned proxy.
-- Keep the latest z.ai catalog-path code snapshot aligned with its supporting docs on the current staging line.
+## Preserved child refs
 
-## Notes
-- push branch: pi/fork-tax/2026-03-21-211345
-- origin remains https://github.com/open-hax/proxx.git; snapshot published on a dedicated Π branch plus tag while local staging stays available for ongoing work.
+- Knoxx source repo: `c066cf0b206961ef70d46bd869b7db006b314d6f` (`c066cf0b2069`)
+  - Branch: `pi/fork-tax/20260526T204054Z-knoxx-host-services`
+  - Tag: `pi/fork-tax/20260526T204054Z/knoxx-host-services`
+  - Remote: `git@github.com:open-hax/knoxx.git`
+- OpenPlanner parent repo: `56d6effee7a8d97a8ddde030f381b12bd3c52ebb` (`56d6effee7a8`)
+  - Branch: `pi/fork-tax/20260526T204054Z-openplanner-knoxx-host-services`
+  - Tag: `pi/fork-tax/20260526T204054Z/openplanner-knoxx-host-services`
+  - Remote: `git@github.com:open-hax/openplanner.git`
+
+## Root paths staged for final snapshot
+
+- `services/openplanner/ecosystem.host.config.cjs` — service-owned PM2 ecosystem for Knoxx host services.
+- `services/openplanner/README.md` — operator docs for the service-owned PM2 path.
+- `orgs/open-hax/openplanner` — submodule pointer advanced to the OpenPlanner commit above.
+- `receipts.edn` and `orgs/open-hax/openplanner/packages/agents/knoxx/receipts.edn` — receipt-river evidence.
+- `.ημ/Π_LAST.md`, `.ημ/Π_STATE.sexp`, `.ημ/Π_MANIFEST.sha256` — handoff artifacts.
 
 ## Verification
-- pass: pnpm test (325/325) from 2026-03-21T22:13:55Z receipt
-- pass: docker compose up -d --build open-hax-openai-proxy + curl /health + direct z.ai /models/chat/completions + temporary local zai proxy probe from 2026-03-21T22:13:55Z receipt
+
+- `node -c services/openplanner/ecosystem.host.config.cjs`
+- `node -c orgs/open-hax/openplanner/packages/agents/knoxx/ecosystem.config.cjs`
+- `pnpm -C orgs/open-hax/openplanner/packages/agents/knoxx/backend exec shadow-cljs compile test` — 396 tests, 1111 assertions, 0 failures, 0 errors.
+- `pnpm -C orgs/open-hax/openplanner/packages/agents/knoxx/backend exec shadow-cljs compile server` — 0 warnings.
+- `pnpm -C orgs/open-hax/openplanner/packages/agents/knoxx/frontend typecheck`
+- `pnpm -C orgs/open-hax/openplanner/packages/agents/knoxx/frontend test -- BroadcastStudioPage.test.tsx CmsPage.test.tsx` — 47 files, 213 passed, 41 todo.
+- `cd orgs/open-hax/openplanner/packages/agents/knoxx/ingestion && clojure -M:test` — 45 tests, 189 assertions, 0 failures, 0 errors.
+- PM2 migration: old Knoxx/Shoedelussy entries deleted and restarted from `services/openplanner/ecosystem.host.config.cjs`; `pm2 save` completed.
+- Authenticated `GET http://127.0.0.1:8000/health` returned `status=ok`.
+- Hardcoded-source check: no `/home/err/devel`, `/app/workspace/devel`, `devel workspace`, or `devel corpus` in service ecosystem or Knoxx runtime source scope.
+- `git diff --cached --check` and high-risk secret heuristic scans passed for child commits; root staged checks run before final commit.
+
+## Concurrent dirt intentionally left untouched
+
+- Existing unrelated root workspace dirt is not staged or cleaned.
+- This fork tax stages only the Knoxx/OpenPlanner/service-owned PM2 migration paths listed above.
+- Historical broad-deletion/root clutter described in the previous recursive fork-tax artifacts remains outside this path-scoped snapshot unless explicitly requested.
+
+## Root finalization
+
+- Planned root branch: `pi/fork-tax/20260526T204054Z-knoxx-host-services`
+- Planned root tag: `pi/fork-tax/20260526T204054Z/devel-knoxx-host-services`
+- Root commit: pending at artifact render time; final tag points to the committed snapshot.
