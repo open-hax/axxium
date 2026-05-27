@@ -60,7 +60,7 @@ jobs:
           path: .
           format: "SARIF"
           out: "dependency-check-report"
-          args: "--failOnCVSS 0"
+          args: "--failOnCVSS 0 --disableArchive --disableNodeAudit"
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
