@@ -26,18 +26,6 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'ollama' }}
       MODEL: ${{ vars.MDLINT_MODEL || 'gpt-oss:20b-cloud' }}
 
-    services:
-      # Optional local Ollama for self-hosted or when no remote is configured
-      ollama:
-        image: ollama/ollama:latest
-        ports:
-          - 11434:11434
-        options: >-
-          --health-cmd "curl -sSf http://localhost:11434/api/version || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -42,6 +43,7 @@ jobs:
     environment: eta-mu-production
     steps:
       - uses: actions/checkout@v5
+      - run: git submodule update --init --depth 1 orgs/open-hax/eta-mu
       - name: configure production ssh
         run: |
           install -m 700 -d ~/.ssh
