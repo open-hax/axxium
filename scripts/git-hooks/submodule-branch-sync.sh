@@ -33,7 +33,8 @@ ensure_gitmodules_branch() {
   while read -r key path; do
     local name=${key#submodule.}
     name=${name%.path}
-    local current=$(git -C "$ROOT" config -f "$ROOT/.gitmodules" "submodule.${name}.branch" || true)
+    local current
+    current=$(git -C "$ROOT" config -f "$ROOT/.gitmodules" "submodule.${name}.branch" || true)
     if [ "$current" != "$target" ]; then
       git -C "$ROOT" config -f "$ROOT/.gitmodules" "submodule.${name}.branch" "$target"
       changed=1
@@ -51,12 +52,14 @@ submodule_dirty() {
 }
 
 submodule_in_merge_state() {
-  local gitdir=$(git -C "$1" rev-parse --git-dir)
+  local gitdir
+  gitdir=$(git -C "$1" rev-parse --git-dir)
   [ -f "$gitdir/MERGE_HEAD" ]
 }
 
 submodule_in_rebase_state() {
-  local gitdir=$(git -C "$1" rev-parse --git-dir)
+  local gitdir
+  gitdir=$(git -C "$1" rev-parse --git-dir)
   [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]
 }
 
@@ -86,7 +89,8 @@ check_push_constraints() {
       continue
     fi
 
-    local head_ref=$(git -C "$abs" symbolic-ref -q --short HEAD || true)
+    local head_ref
+    head_ref=$(git -C "$abs" symbolic-ref -q --short HEAD || true)
     if [ -z "$head_ref" ]; then
       echo "::error::Submodule $path is in detached HEAD"
       failed=1
@@ -164,8 +168,10 @@ ci_check_mergeability() {
   while read -r key path; do
     local name=${key#submodule.}
     name=${name%.path}
-    local url=$(git -C "$ROOT" config -f "$ROOT/.gitmodules" "submodule.${name}.url")
-    local slug=$(to_repo_slug "$url")
+    local url
+    url=$(git -C "$ROOT" config -f "$ROOT/.gitmodules" "submodule.${name}.url")
+    local slug
+    slug=$(to_repo_slug "$url")
     local abs="$ROOT/$path"
 
     git -C "$abs" fetch --no-tags origin "$base_branch" "$head_branch" main >/dev/null 2>&1 || true
@@ -186,7 +192,8 @@ ci_check_mergeability() {
 
     local base_ref="origin/$base_branch"
     local head_ref="origin/$head_branch"
-    local mb=$(git -C "$abs" merge-base "$base_ref" "$head_ref" || true)
+    local mb
+    mb=$(git -C "$abs" merge-base "$base_ref" "$head_ref" || true)
     local conflict=0
     if [ -z "$mb" ]; then
       conflict=1
@@ -241,18 +248,21 @@ current_branch() {
 main() {
   case "$STAGE" in
     commit)
-      local branch=$(current_branch)
+      local branch
+      branch=$(current_branch)
       special_branch "$branch" || exit 0
       ensure_gitmodules_branch "$branch"
       ;;
     push)
-      local branch=$(current_branch)
+      local branch
+      branch=$(current_branch)
       special_branch "$branch" || exit 0
       ensure_gitmodules_branch "$branch"
       check_push_constraints "$branch"
       ;;
     post-checkout)
-      local branch=$(current_branch)
+      local branch
+      branch=$(current_branch)
       check_dirty_submodules
       if special_branch "$branch"; then
         update_submodules_for_branch "$branch"

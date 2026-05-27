@@ -4,8 +4,6 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVEL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 KNOXX_BACKEND_URL="${KNOXX_BACKEND_URL:-http://localhost:8000}"
 
 echo "=== Knoxx Session Resilience Test ==="

@@ -37,8 +37,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
-        # Skip service if remote OPENAI_BASE_URL is provided
-        if: ${{ !secrets.OPENAI_BASE_URL }}
 
     steps:
       - name: Checkout
@@ -58,7 +56,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: (Optional) Pull model
-        if: ${{ !secrets.OPENAI_BASE_URL }}
+        if: ${{ env.OPENAI_BASE_URL == 'http://localhost:11434/v1' }}
         run: |
           echo "Pulling model ${MODEL} from local Ollama"
           curl -sSf http://localhost:11434/api/pull -d "{\"name\":\"${MODEL}\"}" || true

@@ -9,6 +9,7 @@ env:
   SONAR_HOST_URL: https://sonarcloud.io
   SONAR_ORG: octave-commons
   SONAR_NAMESPACE: octave-commons
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 jobs:
   prepare:
@@ -30,16 +31,13 @@ jobs:
           node scripts/sonar-bootstrap.mjs matrix --namespace "${SONAR_NAMESPACE}" --recursive true > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
       - name: Ensure Sonar projects exist
-        if: ${{ secrets.SONAR_TOKEN != '' }}
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        if: ${{ env.SONAR_TOKEN != '' }}
         run: |
           node scripts/sonar-bootstrap.mjs ensure --namespace "${SONAR_NAMESPACE}" --host "${SONAR_HOST_URL}" --org "${SONAR_ORG}" --recursive true
 
   sonar:
     needs: prepare
     runs-on: ubuntu-latest
-    if: ${{ secrets.SONAR_TOKEN != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -60,9 +58,8 @@ jobs:
           key: ${{ runner.os }}-sonar-${{ hashFiles('**/pnpm-lock.yaml', '**/package-lock.json', '**/yarn.lock', '**/bun.lock') }}
           restore-keys: ${{ runner.os }}-sonar-
       - name: SonarCloud Scan
+        if: ${{ env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarcloud-github-action@v2
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
             -Dsonar.projectKey=${{ matrix.projectKey }}

@@ -72,7 +72,8 @@ jobs:
       - name: staging deploy failure logs
         if: failure()
         run: |
-          ssh ${ETA_MU_STAGING_SSH_USER}@${ETA_MU_STAGING_SSH_HOST} "cd ${ETA_MU_STAGING_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
+          # shellcheck disable=SC2029
+          ssh "${ETA_MU_STAGING_SSH_USER}@${ETA_MU_STAGING_SSH_HOST}" "cd ${ETA_MU_STAGING_DEPLOY_PATH} && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml ps && docker compose --project-name '${ETA_MU_STAGING_COMPOSE_PROJECT_NAME}' -f services/eta-mu/compose.yaml logs --tail=200"
         env:
           ETA_MU_STAGING_SSH_HOST: ${{ vars.ETA_MU_STAGING_SSH_HOST || 'big.ussy.promethean.rest' }}
           ETA_MU_STAGING_SSH_USER: ${{ vars.ETA_MU_STAGING_SSH_USER || 'error' }}
@@ -89,7 +90,7 @@ jobs:
     steps:
       - name: wait for health
         run: |
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             if curl -fsS "${ETA_MU_STAGING_VERIFY_URL}/health" >/dev/null; then
               exit 0
             fi

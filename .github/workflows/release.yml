@@ -44,7 +44,7 @@ jobs:
         run: pnpm run -r --if-present build
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: release-${{ github.run_id }}
           target_commitish: ${{ github.event.pull_request.merge_commit_sha }}
