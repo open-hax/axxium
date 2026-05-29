@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-openplanner-kanban-orgs-riatzukiza-openplanner-specs-openplanner-graph-events-md"
+title: "OpenPlanner Graph Events"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:01:04.663Z"
+source: "orgs/riatzukiza/openplanner/specs/openplanner-graph-events.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/openplanner/specs/openplanner-graph-events.md`
+> Migrated-to-kanban: `orgs/riatzukiza/openplanner/kanban/openplanner-graph-events.md`
+
 # OpenPlanner Graph Events
 
 ## Status

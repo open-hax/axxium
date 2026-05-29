@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-comprehensive-security-md"
+title: "Comprehensive Security Suite Alignment"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.501Z"
+source: "orgs/riatzukiza/kronos/spec/comprehensive-security.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/comprehensive-security.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/comprehensive-security.md`
+
 # Comprehensive Security Suite Alignment
 
 ## Context

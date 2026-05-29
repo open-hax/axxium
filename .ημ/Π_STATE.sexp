@@ -26,3 +26,12 @@
     (tag "recorded in Π_LAST.md")
     (push "branch and tag pushed; final receipt amendment force-with-lease pushed"))
   (guardrail "this intentionally supersedes prior long-history REDACTED_SECRET branch to avoid replaying secret-bearing history"))
+
+(pi-state
+  (timestamp "20260529T040216Z")
+  (batch-manifest "/tmp/eta-mu-kanban-batches/agent_riatzukiza.json")
+  (action "eta-mu kanban migration batch agent_riatzukiza")
+  (REDACTED_SECRET-tracked-paths ("orgs/riatzukiza/kronos" "orgs/riatzukiza/openplanner"))
+  (submodules ("orgs/riatzukiza/ollama-benchmarks" "orgs/riatzukiza/openhax" "orgs/riatzukiza/riatzukiza.github.io"))
+  (verification "migration script and eta-mu-beta kanban count spot checks")
+  (concurrency "path-scoped staging only; unrelated dirt untouched"))

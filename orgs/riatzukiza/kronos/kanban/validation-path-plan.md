@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-validation-path-plan-md"
+title: "Validation Path Fix Plan"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.502Z"
+source: "orgs/riatzukiza/kronos/spec/validation-path-plan.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/validation-path-plan.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/validation-path-plan.md`
+
 # Validation Path Fix Plan
 
 ## Summary

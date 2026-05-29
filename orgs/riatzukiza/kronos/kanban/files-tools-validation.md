@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-files-tools-validation-md"
+title: "Files Tools Validation Spec"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.503Z"
+source: "orgs/riatzukiza/kronos/spec/files-tools-validation.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/files-tools-validation.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/files-tools-validation.md`
+
 # Files Tools Validation Spec
 
 ## Context

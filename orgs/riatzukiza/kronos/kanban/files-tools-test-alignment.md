@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-files-tools-test-alignment-md"
+title: "Files Tools Test Alignment"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.500Z"
+source: "orgs/riatzukiza/kronos/spec/files-tools-test-alignment.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/files-tools-test-alignment.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/files-tools-test-alignment.md`
+
 # Files Tools Test Alignment
 
 ## Context

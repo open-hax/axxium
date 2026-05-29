@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-files-security-validation-md"
+title: "Files Security Validation Spec"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.501Z"
+source: "orgs/riatzukiza/kronos/spec/files-security-validation.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/files-security-validation.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/files-security-validation.md`
+
 # Files Security Validation Spec
 
 ## Context

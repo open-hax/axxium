@@ -59,3 +59,14 @@ This run intentionally does not path-scope the REDACTED_SECRET commit. It stages
 - Root tag pushed: `pi/fork-tax/20260529T022118Z/devel-main-softreset-all-dirt`
 - Root commit: the commit containing this artifact; final tag points to the committed all-dirt snapshot.
 - Root working tree was clean immediately after the first push; this final receipt/artifact amendment is pushed by force-with-lease to keep the receipt in the snapshot.
+
+---
+
+# Π handoff: eta-mu kanban migration batch agent_riatzukiza
+
+- timestamp: 20260529T040216Z
+- batch_manifest: /tmp/eta-mu-kanban-batches/agent_riatzukiza.json
+- touched REDACTED_SECRET-tracked paths: orgs/riatzukiza/kronos, orgs/riatzukiza/openplanner
+- touched submodules: orgs/riatzukiza/ollama-benchmarks, orgs/riatzukiza/openhax, orgs/riatzukiza/riatzukiza.github.io
+- verification: migration script plus eta-mu-beta kanban count spot checks for all boardDir values
+- concurrency: path-scoped staging only; existing unrelated REDACTED_SECRET/submodule dirt left untouched

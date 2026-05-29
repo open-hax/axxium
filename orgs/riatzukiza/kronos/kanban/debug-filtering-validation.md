@@ -1,3 +1,17 @@
+---
+uuid: "orgs-riatzukiza-kronos-kanban-orgs-riatzukiza-kronos-spec-debug-filtering-validation-md"
+title: "Debug Filtering Validation Spec"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:00:58.500Z"
+source: "orgs/riatzukiza/kronos/spec/debug-filtering-validation.md"
+category: "specs"
+---
+
+> Source: `orgs/riatzukiza/kronos/spec/debug-filtering-validation.md`
+> Migrated-to-kanban: `orgs/riatzukiza/kronos/kanban/debug-filtering-validation.md`
+
 # Debug Filtering Validation Spec
 
 ## Context
