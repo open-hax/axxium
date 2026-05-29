@@ -1592,4 +1592,7 @@
 	url = git@github.com:riatzukiza/xcancelussybot.git
 [submodule "orgs/stakira/OpenUtau"]
 	path = orgs/stakira/OpenUtau
-	url = https://github.com/stakira/OpenUtau.git
+	url = git@github.com:octave-commons/OpenUtau.git
+[submodule "orgs/octave-commons/eta-mu-sol"]
+	path = orgs/octave-commons/eta-mu-sol
+	url = git@github.com:octave-commons/eta-mu-sol.git
