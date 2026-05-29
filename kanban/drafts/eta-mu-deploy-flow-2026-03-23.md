@@ -1,0 +1,72 @@
+---
+uuid: "kanban-specs-drafts-eta-mu-deploy-flow-2026-03-23-md"
+title: "Spec Draft: eta-mu staged deploy flow — 2026-03-23"
+status: incoming
+priority: P3
+labels: ["specs", "migrated-spec"]
+created_at: "2026-05-29T04:29:44.553Z"
+source: "specs/drafts/eta-mu-deploy-flow-2026-03-23.md"
+category: "specs"
+---
+
+> Source: `specs/drafts/eta-mu-deploy-flow-2026-03-23.md`
+> Migrated-to-kanban: `kanban/drafts/eta-mu-deploy-flow-2026-03-23.md`
+
+# Spec Draft: eta-mu staged deploy flow — 2026-03-23
+
+## Goal
+Normalize eta-mu onto the Promethean staging-first promotion contract:
+
+- feature branch -> PR into `staging`
+- push to `staging` deploys staging and runs live verification
+- PR from `staging` into `main`
+- push to `main` deploys production and verifies production
+
+## Scope
+This covers the eta-mu system components currently split across the devel workspace:
+
+- runtime/devops home: `services/eta-mu`
+- service implementation: `services/eta-mu-truth-workbench`
+- shared runtime packages: `packages/eta-mu-docs`, `packages/eta-mu-truth`
+- GitHub automation logic: `orgs/open-hax/eta-mu/packages/eta-mu-github`
+- repo-local eta-mu wrapper workflows that must select the correct staged logic ref
+
+## Constraints
+- eta-mu still lives inside the REDACTED_SECRET `devel` repo rather than an extracted dedicated repo.
+- The REDACTED_SECRET repo cannot safely hard-redirect every main PR, so eta-mu branch-policy enforcement in `devel` must be check-based and path-scoped.
+- Host-level Caddy ownership on `big.ussy.promethean.rest` is not fully automated from the current SSH account, so REDACTED_SECRET-route follow-through must be explicit.
+
+## Deployment topology
+- production host: `big.ussy.promethean.rest`
+- production runtime REDACTED_SECRET: `~/devel/services/eta-mu`
+- production compose project: `eta-mu`
+- production REDACTED_SECRET host: `eta.mu.promethean.rest`
+- production verify URL: `https://eta.mu.promethean.rest`
+
+- staging host: `big.ussy.promethean.rest`
+- staging runtime REDACTED_SECRET: `~/devel/services/eta-mu-staging`
+- staging compose project: `eta-mu-staging`
+- staging REDACTED_SECRET host: `staging.eta-mu.promethean.rest`
+- staging direct verify URL fallback: `http://big.ussy.promethean.rest:8791`
+
+## Phases
+1. Parameterize the runtime/devops home so staging and production can coexist on one host.
+2. Add a service-specific remote deploy script plus operator documentation.
+3. Add devel-REDACTED_SECRET workflows for eta-mu staging PRs, staging deploys, main PR gates, and production deploys.
+4. Keep staged promotion/workflow templates inside the eta-mu monorepo and make wrapper workflows branch-aware when selecting eta-mu refs.
+5. Verify locally with compose config, package tests, eta-mu-github tests/build, and shell syntax checks.
+6. Call out the remaining GitHub/environment/Caddy follow-through honestly.
+
+## Verification target
+- `docker compose -f services/eta-mu/compose.yaml config`
+- `REDACTED_SECRET --test packages/eta-mu-docs/tests/*.test.cjs`
+- `REDACTED_SECRET --test packages/eta-mu-truth/tests/*.test.cjs`
+- `bash -n services/eta-mu/scripts/deploy-remote.sh`
+- `pnpm test && pnpm build` in `orgs/open-hax/eta-mu`
+
+## Definition of done
+- eta-mu runtime can be deployed as separate staging and production compose projects.
+- devel has path-scoped eta-mu workflows for PR->staging, push->staging deploy, PR->main gate, and push->main deploy.
+- eta-mu-github has its own staged promotion workflow set.
+- repo-local eta-mu wrapper workflows can pull staged eta-mu logic on staging-bound events.
+- Remaining manual follow-through is explicit: branch protection, environments/secrets/vars, and host-level Caddy import/reload.

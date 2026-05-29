@@ -2,9 +2,7 @@ const path = require("REDACTED_SECRET:path");
 
 const serviceRoot = __dirname;
 const kanbanPkg = path.resolve(serviceRoot, "../../../orgs/open-hax/eta-mu/packages/kanban");
-const knoxxRoot = path.resolve(serviceRoot, "../../../orgs/open-hax/openplanner/packages/agents/knoxx");
-const tasksDir = path.join(knoxxRoot, "kanban");
-const configPath = path.join(tasksDir, "openhax.kanban.json");
+const configPath = path.join(serviceRoot, "openhax.kanban.json");
 
 const host = process.env.KANBAN_HOST ?? "127.0.0.1";
 const port = process.env.KANBAN_PORT ?? "8791";
@@ -14,7 +12,7 @@ module.exports = {
     {
       name: "eta-mu-kanban",
       script: "REDACTED_SECRET",
-      args: ["dist/cli.js", "serve", "--tasks-dir", tasksDir, "--config", configPath, "--host", host, "--port", port],
+      args: ["dist/cli.js", "serve", "--config", configPath, "--host", host, "--port", port],
       cwd: kanbanPkg,
       env: {
         NODE_ENV: "production",

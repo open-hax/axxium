@@ -1,0 +1,513 @@
+{
+  "generatedAt": "2026-05-29T03:58:49Z",
+  "skipped": [
+    {
+      "specDir": ".worktrees/battlebussy-ci-pr-clean/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/battlebussy-live-reconcile/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/battlebussy-main-gate-fixes/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/battlebussy-promotion/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/battlebussy-staging-bootstrap/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/proxx-shared-edge-hotfix/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": ".worktrees/shibboleth-promotion/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/archives/open-hax-openai-proxy-retired-worktree-2026-03-19/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/.stryker-tmp/sandbox-smcI3i/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/@hey-api+json-schema-ref-parser@1.0.6/REDACTED_SECRET_modules/@hey-api/json-schema-ref-parser/lib/__tests__/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/@openauthjs+openauth@0.4.3_arctic@2.3.4_hono@4.10.5/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/@standard-schema+spec@1.0.0-beta.3/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@0.4.1/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "inbox/workspaces/openhax-codex/codex-auth/REDACTED_SECRET_modules/.pnpm/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "REDACTED_SECRET_modules/.pnpm/s-js@0.4.9/REDACTED_SECRET_modules/s-js/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "REDACTED_SECRET_modules/.pnpm/tdigest@0.1.2/REDACTED_SECRET_modules/tdigest/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/eta-mu-sol/.opencode/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/fork_tales/part64/frontend/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/fork_tales/part64/frontend/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/promethean/cli/kanban/stryker-tmp/sandbox-1ffqQK/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/promethean/cli/kanban/stryker-tmp/sandbox-D5vQNp/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/promethean/cli/kanban/stryker-tmp/sandbox-S8mnhn/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/promethean/cli/kanban/stryker-tmp/sandbox-UsqO5u/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/octave-commons/promethean/cli/kanban/stryker-tmp/sandbox-ylArOT/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/commanoxx/.shadow-cljs/builds/app/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/eta-mu/REDACTED_SECRET_modules/.pnpm/@standard-schema+spec@1.1.0/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/eta-mu/REDACTED_SECRET_modules/.pnpm/effect@4.0.0-beta.59/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/eta-mu/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/eta-mu/REDACTED_SECRET_modules/.pnpm/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/@standard-schema+spec@1.1.0/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/effect@4.0.0-beta.59/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/effect@4.0.0-beta.65/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@0.4.1/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/REDACTED_SECRET_modules/.pnpm/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/.worktrees/xiaomi-mimo-contracts/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/backend/.shadow-cljs/builds/app/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/backend/.shadow-cljs/builds/server/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/backend/.shadow-cljs/builds/server-dev/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/frontend/.shadow-cljs/builds/app/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/packages/agents/knoxx/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/pseudo/workbench/.shadow-cljs/builds/app/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/pseudo/workbench/.shadow-cljs/builds/main/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/pseudo/workbench/.shadow-cljs/builds/preload/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/openplanner/pseudo/workbench/.shadow-cljs/builds/renderer/dev/ana/cljs/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.opencode/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-main/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-main/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-origin-main/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-origin-main/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-staging/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-staging/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-stash-a497a13/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/audit-stash-a497a13/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/feat-federated-ollama-downstream-routing/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/integration-repair/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/integration-repair/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/main/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/main/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/provider-catalog-route-timeout-pr/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/proxx-cljs-foundation-recovery/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/proxx-cljs-foundation-recovery/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/proxx-policy-engine/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/proxx-policy-engine/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/.worktrees/sync-main-into-staging/specs",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/.pnpm/@fastify+swagger@9.5.1/REDACTED_SECRET_modules/@fastify/swagger/lib/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/.pnpm/@fastify+swagger@9.5.1/REDACTED_SECRET_modules/@fastify/swagger/test/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@0.4.1/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@1.0.0/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/@fastify/ajv-compiler/REDACTED_SECRET_modules/ajv/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/ajv-formats/REDACTED_SECRET_modules/ajv/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/fast-json-stringify/REDACTED_SECRET_modules/ajv/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/open-hax/proxx/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/reference/anomalyco/opencode/.opencode/REDACTED_SECRET_modules/@standard-schema/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/reference/anomalyco/opencode/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/reference/code-yeongyu/oh-my-openagent/docs/superpowers/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/riatzukiza/desktop/.worktrees/fix-typecheck-deps/REDACTED_SECRET_modules/.pnpm/json-schema-traverse@0.4.1/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/riatzukiza/desktop/.worktrees/fix-typecheck-deps/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/shuv/claude-code/src/utils/bash/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/shuv/desloppify/desloppify/languages/_framework/treesitter/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/shuv/mrmd/vscode/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/shuv/openwork/apps/desktop/e2e/provider-tests/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/shuv/openwork/apps/desktop/e2e/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/shuv/penpot/frontend/playwright/ui/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/shuv/pi-mcp-adapter/examples/interactive-visualizer/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/shuv/pi-mcp-adapter/REDACTED_SECRET_modules/json-schema-traverse/spec",
+      "reason": "generated/pruned"
+    },
+    {
+      "specDir": "orgs/shuv/uptime-kuma/test/e2e/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/gates-pr35-hardening-main/docs/decisions/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/gates-pr35-hardening-main/docs/planning/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/gates-pr35-hardening-main/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/anomalyco/opencode/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/gates-of-aker/docs/decisions/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/gates-of-aker/docs/planning/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/gates-of-aker/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/promethean/cli/kanban/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/promethean/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/octave-commons/shibboleth/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/open-hax/cljs-plugin-template/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/open-hax/codex/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/open-hax/museeks/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/open-hax/openhax/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/open-hax/plugins/codex/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/ollama-benchmarks/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/ollama-benchmarks/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/openhax/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/cli/kanban/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/experimental/pantheon/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/services/autocommit/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/services/knowledge-graph/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/services/sentinel/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/riatzukiza/promethean/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/orgs/ussyverse/openclawssy/docs/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/pm2-clj-project/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/reconstitute/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/services/cephalon-cljs/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/services/kronos/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/services/mcp-fs-oauth/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/services/open-hax-openai-proxy/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/threat-radar-next-step/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/workspaces/openhax-codex/codex-auth/spec",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/kanban/sources/workspaces/openhax-codex/opencode/specs",
+      "reason": "archive/reference/source-copy"
+    },
+    {
+      "specDir": "orgs/ussyverse/monorepo/projects/ai-agents/swarmussy/projects/discord_bot/scratch/shared/qa/specs",
+      "reason": "no-markdown"
+    },
+    {
+      "specDir": "orgs/ussyverse/swarmussy/projects/discord_bot/scratch/shared/qa/specs",
+      "reason": "no-markdown"
+    }
+  ]
+}
