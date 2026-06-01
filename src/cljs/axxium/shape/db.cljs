@@ -122,7 +122,7 @@
          [:kind :text :not-null]
          [:email :text]
          [:display_name :text]
-         [:created_at :timestamptz :default "NOW()"]])))
+         [:created_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-table-actors
   []
@@ -133,21 +133,21 @@
          [:email :text]
          [:display_name :text]
          [:password_hash :text]
-         [:capabilities :jsonb :default "[]"]
-         [:roles :jsonb :default "[]"]
+         [:capabilities :jsonb :default [:raw "'[]'"]]
+         [:roles :jsonb :default [:raw "'[]'"]]
          [:status :text :default "active"]
-         [:created_at :timestamptz :default "NOW()"]
-         [:updated_at :timestamptz :default "NOW()"]])))
+         [:created_at :timestamptz :default [:raw "NOW()"]]
+         [:updated_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-table-sessions
   []
   (-> (h/create-table :sessions :if-not-exists)
       (h/with-columns
-        [[:id :uuid :primary-key :default "gen_random_uuid()"]
+        [[:id :uuid :primary-key :default [:raw "gen_random_uuid()"]]
          [:actor_id :text :not-null :references [:actors :id]]
          [:token_hash :text :not-null]
          [:expires_at :timestamptz :not-null]
-         [:created_at :timestamptz :default "NOW()"]])))
+         [:created_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-table-oauth-clients
   []
@@ -156,10 +156,10 @@
         [[:id :text :primary-key]
          [:secret_hash :text :not-null]
          [:name :text :not-null]
-         [:redirect_uris :jsonb :default "[]"]
-         [:grant_types :jsonb :default "[]"]
-         [:scopes :jsonb :default "[]"]
-         [:created_at :timestamptz :default "NOW()"]])))
+         [:redirect_uris :jsonb :default [:raw "'[]'"]]
+         [:grant_types :jsonb :default [:raw "'[]'"]]
+         [:scopes :jsonb :default [:raw "'[]'"]]
+         [:created_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-index-actors-email
   []
