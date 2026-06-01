@@ -72,3 +72,56 @@ For every assistant response, you MUST satisfy this output contract even for sim
 
 ## OpenCode eta-mu tool disclosure
 When asked what tools you have, include the eta-mu OpenCode extension tools explicitly: `apply_patch`, `chronos`, `contract_fulfillment`, `graph-memory-search`, `graph-memory-recall`, `graph-memory-ingest`, `context-hydrate`, `graph-memory-status`, `render_image`, `opmf_parse`, `skill_graph`, `receipt_river`, `session_mycology`, and `websearch`.
+
+## Kanban → GitHub → Kimi workflow
+
+The workspace uses markdown Kanban cards as planning source, GitHub issues as collaboration/sync surface, Kimi/OpenCode for issue triage and PR review, CodeRabbit for secondary review, and Discord for event visibility.
+
+Agent rules:
+
+- Before opening new GitHub issues, check the relevant Kanban directory below.
+- Synced GitHub issues contain `<!-- openhax-kanban-sync uuid="..." -->`; treat that marker as idempotent identity and do not duplicate it.
+- GitHub labels from sync include `kanban`, `status:<status>`, `priority:<priority>`, and normalized task labels.
+- Kimi issue/PR workflows must read Kanban context when labels or sync markers are present.
+- CodeRabbit/Kimi inline review comments are merge-blocking where GitHub branch protection supports required conversation resolution.
+- Discord mirrors GitHub events and inline code review comments via repository workflow secrets; never log webhook URLs or tokens.
+- Use throttled syncs to avoid GitHub secondary content-creation limits:
+  ```bash
+  eta-mu kanban sync github --tasks-dir <kanban-dir> --repo <owner/repo> --dry-run
+  eta-mu kanban sync github --tasks-dir <kanban-dir> --repo <owner/repo> --max-writes 25 --write-delay-ms 5000
+  ```
+
+Canonical Kanban directories currently known to sync to GitHub:
+
+| Repo | Kanban directory | Tasks | Config |
+|---|---|---|---|
+| `riatzukiza/devel` | `kanban` | 150 | `kanban/openhax.kanban.json` |
+| `octave-commons/daimoi` | `orgs/octave-commons/daimoi/kanban` | 7 | `orgs/octave-commons/daimoi/kanban/openhax.kanban.json` |
+| `octave-commons/fork_tales` | `orgs/octave-commons/fork_tales/kanban` | 56 | `orgs/octave-commons/fork_tales/kanban/openhax.kanban.json` |
+| `octave-commons/gates-of-aker` | `orgs/octave-commons/gates-of-aker/docs/decisions/kanban` | 12 | `orgs/octave-commons/gates-of-aker/docs/decisions/kanban/openhax.kanban.json` |
+| `octave-commons/gates-of-aker` | `orgs/octave-commons/gates-of-aker/docs/planning/kanban` | 87 | `orgs/octave-commons/gates-of-aker/docs/planning/kanban/openhax.kanban.json` |
+| `octave-commons/gates-of-aker` | `orgs/octave-commons/gates-of-aker/kanban` | 163 | `orgs/octave-commons/gates-of-aker/kanban/openhax.kanban.json` |
+| `octave-commons/pantheon` | `orgs/octave-commons/pantheon/kanban` | 1 | `orgs/octave-commons/pantheon/kanban/openhax.kanban.json` |
+| `octave-commons/kanban` | `orgs/octave-commons/promethean/cli/kanban/kanban` | 6 | `orgs/octave-commons/promethean/cli/kanban/kanban/openhax.kanban.json` |
+| `octave-commons/promethean` | `orgs/octave-commons/promethean/docs/kanban` | 2 | `orgs/octave-commons/promethean/docs/kanban/openhax.kanban.json` |
+| `octave-commons/promethean` | `orgs/octave-commons/promethean/kanban` | 101 | `orgs/octave-commons/promethean/kanban/openhax.kanban.json` |
+| `octave-commons/shibboleth` | `orgs/octave-commons/shibboleth/kanban` | 21 | `orgs/octave-commons/shibboleth/kanban/openhax.kanban.json` |
+| `octave-commons/simulacron` | `orgs/octave-commons/simulacron/kanban` | 3 | `orgs/octave-commons/simulacron/kanban/openhax.kanban.json` |
+| `open-hax/cljs-plugin-template` | `orgs/open-hax/archived/cljs-plugin-template/kanban` | 2 | `orgs/open-hax/archived/cljs-plugin-template/kanban/openhax.kanban.json` |
+| `open-hax/voxx` | `orgs/open-hax/archived/voxx/kanban` | 4 | `orgs/open-hax/archived/voxx/kanban/openhax.kanban.json` |
+| `open-hax/eta-mu` | `orgs/open-hax/eta-mu/kanban` | 27 | `orgs/open-hax/eta-mu/kanban/openhax.kanban.json` |
+| `open-hax/eta-mu` | `orgs/open-hax/eta-mu/packages/eta-mu-extensions/kanban` | 1 | `orgs/open-hax/eta-mu/packages/eta-mu-extensions/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/kanban` | 14 | `orgs/open-hax/openplanner/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/agents/cephalon/kanban` | 30 | `orgs/open-hax/openplanner/packages/agents/cephalon/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-clj/kanban` | 2 | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-clj/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-cljs/kanban` | 66 | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-cljs/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-ts/kanban` | 1 | `orgs/open-hax/openplanner/packages/agents/cephalon/packages/cephalon-ts/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/agents/cephalon/recovered/cephalon-clj/kanban` | 1 | `orgs/open-hax/openplanner/packages/agents/cephalon/recovered/cephalon-clj/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/graph/graph-weaver/kanban` | 3 | `orgs/open-hax/openplanner/packages/graph/graph-weaver/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/graph/graph-weaver-aco/kanban` | 6 | `orgs/open-hax/openplanner/packages/graph/graph-weaver-aco/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/packages/graph/myrmex/kanban` | 5 | `orgs/open-hax/openplanner/packages/graph/myrmex/kanban/openhax.kanban.json` |
+| `open-hax/openplanner` | `orgs/open-hax/openplanner/pseudo/graph-runtime/kanban` | 2 | `orgs/open-hax/openplanner/pseudo/graph-runtime/kanban/openhax.kanban.json` |
+| `open-hax/proxx` | `orgs/open-hax/proxx/kanban` | 126 | `orgs/open-hax/proxx/kanban/openhax.kanban.json` |
+| `open-hax/tooloxx` | `orgs/open-hax/tooloxx/docs/imports/devel-root/kanban` | 6 | `orgs/open-hax/tooloxx/docs/imports/devel-root/kanban/openhax.kanban.json` |
+| `open-hax/tooloxx` | `orgs/open-hax/tooloxx/docs/imports/promethean/kanban` | 4 | `orgs/open-hax/tooloxx/docs/imports/promethean/kanban/openhax.kanban.json` |
+| `open-hax/mcp-fs-oauth` | `orgs/open-hax/tooloxx/services/mcp-fs-oauth/kanban` | 2 | `orgs/open-hax/tooloxx/services/mcp-fs-oauth/kanban/openhax.kanban.json` |
