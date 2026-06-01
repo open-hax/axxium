@@ -8,7 +8,7 @@
   ;; GET /health — Service health
   (.get app "/health"
     (fn [_req reply]
-      (-> (db/query "SELECT 1 as ping" [])
+      (-> (db/query-sql (db/q-health-check))
           (.then
             (fn [_]
               (.send reply (clj->js {:status "ok"

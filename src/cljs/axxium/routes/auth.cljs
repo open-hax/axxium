@@ -6,9 +6,9 @@
             [axxium.config :as cfg]
             [axxium.db :as db]
             [axxium.auth.session :as session]
-            [axxium.schema :as schema]))
-
-(def ^:private bcrypt (js/require "bcrypt"))
+            [axxium.schema :as schema]
+            [axxium.extern.bcrypt :as bcrypt]
+            [promesa.core :as p]))
 
 (defn- body-map [req]
   (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
@@ -21,10 +21,10 @@
 
 (defn- hash-password [password]
   (let [salt-rounds (cfg/get-in-config [:password/salt-rounds])]
-    (.hash bcrypt password salt-rounds)))
+    (bcrypt/hash password salt-rounds)))
 
 (defn- verify-password [password hash]
-  (.compare bcrypt password hash))
+  (bcrypt/compare password hash))
 
 (defn- sanitize-actor [actor]
   (dissoc actor :password_hash))
@@ -34,10 +34,10 @@
   [app]
   (.post app "/api/auth/signup"
          (fn [req reply]
-           (let [body (body-map req)
-                 email (str/lower-case (str/trim (str (:email body))))
-                 password (str (:password body))
-                 display-name (str/trim (str (or (:display-name body) (:display_name body) email)))]
+           (p/let [body (body-map req)
+                   email (str/lower-case (str/trim (str (:email body))))
+                   password (str (:password body))
+                   display-name (str/trim (str (or (:display-name body) (:display_name body) email)))]
              (cond
                (str/blank? email)
                (.send (.code reply 400) (clj->js {:error "email is required"}))
@@ -49,72 +49,69 @@
                (.send (.code reply 400) (clj->js {:error "password must be at least 8 characters"}))
 
                :else
-               (-> (db/query-one "SELECT id FROM actors WHERE email = $1" [email])
+               (-> (db/query-one-sql
+                    (db/q-select-actor-by-email {:email email}))
                    (.then (fn [existing]
                             (when existing
                               (throw (http-error 409 "email_exists" "An account with this email already exists")))))
                    (.then (fn [_]
-                            (-> (hash-password password)
-                                (.then (fn [password-hash]
-                                         (let [entity-id (str "entity_" (random-uuid))
-                                               actor-id (str "actor_" (random-uuid))]
-                                           (-> (db/query
-                                                "INSERT INTO entities (id, kind, email, display_name) VALUES ($1, $2, $3, $4)"
-                                                [entity-id "human" email display-name])
-                                               (.then (fn [_]
-                                                        (db/query
-                                                         "INSERT INTO actors (id, entity_id, email, display_name, password_hash, capabilities, roles, status)
-                                                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
-                                                         [actor-id entity-id email display-name password-hash
-                                                          (clj->js [:axxium/login :axxium/read :axxium/write])
-                                                          (clj->js [:axxium/user])
-                                                          "active"])))
-                                               (.then (fn [_]
-                                                        (-> (db/query-one "SELECT * FROM actors WHERE id = $1" [actor-id])
-                                                            (.then (fn [actor]
-                                                                     (let [actor (js->clj actor :keywordize-keys true)]
-                                                                       (-> (session/create-session! actor)
-                                                                           (.then (fn [{:keys [token]}]
-                                                                                    (session/set-session-cookie reply token)
-                                                                                    (.send reply (clj->js
-                                                                                                  {:ok true
-                                                                                                   :actor (sanitize-actor actor)
-                                                                                                   :token token}))))))))))))))))))
+                            (p/let [password-hash (hash-password password)
+                                    entity-id (str "entity_" (random-uuid))
+                                    actor-id (str "actor_" (random-uuid))
+                                    _ (db/query-sql (db/q-insert-entity {:id entity-id
+                                                                          :kind "human"
+                                                                          :email email
+                                                                          :display-name display-name}))
+                                    _ (db/query-sql (db/q-insert-actor {:id actor-id
+                                                                          :entity-id entity-id
+                                                                          :email email
+                                                                          :display-name display-name
+                                                                          :password-hash password-hash
+                                                                          :capabilities [:axxium/login :axxium/read :axxium/write]
+                                                                          :roles [:axxium/user]
+                                                                          :status "active"}))
+                                    actor (db/query-one-sql (db/q-select-actor-by-id {:id actor-id}))
+                                    actor (js->clj actor :keywordize-keys true)
+                                    {:keys [token]} (session/create-session! actor)]
+                              (session/set-session-cookie reply token)
+                              (.send reply (clj->js
+                                            {:ok true
+                                             :actor (sanitize-actor actor)
+                                             :token token})))))
                    (.catch (fn [err]
                              (.send (.code reply (or (.-statusCode err) 500))
                                     (clj->js {:error (or (.-message err) "Signup failed")
-                                               :code (or (.-code err) "unknown")}))))))))))
+                                                :code (or (.-code err) "unknown")}))))))))))
 
 (defn register-login-route!
   "POST /api/auth/login — Email/password login."
   [app]
   (.post app "/api/auth/login"
          (fn [req reply]
-           (let [body (body-map req)
-                 email (str/lower-case (str/trim (str (:email body))))
-                 password (str (:password body))]
+           (p/let [body (body-map req)
+                   email (str/lower-case (str/trim (str (:email body))))
+                   password (str (:password body))]
              (if (or (str/blank? email) (str/blank? password))
                (.send (.code reply 400) (clj->js {:error "email and password are required"}))
-               (-> (db/query-one "SELECT * FROM actors WHERE email = $1 AND status = 'active'" [email])
+               (-> (db/query-one-sql
+                    (db/q-select-actor-by-email-active {:email email}))
                    (.then (fn [actor]
                             (if-not actor
                               (throw (http-error 401 "invalid_credentials" "Invalid email or password"))
-                              (let [actor (js->clj actor :keywordize-keys true)]
-                                (-> (verify-password password (:password_hash actor))
-                                    (.then (fn [valid?]
-                                             (if-not valid?
-                                               (throw (http-error 401 "invalid_credentials" "Invalid email or password"))
-                                               (-> (session/create-session! actor)
-                                                   (.then (fn [{:keys [token]}]
-                                                            (session/set-session-cookie reply token)
-                                                            (.send reply (clj->js
-                                                                          {:ok true
-                                                                           :actor (sanitize-actor actor)
-                                                                           :token token})))))))))))))
+                              (p/let [actor (js->clj actor :keywordize-keys true)
+                                      valid? (verify-password password (:password_hash actor))]
+                                (if-not valid?
+                                  (throw (http-error 401 "invalid_credentials" "Invalid email or password"))
+                                  (p/let [{:keys [token]} (session/create-session! actor)]
+                                    (session/set-session-cookie reply token)
+                                    (.send reply (clj->js
+                                                  {:ok true
+                                                   :actor (sanitize-actor actor)
+                                                   :token token}))))))))
                    (.catch (fn [err]
                              (.send (.code reply (or (.-statusCode err) 500))
                                     (clj->js {:error (or (.-message err) "Login failed")
-                                               :code (or (.-code err) "unknown")}))))))))))
+                                                :code (or (.-code err) "unknown")}))))))))))
 
 (defn register-logout-route!
   "POST /api/auth/logout — Clear session."
@@ -136,13 +133,14 @@
               (.then (fn [ctx]
                        (if-not ctx
                          (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
-                         (-> (db/query-one "SELECT * FROM actors WHERE id = $1" [(:auth/actor-id ctx)])
+                         (-> (db/query-one-sql
+                              (db/q-select-actor-by-id {:id (:auth/actor-id ctx)}))
                              (.then (fn [actor]
                                       (if-not actor
                                         (.send (.code reply 401) (clj->js {:error "Actor not found"}))
                                         (.send reply (clj->js
                                                       {:ok true
-                                                       :actor (sanitize-actor (js->clj actor :keywordize-keys true))})))))))))))))
+                                                       :actor (sanitize-actor (js->clj actor :keywordize-keys true))}))))))))))))
 
 (defn register-config-route!
   "GET /api/auth/config — Public auth configuration."
@@ -162,4 +160,4 @@
   (register-signup-route! app)
   (register-login-route! app)
   (register-logout-route! app)
-  (register-me-route! app))
+  (register-me-route! app)))

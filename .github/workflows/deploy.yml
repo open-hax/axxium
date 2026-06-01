@@ -42,9 +42,11 @@ jobs:
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
             --exclude node_modules \
             --exclude .git \
+            --exclude .shadow-cljs \
+            --exclude dist-dev \
             ./ $DEPLOY_USER@$DEPLOY_HOST:~/services/axxium/
           
-          # Install and restart
+          # Deploy with Docker Compose
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $DEPLOY_USER@$DEPLOY_HOST '
-            cd ~/services/axxium && npm install && pm2 restart axxium || pm2 start dist/server.js --name axxium
+            cd ~/services/axxium && docker compose up -d --build
           '

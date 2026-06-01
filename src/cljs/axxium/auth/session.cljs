@@ -5,15 +5,15 @@
   (:require [axxium.config :as cfg]
             [axxium.db :as db]
             [axxium.auth.token :as token]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            ["node:crypto" :as crypto]))
 
 (def COOKIE-NAME (cfg/get-in-config [:session/cookie-name]))
 
 (defn- hash-token [token]
-  (let [crypto (js/require "node:crypto")]
-    (.createHash crypto "sha256")
-    (.update token)
-    (.digest "hex")))
+  (-> (.createHash crypto "sha256")
+      (.update token)
+      (.digest "hex")))
 
 (defn- body-map [req]
   (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
@@ -28,9 +28,10 @@
                        actor-id (:actor/id actor)
                        expiry-hours (cfg/get-in-config [:jwt/expiry-hours])
                        expires-at (js/Date. (+ (.getTime (js/Date.)) (* expiry-hours 3600000)))]
-                   (-> (db/query
-                        "INSERT INTO sessions (actor_id, token_hash, expires_at) VALUES ($1, $2, $3)"
-                        [actor-id token-hash expires-at])
+                   (-> (db/query-sql
+                        (db/q-insert-session {:actor-id actor-id
+                                              :token-hash token-hash
+                                              :expires-at expires-at}))
                        (.then (fn [_]
                                 {:token token
                                  :actor actor})))))))))
@@ -43,21 +44,17 @@
     (-> (token/verify-token token)
         (.then (fn [claims]
                  (let [actor-id (:sub claims)]
-                   (-> (db/query-one
-                        "SELECT a.* FROM actors a
-                         JOIN sessions s ON a.id = s.actor_id
-                         WHERE a.id = $1 AND s.token_hash = $2 AND s.expires_at > NOW()"
-                        [actor-id (hash-token token)])
+                   (-> (db/query-one-sql
+                        (db/q-select-actor-by-session actor-id (hash-token token)))
                        (.then (fn [actor]
                                 (when actor
-                                  (js->clj actor :keywordize-keys true))))))))
+                                  (js->clj actor :keywordize-keys true)))))))
         (.catch (fn [_] nil)))))
 
 (defn delete-session!
   "Delete a session by token."
   [token]
-  (db/query "DELETE FROM sessions WHERE token_hash = $1"
-            [(hash-token token)]))
+  (db/query-sql (db/q-delete-session-by-hash (hash-token token))))
 
 (defn set-session-cookie
   "Set the session cookie on a Fastify reply."
@@ -97,3 +94,4 @@
                     :auth/email (:email actor)
                     :auth/capabilities (js->clj (:capabilities actor) :keywordize-keys true)
                     :auth/roles (js->clj (:roles actor) :keywordize-keys true)}))))))
+)

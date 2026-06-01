@@ -8,3 +8,5 @@ target/
 .shadow-cljs/
 .cpcache/
 .nrepl-port
+.clj-kondo/.cache/
+.lsp/.cache/

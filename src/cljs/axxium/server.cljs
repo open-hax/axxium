@@ -5,22 +5,25 @@
             [axxium.db :as db]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
-            [axxium.routes.health :as health-routes]))
+            [axxium.routes.health :as health-routes]
+            ["fastify" :default Fastify]
+            ["@fastify/cors" :default fastifyCors]
+            ["@fastify/cookie" :default fastifyCookie]
+            ["@fastify/static" :default fastifyStatic]
+            ["node:path" :as path]))
 
 (defn- create-app
   "Create and configure the Fastify application."
   []
-  (let [fastify (js/require "fastify")
-        app (fastify #js {:logger true})]
-    ;; Register plugins
-    (-> (.register app (js/require "@fastify/cors")
-                   #js {:origin true
-                        :credentials true
-                        :methods #js ["GET" "POST" "PUT" "DELETE" "OPTIONS"]
-                        :allowedHeaders #js ["Authorization" "Content-Type" "X-Requested-With"]})
+  (let [app (Fastify #js {:logger true})]
+    (-> (.register app fastifyCors
+                    #js {:origin true
+                         :credentials true
+                         :methods #js ["GET" "POST" "PUT" "DELETE" "OPTIONS"]
+                         :allowedHeaders #js ["Authorization" "Content-Type" "X-Requested-With"]})
          (.then
            (fn [_]
-             (.register app (js/require "@fastify/cookie")))))
+             (.register app fastifyCookie))))
     app))
 
 (defn- register-routes!
@@ -33,10 +36,8 @@
 (defn- register-static!
   "Register static file serving for the portal."
   [app]
-  (-> (.register app (js/require "@fastify/static")
-                  #js {:root (str (js/require "node:path")
-                                 (.join (js/require "node:path")
-                                        js/__dirname ".." "resources" "public"))
+  (-> (.register app fastifyStatic
+                  #js {:root (.join path js/__dirname ".." "resources" "public")
                        :prefix "/portal/"})))
 
 (defn start!
