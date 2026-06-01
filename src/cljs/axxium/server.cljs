@@ -29,6 +29,7 @@
 (defn- register-routes!
   "Register all API routes on the app."
   [app]
+  (println "DEBUG: register-auth-routes! type:" (js/typeof auth-routes/register-auth-routes!))
   (health-routes/register-health-routes! app)
   (auth-routes/register-auth-routes! app)
   (actor-routes/register-actor-routes! app))
