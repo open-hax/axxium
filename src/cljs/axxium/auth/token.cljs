@@ -12,12 +12,10 @@
   "Create a JWT for an actor with their capabilities.
    Returns promise of token string."
   [actor]
-  (let [secret (cfg/get-in-config [:jwt/secret])
+  (let [secret-key (secret-key)
         issuer (cfg/get-in-config [:jwt/issuer])
         audience (cfg/get-in-config [:jwt/audience])
         expiry-hours (cfg/get-in-config [:jwt/expiry-hours])
-        encoder (new (.-TextEncoder js/globalThis))
-        secret-key (.encode encoder secret)
         claims {:sub (:actor/id actor)
                 :entity-id (:actor/entity-id actor)
                 :email (:actor/email actor)
@@ -36,11 +34,9 @@
   "Verify a JWT and return the claims.
    Returns promise of verified payload or throws."
   [token]
-  (let [secret (cfg/get-in-config [:jwt/secret])
+  (let [secret-key (secret-key)
         issuer (cfg/get-in-config [:jwt/issuer])
-        audience (cfg/get-in-config [:jwt/audience])
-        encoder (new (.-TextEncoder js/globalThis))
-        secret-key (.encode encoder secret)]
+        audience (cfg/get-in-config [:jwt/audience])]
     (-> (jose/jwtVerify token secret-key #js {:issuer issuer
                                                 :audience audience
                                                 :clockTolerance 60})

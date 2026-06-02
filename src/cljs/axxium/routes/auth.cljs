@@ -97,11 +97,11 @@
                   (.send reply (clj->js
                                 {:ok true
                                  :actor (sanitize-actor actor)
-                                 :token token}))))))))
-    (catch js/Error err
-      (.send (.code reply (or (.-statusCode err) 500))
-             (clj->js {:error (or (.-message err) "Login failed")
-                       :code (or (.-code err) "unknown")})))))
+                                 :token token})))))))))))
+     (catch js/Error err
+       (.send (.code reply (or (.-statusCode err) 500))
+              (clj->js {:error (or (.-message err) "Login failed")
+                        :code (or (.-code err) "unknown")})))
 
 (defn register-signup-route!
   "POST /api/auth/signup — Email/password registration."
@@ -140,7 +140,7 @@
                                         (.send (.code reply 401) (clj->js {:error "Actor not found"}))
                                         (.send reply (clj->js
                                                       {:ok true
-                                                       :actor (sanitize-actor (js->clj actor :keywordize-keys true))}))))))))))))
+                                                       :actor (sanitize-actor (js->clj actor :keywordize-keys true))})))))))))))))
 
 (defn register-config-route!
   "GET /api/auth/config — Public auth configuration."

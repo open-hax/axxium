@@ -37,7 +37,7 @@
   "Register static file serving for the portal."
   [app]
   (-> (.register app fastifyStatic
-                  #js {:root (.join path js/__dirname ".." "resources" "public")
+                  #js {:root (.resolve path "resources" "public")
                        :prefix "/portal/"})))
 
 (defn start!
@@ -49,16 +49,16 @@
       (.then
         (fn [_]
           (println "Database schema initialized")
-           (let [app (create-app)]
-             (register-routes! app)
-             (register-static! app)
-            (.then
-              (.listen app #js {:port (cfg/get-in-config [:axxium/port])
-                                :host (cfg/get-in-config [:axxium/host])})
-              (fn [address]
-                (println (str "Axxium listening on " address))
-                (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
-                app)))))
+          (let [app (create-app)]
+            (register-routes! app)
+            (register-static! app)
+            (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])
+                                  :host (cfg/get-in-config [:axxium/host])})
+                (.then
+                  (fn [address]
+                    (println (str "Axxium listening on " address))
+                    (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
+                    app))))))
       (.catch
         (fn [err]
           (println (str "Failed to start Axxium: " (.-message err)))
