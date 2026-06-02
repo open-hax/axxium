@@ -2,12 +2,11 @@
   "JWT token creation and verification using jose.
    Tokens carry the auth context that downstream services consume."
   (:require [axxium.config :as cfg]
-            [clojure.string :as str]
-            ["jose" :refer [SignJWT jwtVerify]]))
+            [axxium.extern.jose :as jose]))
 
 (defn- secret-key []
   (let [secret (cfg/get-in-config [:jwt/secret])]
-    (.encode (new js/TextEncoder) secret)))
+    (.encode (new (.-TextEncoder js/globalThis)) secret)))
 
 (defn create-token
   "Create a JWT for an actor with their capabilities.
@@ -25,7 +24,7 @@
                 :capabilities (:actor/capabilities actor)
                 :roles (:actor/roles actor)
                 :status (:actor/status actor)}]
-    (-> (new SignJWT (clj->js claims))
+    (-> (new jose/SignJWT (clj->js claims))
         (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
         (.setIssuedAt)
         (.setIssuer issuer)
@@ -42,8 +41,8 @@
         audience (cfg/get-in-config [:jwt/audience])
         encoder (new (.-TextEncoder js/globalThis))
         secret-key (.encode encoder secret)]
-    (-> (jwtVerify token secret-key #js {:issuer issuer
-                                         :audience audience
-                                         :clockTolerance 60})
+    (-> (jose/jwtVerify token secret-key #js {:issuer issuer
+                                                :audience audience
+                                                :clockTolerance 60})
         (.then (fn [result]
                  (js->clj (.-payload result) :keywordize-keys true))))))

@@ -1,0 +1,47 @@
+services:
+  axxium:
+    build: .
+    container_name: axxium
+    ports:
+      - "8787:8787"
+    environment:
+      - AXXIUM_PORT=8787
+      - AXXIUM_HOST=0.0.0.0
+      - AXXIUM_PUBLIC_BASE_URL=https://axxium.promethean.rest
+      - DB_HOST=axxium-db
+      - DB_PORT=5432
+      - DB_NAME=axxium
+      - DB_USER=axxium
+      - DB_PASSWORD=${DB_PASSWORD:-axxium_password}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - JWT_ISSUER=axxium
+      - JWT_AUDIENCE=promethean
+      - BCRYPT_SALT_ROUNDS=12
+    depends_on:
+      - axxium-db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  axxium-db:
+    image: postgres:16-alpine
+    container_name: axxium-db
+    environment:
+      - POSTGRES_DB=axxium
+      - POSTGRES_USER=axxium
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-axxium_password}
+    volumes:
+      - axxium-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axxium -d axxium"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  axxium-postgres-data:

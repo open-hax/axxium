@@ -16,9 +16,8 @@
                 (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
                 (let [limit (js/parseInt (or (aget (aget req "query") "limit") "50"))
                       offset (js/parseInt (or (aget (aget req "query") "offset") "0"))]
-                  (-> (db/query-all
-                       "SELECT * FROM actors WHERE status = 'active' ORDER BY created_at DESC LIMIT $1 OFFSET $2"
-                       [limit offset])
+                  (-> (db/query-all-sql
+                                          (db/q-select-actors-active {:limit limit :offset offset}))
                       (.then
                         (fn [actors]
                           (.send reply (clj->js {:ok true
@@ -34,7 +33,8 @@
               (if-not ctx
                 (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
                 (let [actor-id (aget (aget req "params") "id")]
-                  (-> (db/query-one "SELECT * FROM actors WHERE id = $1" [actor-id])
+                  (-> (db/query-one-sql
+                        (db/q-select-actor-by-id {:id actor-id}))
                       (.then
                         (fn [actor]
                           (if-not actor
@@ -50,7 +50,8 @@
             (fn [ctx]
               (if-not ctx
                 (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
-                (-> (db/query-one "SELECT * FROM actors WHERE id = $1" [(:auth/actor-id ctx)])
+                (-> (db/query-one-sql
+                        (db/q-select-actor-by-id {:id (:auth/actor-id ctx)}))
                     (.then
                       (fn [actor]
                         (if-not actor
@@ -67,7 +68,8 @@
               (if-not ctx
                 (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
                 (let [entity-id (aget (aget req "params") "id")]
-                  (-> (db/query-one "SELECT * FROM entities WHERE id = $1" [entity-id])
+                  (-> (db/query-one-sql
+                        (db/q-select-entity-by-id {:id entity-id}))
                       (.then
                         (fn [entity]
                           (if-not entity
@@ -86,9 +88,8 @@
                 (let [actor-id (aget (aget req "params") "id")
                       body (js->clj (or (aget req "body") #js {}) :keywordize-keys true)
                       capabilities (:capabilities body)]
-                  (-> (db/query
-                       "UPDATE actors SET capabilities = $1, updated_at = NOW() WHERE id = $2"
-                       [(clj->js capabilities) actor-id])
+                  (-> (db/query-sql
+                                          (db/q-update-actor-capabilities actor-id capabilities))
                       (.then
                         (fn [_]
                           (.send reply (clj->js {:ok true})))))))))))))
