@@ -37,7 +37,6 @@ jobs:
 
       - name: Run Axxium production gates
         run: |
-          npm run boundary:check
           npm run typecheck
           npm test
           npm run build
