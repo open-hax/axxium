@@ -1,9 +1,10 @@
 (fork-tax-snapshot
   (time "20260610T042416Z")
-  (repo "riatzukiza/devel")
+  (repo "open-hax/axxium")
   (tag "fork-tax/20260610-ci-automation")
   (source-branch "feat/ci-automation-1781026522")
   (base "origin/staging")
+  (snapshot-commit "784ef6cb62bb1e22d4e3613d99857833b86919be")
   (scope (tracked-changes 33))
   (submodule-updates
     (orgs/octave-commons (daimoi eros-eris-field eros-eris-field-app eta-mu-sol fork_tales gates-of-aker lineara_conversation_export promethean promethean-agent-system shibboleth simulacron))

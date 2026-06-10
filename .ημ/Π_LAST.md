@@ -1,9 +1,9 @@
 # Π fork-tax snapshot — 20260610T042416Z
 
-- Repository: riatzukiza/devel
+- Repository: open-hax/axxium (origin remote)
 - Source branch: `feat/ci-automation-1781026522`
 - Base: `origin/staging`
-- Snapshot commit: (pending)
+- Snapshot commit: `784ef6cb62bb1e22d4e3613d99857833b86919be`
 - Π tag: `fork-tax/20260610-ci-automation`
 
 ## Scope (33 tracked files, submodule pointers + policy + config)
