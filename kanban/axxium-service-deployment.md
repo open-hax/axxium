@@ -1,6 +1,6 @@
 ---
 uuid: axxium-service-deployment
-title: "Add Axxium to orgs/open-hax/services deployment"
+title: "Add Axxium to the centralized DigitalOcean deployment"
 status: todo
 priority: P1
 labels: ["axxium", "deployment", "services", "docker", "pm2"]
@@ -10,24 +10,27 @@ points: 5
 category: infrastructure
 ---
 
-# Add Axxium to orgs/open-hax/services Deployment
+# Add Axxium to the centralized DigitalOcean deployment
 
 ## Goal
-Integrate Axxium into the OpenHax services deployment infrastructure alongside Proxx, Knoxx, and Openplanner.
+Add Axxium to the declared `open-hax/services` DigitalOcean stack. Until this
+card is complete, Axxium has no deployed testing, staging, or production slot.
 
 ## Requirements
-- [ ] Create `services/axxium/` directory with deployment configs
-- [ ] Docker Compose setup for Axxium + PostgreSQL
-- [ ] PM2 ecosystem config for production
+- [ ] Create `digitalocean/services/axxium/` with a portable Compose definition
+- [ ] Add a CI-owned immutable Axxium image build
+- [ ] Declare host placement in `digitalocean/hosts/production.yaml`
 - [ ] Environment variable template (`.env.example`)
 - [ ] Health check endpoint integration
 - [ ] Database migration strategy
+- [ ] Pinned host trust and protected-environment deployment gate
 
 ## Acceptance Criteria
-- `docker compose up` in services/axxium starts the full stack
-- PM2 can manage Axxium process in production
+- Services CI builds and publishes an immutable Axxium image
+- the declared DigitalOcean Compose project starts the full stack
 - Database migrations run automatically on startup
-- Health check passes for load balancer integration
+- Services live verification proves the health check through declared ingress
+- no Axxium repository workflow mutates a host directly
 
 ## Related
 - Proxx services: `services/proxx/`
