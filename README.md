@@ -28,6 +28,14 @@ npm run build
 npm start
 ```
 
+## Deployment ownership
+
+Axxium currently owns application validation and portable packaging only. It
+does not declare a testing, staging, or production host. The former direct SSH
+workflows were retired; any future production image build, host placement,
+deployment, and live verification must be added to the declared DigitalOcean
+contract in `open-hax/services`.
+
 ## API Endpoints
 
 ### Auth

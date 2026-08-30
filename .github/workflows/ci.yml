@@ -7,6 +7,19 @@ on:
     branches: [main, staging]
 
 jobs:
+  deployment-boundary:
+    name: deployment-boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Reject retired deployment authority
+        run: |
+          node scripts/check-deployment-boundary.mjs --self-test
+          node scripts/check-deployment-boundary.mjs
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -34,4 +47,3 @@ jobs:
 
       - name: Test
         run: npm test
-        continue-on-error: true
