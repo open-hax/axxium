@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-cljs/
+target/
+.shadow-cljs/
+.cpcache/
+.lsp/
+*.log
+.env
