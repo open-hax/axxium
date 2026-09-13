@@ -5,10 +5,12 @@ WORKDIR /app
 # Copy built application
 COPY dist/ ./dist/
 COPY resources/ ./resources/
-COPY package.prod.json ./package.json
+COPY package.json package-lock.json ./
 
 # Install only production dependencies
-RUN npm install --ignore-scripts --production
+RUN npm ci --ignore-scripts --omit=dev
+
+USER node
 
 # Expose port
 EXPOSE 8787

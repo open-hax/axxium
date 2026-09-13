@@ -12,3 +12,6 @@
   "Compare a password against a hash. Returns Promise<boolean>."
   [password hash]
   (.compare bcrypt-lib password hash))
+
+(defn within-limit? "Reject passwords bcrypt would silently truncate." [password]
+  (and (string? password) (not (.truncates bcrypt-lib password))))

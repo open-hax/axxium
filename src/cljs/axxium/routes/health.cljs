@@ -1,28 +1,10 @@
 (ns axxium.routes.health
-  "Health check and system routes."
-  (:require [axxium.db :as db]))
-
-(defn register-health-routes!
-  "Register health and system routes."
-  [app]
-  ;; GET /health — Service health
-  (.get app "/health"
-    (fn [_req reply]
-      (-> (db/query-sql (db/q-health-check))
-          (.then
-            (fn [_]
-              (.send reply (clj->js {:status "ok"
-                                       :service "axxium"
-                                       :version "0.1.0"}))))
-          (.catch
-            (fn [err]
-              (.send (.code reply 503)
-                     (clj->js {:status "error"
-                                :service "axxium"
-                                :error (.-message err)})))))))
-
-  ;; GET / — Redirect to portal
-  (.get app "/"
-    (fn [_req reply]
-      (.redirect reply "/portal/index.html")))
-)
+  "Database-backed health check with no credential disclosure."
+  (:require [axxium.config :as cfg]
+            [axxium.db :as db]
+            [axxium.extern.http :as http]))
+(defn register-health-routes! "Report ready only when the local database responds." [app]
+  (http/route! app "GET" "/health"
+    (^:async fn [_] (await (db/query-one-sql (db/q-health-check)))
+      {:body {:ok true :service "axxium" :instance (cfg/get-in-config [:axxium/public-base-url])}})
+    cfg/config))
