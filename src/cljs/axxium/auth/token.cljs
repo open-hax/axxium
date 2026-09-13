@@ -1,44 +1,13 @@
 (ns axxium.auth.token
-  "JWT token creation and verification using jose.
-   Tokens carry the auth context that downstream services consume."
+  "Local session token orchestration. Transfer signatures use separate asymmetric keys."
   (:require [axxium.config :as cfg]
             [axxium.extern.jose :as jose]))
-
-(defn- secret-key []
-  (let [secret (cfg/get-in-config [:jwt/secret])]
-    (.encode (new (.-TextEncoder js/globalThis)) secret)))
-
-(defn create-token
-  "Create a JWT for an actor with their capabilities.
-   Returns promise of token string."
-  [actor]
-  (let [secret-key (secret-key)
-        issuer (cfg/get-in-config [:jwt/issuer])
-        audience (cfg/get-in-config [:jwt/audience])
-        expiry-hours (cfg/get-in-config [:jwt/expiry-hours])
-        claims {:sub (:actor/id actor)
-                :entity-id (:actor/entity-id actor)
-                :email (:actor/email actor)
-                :capabilities (:actor/capabilities actor)
-                :roles (:actor/roles actor)
-                :status (:actor/status actor)}]
-    (-> (new jose/SignJWT (clj->js claims))
-        (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
-        (.setIssuedAt)
-        (.setIssuer issuer)
-        (.setAudience audience)
-        (.setExpirationTime (str expiry-hours "h"))
-        (.sign secret-key))))
-
-(defn verify-token
-  "Verify a JWT and return the claims.
-   Returns promise of verified payload or throws."
-  [token]
-  (let [secret-key (secret-key)
-        issuer (cfg/get-in-config [:jwt/issuer])
-        audience (cfg/get-in-config [:jwt/audience])]
-    (-> (jose/jwtVerify token secret-key #js {:issuer issuer
-                                                :audience audience
-                                                :clockTolerance 60})
-        (.then (fn [result]
-                 (js->clj (.-payload result) :keywordize-keys true))))))
+(defn create-token "Mint a unique session for a persisted actor." [actor]
+  (jose/sign-session {:sub (:id actor) :jti (str (random-uuid))}
+                     (cfg/get-in-config [:jwt/secret])
+                     (cfg/get-in-config [:jwt/issuer])
+                     (cfg/get-in-config [:jwt/audience])
+                     (cfg/get-in-config [:jwt/expiry-hours])))
+(defn verify-token "Verify local session claims." [token]
+  (jose/verify-session token (cfg/get-in-config [:jwt/secret])
+                       (cfg/get-in-config [:jwt/issuer]) (cfg/get-in-config [:jwt/audience])))
