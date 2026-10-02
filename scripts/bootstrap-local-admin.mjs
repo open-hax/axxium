@@ -4,7 +4,8 @@ import bcrypt from 'bcryptjs';
 import pg from 'pg';
 
 const { AXXIUM_ADMIN_EMAIL, AXXIUM_ADMIN_PASSWORD, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD } = process.env;
-if (!AXXIUM_ADMIN_EMAIL || !AXXIUM_ADMIN_PASSWORD || AXXIUM_ADMIN_PASSWORD.length < 16) {
+const email = AXXIUM_ADMIN_EMAIL?.trim().toLowerCase();
+if (!email || !AXXIUM_ADMIN_PASSWORD || AXXIUM_ADMIN_PASSWORD.length < 16) {
   throw new Error('A private administrator email and password of at least 16 characters are required');
 }
 
@@ -13,7 +14,6 @@ const client = new pg.Client({ host: DB_HOST, port: Number(DB_PORT || 5432),
 await client.connect();
 try {
   await client.query('BEGIN');
-  const email = AXXIUM_ADMIN_EMAIL.trim().toLowerCase();
   const existing = await client.query('SELECT id FROM actors WHERE email = $1 FOR UPDATE', [email]);
   if (existing.rowCount) throw new Error('Administrator email is already bound; refusing to elevate an existing account');
   const entityId = `entity_${randomUUID()}`;

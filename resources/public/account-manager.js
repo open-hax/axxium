@@ -25,7 +25,9 @@ class AxxiumAccountManager extends HTMLElement {
       body: body ? JSON.stringify(body) : undefined,
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+      throw Object.assign(new Error(result.error || `HTTP ${response.status}`), { status: response.status });
+    }
     return result;
   }
 
@@ -42,7 +44,7 @@ class AxxiumAccountManager extends HTMLElement {
           this.credentials = (await this.request(`/api/actors/${encodeURIComponent(this.credentialPanelActor)}/credentials`)).credentials;
         }
       } catch (error) {
-        if (!error.message.includes('403')) this.message = error.message;
+        if (error.status !== 403) this.message = error.message;
         this.actors = [];
       }
     } catch (_) {
