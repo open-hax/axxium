@@ -86,16 +86,14 @@
   [app origin]
   (.addHook app "onRequest"
             (fn [req reply done]
-              (let [raw (request-url req)]
-                (if (and (= "GET" (aget req "method"))
-                         (str/starts-with? raw "/portal/"))
-                  (try
-                    (let [path (.-pathname (js/URL. raw origin))]
-                      (if-let [target (canonical-url origin path req)]
-                        (redirect! reply target)
-                        (done)))
-                    (catch :default _
-                      (done)))
+              (let [path (when (= "GET" (aget req "method"))
+                           (try
+                             (.-pathname (js/URL. (request-url req) origin))
+                             (catch :default _ nil)))]
+                (if (str/starts-with? (or path "") "/portal/")
+                  (if-let [target (canonical-url origin path req)]
+                    (redirect! reply target)
+                    (done))
                   (done))))))
 
 (defn get! [app path handler]

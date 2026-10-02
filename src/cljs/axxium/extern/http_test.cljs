@@ -43,4 +43,10 @@
                 :raw #js {:url "/portal/index.html?tab=accounts"}}
            reply done)
     (is (= "http://127.0.0.1:8787/portal/index.html?tab=accounts"
+           @redirected))
+    (reset! redirected nil)
+    (@hook #js {:method "GET" :headers #js {:host "localhost:8787"}
+                :raw #js {:url "http://localhost:8787/portal/index.html?tab=agents"}}
+           reply done)
+    (is (= "http://127.0.0.1:8787/portal/index.html?tab=agents"
            @redirected))))
