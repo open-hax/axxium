@@ -1,16 +1,17 @@
 (ns axxium.config
   "Axxium runtime configuration from environment."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [axxium.extern.env :as environment]))
 
 (defn- env
   ([key] (env key nil))
   ([key default]
-   (or (aget (.-env js/process) key)
+   (or (environment/get-value key)
        default)))
 
 (defn- env-int [key default]
   (let [v (env key)]
-    (if v (js/parseInt v) default)))
+    (if v (environment/parse-int v) default)))
 
 (defn- env-bool [key default]
   (let [v (env key)]
@@ -39,6 +40,8 @@
    :oauth/github-client-id (env "GITHUB_OAUTH_CLIENT_ID" "")
    :oauth/github-client-secret (env "GITHUB_OAUTH_CLIENT_SECRET" "")
    :oauth/github-enabled (env-bool "GITHUB_OAUTH_ENABLED" false)
+   :oauth/google-client-file (env "GOOGLE_OAUTH_CLIENT_FILE" "")
+   :oauth/bootstrap-admin-email (env "AXXIUM_BOOTSTRAP_ADMIN_EMAIL" "")
    
    ;; Session
    :session/cookie-name (env "SESSION_COOKIE_NAME" "axxium_session")
