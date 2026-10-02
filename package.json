@@ -13,6 +13,7 @@
     "boundary:check": "node scripts/check-js-boundary.mjs --check"
   },
   "dependencies": {
+    "@atproto-labs/simple-store-memory": "^0.2.6",
     "@atproto/identity": "^0.5.15",
     "@atproto/oauth-client-node": "^0.5.8",
     "@fastify/cookie": "^11.0.2",

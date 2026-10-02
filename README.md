@@ -46,8 +46,10 @@ deployment workflow. At `https://axxium.promethean.rest`, Caddy routes Axxium
 account and actor paths to this image and AT Protocol paths to the official
 PDS. Axxium's OAuth client metadata is served at
 `/api/auth/atproto/client-metadata.json`. The local client uses the AT
-Protocol's `http://localhost` development exception; the public client uses
-the HTTPS metadata URL. The administrator email configured through
+Protocol's `http://localhost` development client ID with a loopback-IP callback;
+the public client uses the HTTPS metadata URL. AT OAuth state and session
+storage and the request lock are process-local; deploy one Axxium replica until
+shared storage and locking are configured. The administrator email configured through
 `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` is reserved from password signup and gains
 administrator privileges only when Google verifies it on first sign-in.
 
@@ -100,7 +102,7 @@ All configuration is via environment variables:
 | `DB_USER` | axxium | Database user |
 | `DB_PASSWORD` | | Database password |
 | `JWT_SECRET` | change-me | JWT signing secret |
-| `AXXIUM_PUBLIC_BASE_URL` | http://localhost:8787 | Exact public origin for callbacks and CORS |
+| `AXXIUM_PUBLIC_BASE_URL` | http://127.0.0.1:8787 | Exact public origin for callbacks and CORS; AT OAuth requires a loopback IP for local redirects |
 | `GOOGLE_OAUTH_CLIENT_FILE` | | Private Google web OAuth client JSON path |
 | `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` | | Verified Google email granted admin on first actor creation |
 | `JWT_ISSUER` | axxium | JWT issuer |

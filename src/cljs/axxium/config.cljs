@@ -21,7 +21,7 @@
   {:axxium/env (or (env "NODE_ENV") "development")
    :axxium/port (env-int "AXXIUM_PORT" 8787)
    :axxium/host (env "AXXIUM_HOST" "0.0.0.0")
-   :axxium/public-base-url (env "AXXIUM_PUBLIC_BASE_URL" "http://localhost:8787")
+   :axxium/public-base-url (env "AXXIUM_PUBLIC_BASE_URL" "http://127.0.0.1:8787")
    
    ;; Database
    :db/host (env "DB_HOST" "localhost")

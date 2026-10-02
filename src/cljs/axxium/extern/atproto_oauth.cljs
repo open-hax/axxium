@@ -2,16 +2,30 @@
   "AT Protocol OAuth client boundary. The official SDK verifies issuer, account
    DID, PKCE, PAR, and DPoP. OAuth tokens are revoked after identity binding."
   (:require [axxium.config :as cfg]
+            ["@atproto-labs/simple-store-memory" :refer [SimpleStoreMemory]]
             ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]))
 
 (def ^:private callback-path "/api/auth/atproto/callback")
 (def ^:private metadata-path "/api/auth/atproto/client-metadata.json")
+(defonce ^:private locks (js/Map.))
 
-(defn- store []
-  (let [entries (js/Map.)]
-    #js {:set (fn [key value] (.set entries key value) (js/Promise.resolve))
-         :get (fn [key] (js/Promise.resolve (.get entries key)))
-         :del (fn [key] (.delete entries key) (js/Promise.resolve))}))
+(defn with-local-oauth-lock
+  "Serialize SDK session operations by key within this Axxium process."
+  [key run]
+  (let [prior (or (.get locks key) (js/Promise.resolve))
+        result (.then prior (fn [_] (run)))
+        drained (.then result (fn [_] nil) (fn [_] nil))]
+    (.set locks key drained)
+    (.then drained
+           (fn [_]
+             (when (identical? (.get locks key) drained)
+               (.delete locks key))))
+    result))
+
+(defn new-oauth-store
+  "Bound abandoned OAuth state and short-lived SDK sessions in memory."
+  []
+  (SimpleStoreMemory. #js {:ttl 1800000 :max 1024}))
 
 (defn- metadata []
   (let [base (cfg/get-in-config [:axxium/public-base-url])
@@ -37,8 +51,9 @@
   (delay
     (NodeOAuthClient.
      #js {:clientMetadata (metadata)
-          :stateStore (store)
-          :sessionStore (store)})))
+          :stateStore (new-oauth-store)
+          :sessionStore (new-oauth-store)
+          :requestLock with-local-oauth-lock})))
 
 (defn client-metadata []
   (js->clj (.-clientMetadata @client) :keywordize-keys true))
