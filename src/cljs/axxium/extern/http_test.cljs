@@ -19,3 +19,10 @@
                 :raw #js {:url "/api/auth/atproto/start?identity=calliope.test"}}
            reply)
     (is @handled)))
+
+(deftest portal-canonicalizes-before-session-linking
+  (let [request #js {:headers #js {:host "localhost:8787"}
+                     :raw #js {:url "/portal/index.html?tab=accounts"}}]
+    (is (= "http://127.0.0.1:8787/portal/index.html?tab=accounts"
+           (http/canonical-url "http://127.0.0.1:8787"
+                               "/portal/index.html" request)))))
