@@ -47,20 +47,6 @@
                   #js {:root (.resolve path "resources" "public")
                        :prefix "/portal/"})))
 
-(defn- register-portal-origin!
-  "Move portal visits to the callback host before any browser session exists."
-  [app]
-  (.addHook app "onRequest"
-            (fn [req reply done]
-              (let [origin (cfg/get-in-config [:axxium/public-base-url])
-                    path (.-pathname (js/URL. (http/request-url req) origin))]
-                (if (and (= "GET" (.-method req))
-                         (.startsWith path "/portal/"))
-                  (if-let [target (http/canonical-url origin path req)]
-                    (http/redirect! reply target)
-                    (done))
-                  (done))))))
-
 (defn start!
   "Start the Axxium server.
    Initializes database schema and starts listening."
@@ -71,7 +57,8 @@
         (fn [_]
           (println "Database schema initialized")
           (let [app (create-app)]
-            (register-portal-origin! app)
+            (http/register-portal-origin!
+             app (cfg/get-in-config [:axxium/public-base-url]))
             (register-routes! app)
             (register-static! app)
             (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])

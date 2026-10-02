@@ -1,5 +1,6 @@
 (ns axxium.extern.http
-  "Fastify request and reply conversion for account routes.")
+  "Fastify request and reply conversion for account routes."
+  (:require [clojure.string :as str]))
 
 (defn body [req]
   (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
@@ -79,6 +80,23 @@
     (if-let [target (canonical-url origin path req)]
       (redirect! reply target)
       (handler req reply))))
+
+(defn register-portal-origin!
+  "Canonicalize browser portal visits before establishing a host-bound session."
+  [app origin]
+  (.addHook app "onRequest"
+            (fn [req reply done]
+              (let [raw (request-url req)]
+                (if (and (= "GET" (aget req "method"))
+                         (str/starts-with? raw "/portal/"))
+                  (try
+                    (let [path (.-pathname (js/URL. raw origin))]
+                      (if-let [target (canonical-url origin path req)]
+                        (redirect! reply target)
+                        (done)))
+                    (catch :default _
+                      (done)))
+                  (done))))))
 
 (defn get! [app path handler]
   (.get app path handler))

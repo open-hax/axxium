@@ -26,3 +26,21 @@
     (is (= "http://127.0.0.1:8787/portal/index.html?tab=accounts"
            (http/canonical-url "http://127.0.0.1:8787"
                                "/portal/index.html" request)))))
+
+(deftest portal-hook-ignores-malformed-nonportal-requests
+  (let [hook (atom nil)
+        completed (atom 0)
+        redirected (atom nil)
+        app #js {:addHook (fn [_ handler] (reset! hook handler))}
+        reply #js {:redirect (fn [target] (reset! redirected target))}
+        done #(swap! completed inc)]
+    (http/register-portal-origin! app "http://127.0.0.1:8787")
+    (@hook #js {:method "GET" :headers #js {:host "localhost:8787"}
+                :raw #js {:url "//["}} reply done)
+    (is (= 1 @completed))
+    (is (nil? @redirected))
+    (@hook #js {:method "GET" :headers #js {:host "localhost:8787"}
+                :raw #js {:url "/portal/index.html?tab=accounts"}}
+           reply done)
+    (is (= "http://127.0.0.1:8787/portal/index.html?tab=accounts"
+           @redirected))))
