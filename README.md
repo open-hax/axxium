@@ -49,7 +49,9 @@ PDS. Axxium's OAuth client metadata is served at
 Protocol's `http://localhost` development client ID with a loopback-IP callback;
 the public client uses the HTTPS metadata URL. AT OAuth state and session
 storage and the request lock are process-local; deploy one Axxium replica until
-shared storage and locking are configured. The administrator email configured through
+shared storage and locking are configured. Local OAuth starts from `localhost`
+redirect to the configured `127.0.0.1` origin before creating state cookies.
+The administrator email configured through
 `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` is reserved from password signup and gains
 administrator privileges only when Google verifies it on first sign-in.
 

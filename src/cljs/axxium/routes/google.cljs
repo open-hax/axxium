@@ -87,5 +87,8 @@
                             "Google sign-in failed")}))))
 
 (defn register-google-routes! [app]
-  (http/get! app "/api/auth/google/start" start!)
+  (http/get! app "/api/auth/google/start"
+             (http/with-canonical-origin
+              (cfg/get-in-config [:axxium/public-base-url])
+              "/api/auth/google/start" start!))
   (http/get! app "/api/auth/google/callback" callback!))

@@ -109,5 +109,8 @@
 
 (defn register-atproto-oauth-routes! [app]
   (http/get! app "/api/auth/atproto/client-metadata.json" metadata!)
-  (http/get! app "/api/auth/atproto/start" start!)
+  (http/get! app "/api/auth/atproto/start"
+             (http/with-canonical-origin
+              (cfg/get-in-config [:axxium/public-base-url])
+              "/api/auth/atproto/start" start!))
   (http/get! app callback-path callback!))

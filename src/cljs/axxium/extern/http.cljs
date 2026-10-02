@@ -60,6 +60,20 @@
 (defn request-url [req]
   (some-> req (aget "raw") (aget "url")))
 
+(defn with-canonical-origin
+  "Redirect OAuth starts to the configured host before setting state cookies."
+  [origin path handler]
+  (let [configured-host (.-host (js/URL. origin))]
+    (fn [req reply]
+      (let [request-host (some-> req (aget "headers") (aget "host"))]
+        (if (and request-host
+                 (not= (.toLowerCase request-host) configured-host))
+          (let [target (js/URL. path origin)
+                requested (js/URL. (request-url req) origin)]
+            (set! (.-search target) (.-search requested))
+            (redirect! reply (.toString target)))
+          (handler req reply))))))
+
 (defn get! [app path handler]
   (.get app path handler))
 
