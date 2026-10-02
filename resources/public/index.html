@@ -17,9 +17,8 @@
             justify-content: center;
         }
         .container {
-            text-align: center;
             padding: 2rem;
-            max-width: 600px;
+            width: min(100%, 760px);
         }
         h1 {
             font-size: 4rem;
@@ -93,8 +92,8 @@
 <body>
     <div class="container">
         <h1>Axxium</h1>
-        <p class="subtitle">Welcome to Axxium — The axiomatic identity kernel</p>
-        <span class="status">v0.1.0 — Identity Provider Active</span>
+        <p class="subtitle">Every action has an actor. Every borrowed key has a keeper.</p>
+        <axxium-account-manager></axxium-account-manager>
         
         <div class="links">
             <a href="/api/auth/config">Auth Config</a>
@@ -103,15 +102,15 @@
         </div>
         
         <div class="axioms">
-            <h2>The Five Axioms</h2>
+            <h2>The compact</h2>
             <ul>
-                <li><span class="axiom-num">1.</span> Identity is Capability-Bearing</li>
-                <li><span class="axiom-num">2.</span> All Action is Attributable</li>
-                <li><span class="axiom-num">3.</span> Truth is Constructed Through Evidence</li>
-                <li><span class="axiom-num">4.</span> Contracts Define Admissible Behavior</li>
-                <li><span class="axiom-num">5.</span> The System is Append-Only and Causality-Tracking</li>
+                <li><span class="axiom-num">1.</span> Name the actor: human or agent.</li>
+                <li><span class="axiom-num">2.</span> Name the borrowed key and the human who issued it.</li>
+                <li><span class="axiom-num">3.</span> Give the key an ending, and a way to call it home.</li>
+                <li><span class="axiom-num">4.</span> Let the handle and DID name each other before trusting the name.</li>
             </ul>
         </div>
     </div>
+    <script type="module" src="/portal/account-manager.js"></script>
 </body>
 </html>
