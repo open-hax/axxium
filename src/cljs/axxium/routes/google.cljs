@@ -76,6 +76,11 @@
           (http/redirect! reply "/portal/index.html"))
         (http/send! reply 400 {:error "Invalid or expired Google sign-in state"})))
     (catch :default err
+      (let [{:keys [stage provider-status provider-error reason]} (ex-data err)]
+        (println "Google sign-in failed at" (or stage :actor-or-session)
+                 "provider-status" provider-status
+                 "provider-error" provider-error
+                 "reason" reason))
       (http/send! reply (or (:status (ex-data err)) 502)
                   {:error (if (= 409 (:status (ex-data err)))
                             "Email is already bound to another Axxium actor"

@@ -63,20 +63,30 @@
                                     #js {:method "POST" :body body
                                          :redirect "error"}))]
       (when-not (.-ok response)
-        (throw (ex-info "Google token exchange failed" {})))
+        (let [failure (try (await (.json response))
+                           (catch :default _ nil))]
+          (throw (ex-info "Google token exchange failed"
+                          {:stage :token-exchange
+                           :provider-status (.-status response)
+                           :provider-error (some-> failure .-error)}))))
       (let [tokens (await (.json response))
             id-token (.-id_token tokens)
-            verified (await (jose/jwtVerify
-                             id-token google-keys
-                             #js {:audience (.-client_id web)
-                                  :issuer #js ["https://accounts.google.com"
-                                               "accounts.google.com"]}))
+            verified (try
+                       (await (jose/jwtVerify
+                               id-token google-keys
+                               #js {:audience (.-client_id web)
+                                    :issuer #js ["https://accounts.google.com"
+                                                 "accounts.google.com"]}))
+                       (catch :default error
+                         (throw (ex-info "Google ID token verification failed"
+                                         {:stage :id-token
+                                          :reason (.-code error)}))))
             payload (.-payload verified)]
         (when-not (and (= nonce (.-nonce payload))
                        (true? (.-email_verified payload))
                        (seq (.-sub payload))
                        (seq (.-email payload)))
-          (throw (ex-info "Google identity claim rejected" {})))
+          (throw (ex-info "Google identity claim rejected" {:stage :claims})))
         {:subject (.-sub payload)
          :email (.-email payload)
          :display-name (or (.-name payload) (.-email payload))}))))

@@ -19,7 +19,7 @@
 (defn- create-app
   "Create and configure the Fastify application."
   []
-  (let [app (Fastify #js {:logger true})]
+  (let [app (Fastify #js {:logger #js {:redact #js ["req.url"]}})]
     (.register app fastifyCors
                #js {:origin (cfg/get-in-config [:axxium/public-base-url])
                     :credentials true
