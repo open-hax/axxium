@@ -3,6 +3,7 @@
    Fastify-based, serving the identity provider API and portal."
   (:require [axxium.config :as cfg]
             [axxium.db :as db]
+            [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
@@ -11,7 +12,6 @@
             [axxium.routes.atproto-oauth :as atproto-oauth-routes]
             [axxium.routes.google :as google-routes]
             [axxium.routes.health :as health-routes]
-            ["fastify" :default Fastify]
             ["@fastify/cors" :default fastifyCors]
             ["@fastify/cookie" :default fastifyCookie]
             ["@fastify/static" :default fastifyStatic]
@@ -20,7 +20,7 @@
 (defn- create-app
   "Create and configure the Fastify application."
   []
-  (let [app (Fastify #js {:logger #js {:redact #js ["req.url"]}})]
+  (let [app (fastify/create-app)]
     (.register app fastifyCors
                #js {:origin (cfg/get-in-config [:axxium/public-base-url])
                     :credentials true

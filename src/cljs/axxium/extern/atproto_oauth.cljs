@@ -9,18 +9,22 @@
 (def ^:private metadata-path "/api/auth/atproto/client-metadata.json")
 (defonce ^:private locks (js/Map.))
 
-(defn with-local-oauth-lock
+(defn ^:async with-local-oauth-lock
   "Serialize SDK session operations by key within this Axxium process."
   [key run]
-  (let [prior (or (.get locks key) (js/Promise.resolve))
-        result (.then prior (fn [_] (run)))
-        drained (.then result (fn [_] nil) (fn [_] nil))]
+  (let [prior (.get locks key)
+        release (atom nil)
+        drained (js/Promise. (fn [resolve _] (reset! release resolve)))]
+    ;; Reserve this position before yielding so another caller queues behind it.
     (.set locks key drained)
-    (.then drained
-           (fn [_]
-             (when (identical? (.get locks key) drained)
-               (.delete locks key))))
-    result))
+    (try
+      (await prior)
+      (await (run))
+      (finally
+        ;; A rejected operation releases successors without rejecting their gate.
+        (@release nil)
+        (when (identical? (.get locks key) drained)
+          (.delete locks key))))))
 
 (defn new-oauth-store
   "Bound abandoned OAuth state and short-lived SDK sessions in memory."
