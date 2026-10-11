@@ -5,93 +5,74 @@
   (:require [axxium.config :as cfg]
             [axxium.db :as db]
             [axxium.auth.token :as token]
-            [clojure.string :as str]
-            ["node:crypto" :as crypto]))
+            [axxium.extern.agent-credentials :as secrets]
+            [axxium.extern.http :as http]
+            [clojure.string :as str]))
 
 (def COOKIE-NAME (cfg/get-in-config [:session/cookie-name]))
 
-(defn- hash-token [token]
-  (-> (.createHash crypto "sha256")
-      (.update token)
-      (.digest "hex")))
-
-(defn- body-map [req]
-  (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
-
-(defn create-session!
+(defn ^:async create-session!
   "Create a session for an actor. Returns {:token token :actor actor}."
   [actor]
-  (let [token-promise (token/create-token actor)]
-    (-> token-promise
-        (.then (fn [token]
-                 (let [token-hash (hash-token token)
-                       actor-id (:actor/id actor)
-                       expiry-hours (cfg/get-in-config [:jwt/expiry-hours])
-                       expires-at (js/Date. (+ (.getTime (js/Date.)) (* expiry-hours 3600000)))]
-                   (-> (db/query-sql
-                        (db/q-insert-session {:actor-id actor-id
-                                              :token-hash token-hash
-                                              :expires-at expires-at}))
-                       (.then (fn [_]
-                                {:token token
-                                 :actor actor})))))))))
+  (let [value (await (token/create-token actor))
+        expires-at (secrets/expires-at (cfg/get-in-config [:jwt/expiry-hours]))]
+    (await (db/query-sql
+            (db/q-insert-session {:actor-id (:id actor)
+                                  :token-hash (secrets/token-hash value)
+                                  :expires-at expires-at})))
+    {:token value :actor actor}))
 
-(defn verify-session
+(defn ^:async verify-session
   "Verify a session token. Returns promise of actor or nil."
   [token]
-  (if (str/blank? token)
-    (js/Promise.resolve nil)
-    (-> (token/verify-token token)
-        (.then (fn [claims]
-                 (let [actor-id (:sub claims)]
-                   (-> (db/query-one-sql
-                        (db/q-select-actor-by-session actor-id (hash-token token)))
-                       (.then (fn [actor]
-                                (when actor
-                                  (js->clj actor :keywordize-keys true)))))))
-        (.catch (fn [_] nil)))))
+  (cond
+    (str/blank? token) nil
+    (str/starts-with? token "axx_")
+    (await (db/query-one-sql
+            (db/q-select-active-agent-credential (secrets/token-hash token))))
+    :else
+    (try
+      (let [claims (await (token/verify-token token))]
+        (await (db/query-one-sql
+                (db/q-select-actor-by-session
+                 (:sub claims) (secrets/token-hash token)))))
+      (catch :default _ nil))))
 
 (defn delete-session!
   "Delete a session by token."
   [token]
-  (db/query-sql (db/q-delete-session-by-hash (hash-token token))))
+  (db/query-sql (db/q-delete-session-by-hash (secrets/token-hash token))))
 
 (defn set-session-cookie
   "Set the session cookie on a Fastify reply."
   [reply token]
-  (let [cookie-opts #js {:path "/"
-                         :httpOnly true
-                         :secure (cfg/get-in-config [:session/cookie-secure])
-                         :sameSite (cfg/get-in-config [:session/cookie-same-site])
-                         :maxAge (* (cfg/get-in-config [:jwt/expiry-hours]) 3600000)}]
-    (.setCookie reply COOKIE-NAME token cookie-opts)))
+  (http/set-session-cookie!
+   reply COOKIE-NAME token
+   {:secure (cfg/get-in-config [:session/cookie-secure])
+    :same-site (cfg/get-in-config [:session/cookie-same-site])
+    :max-age (* (cfg/get-in-config [:jwt/expiry-hours]) 3600000)}))
 
 (defn clear-session-cookie
   "Clear the session cookie."
   [reply]
-  (.clearCookie reply COOKIE-NAME #js {:path "/"}))
+  (http/clear-session-cookie! reply COOKIE-NAME))
 
 (defn extract-auth-token
   "Extract bearer token from request headers or cookie."
   [req]
-  (let [headers (aget req "headers")
-        auth-header (str (or (aget headers "authorization") ""))
-        cookie-token (some-> req (aget "cookies") (aget COOKIE-NAME))]
+  (let [auth-header (str (or (http/authorization req) ""))
+        cookie-token (http/cookie req COOKIE-NAME)]
     (or
      (when (str/starts-with? (str/lower-case auth-header) "bearer ")
        (str/trim (subs auth-header 7)))
      cookie-token)))
 
-(defn resolve-auth-context
+(defn ^:async resolve-auth-context
   "Resolve auth context from request. Returns promise of context map or nil."
   [req]
-  (let [token (extract-auth-token req)]
-    (-> (verify-session token)
-        (.then (fn [actor]
-                 (when actor
-                   {:auth/actor-id (:id actor)
-                    :auth/entity-id (:entity_id actor)
-                    :auth/email (:email actor)
-                    :auth/capabilities (js->clj (:capabilities actor) :keywordize-keys true)
-                    :auth/roles (js->clj (:roles actor) :keywordize-keys true)}))))))
-)
+  (when-let [actor (await (verify-session (extract-auth-token req)))]
+    {:auth/actor-id (:id actor)
+     :auth/entity-id (:entity_id actor)
+     :auth/email (:email actor)
+     :auth/capabilities (:capabilities actor)
+     :auth/roles (:roles actor)}))
