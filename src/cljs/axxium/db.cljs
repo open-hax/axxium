@@ -10,27 +10,31 @@
 (defonce pool
   (delay
     (pg/create-pool!
-     {:connection-string (cfg/db-url)
+     {:host (cfg/get-in-config [:db/host])
+      :port (cfg/get-in-config [:db/port])
+      :database (cfg/get-in-config [:db/name])
+      :user (cfg/get-in-config [:db/user])
+      :password (cfg/get-in-config [:db/password])
       :max 20
       :idle-timeout-ms 30000
       :connect-timeout-ms 2000})))
 
 (defn- honey->sql
-  "Format a HoneySQL map to [sql-str params]."
+  "Format a HoneySQL map to [sql-str & params]."
   [honey-map]
   (sql/format honey-map {:numbered true}))
 
 (defn query-sql
   "Execute a HoneySQL query. Returns promise of rows."
   [honey-map]
-  (let [[sql-str params] (honey->sql honey-map)]
+  (let [[sql-str & params] (honey->sql honey-map)]
     (-> (pg/query! @pool sql-str params)
         (.then :rows))))
 
 (defn query-one-sql
   "Execute HoneySQL query and return first row or nil."
   [honey-map]
-  (let [[sql-str params] (honey->sql honey-map)]
+  (let [[sql-str & params] (honey->sql honey-map)]
     (pg/query-one! @pool sql-str params)))
 
 (defn query-all-sql
@@ -41,7 +45,7 @@
 (defn- exec-ddl!
   "Execute a HoneySQL DDL statement."
   [honey-map]
-  (let [[sql-str _params] (honey->sql honey-map)]
+  (let [[sql-str & _params] (honey->sql honey-map)]
     (pg/query! @pool sql-str [])))
 
 (defn init-schema!

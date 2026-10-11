@@ -96,3 +96,45 @@ All configuration is via environment variables:
 ## License
 
 GPL-3.0-only
+
+## Host environments and portable identity
+
+Each instance uses `https://<environment>.axxium.promethean.rest`. Stealth and
+Yoga have independent PostgreSQL state, session secrets and Ed25519 signing keys.
+The browser portal is `/portal/index.html`. Register or sign in, choose a trusted
+destination, confirm the current password, and copy the transfer. On the recipient,
+open “Bring an identity to this computer”, paste it, and choose a new local password.
+The actor and entity identifiers survive; passwords, sessions and permissions do
+not travel. The recipient assigns its own basic account permissions.
+
+A transfer is signed, recipient-bound, valid for five minutes and usable once.
+Imports accept only explicitly pinned issuer public keys. Exchange public keys
+through the operator's authenticated SSH connection; never distribute private
+keys or copy a source instance's `.env`. Existing account collisions are refused.
+After import, fresh recipient logins use the recipient database and continue when
+the issuer application is stopped.
+
+Build with `npm ci --ignore-scripts && npm run typecheck && npm test && npm run build`,
+then `docker build -t axxium:<commit> .`. Prepare an instance using
+`scripts/prepare-instance.mjs DIRECTORY ENV PUBLIC_ORIGIN IMAGE`; it generates local
+secrets with private permissions and installs `compose.instance.yaml`. Configure
+`trust.json` as an object mapping exact trusted issuer origins to their public JWKs.
+Publish the loopback application port through the documented Knoxx Caddy ingress.
+
+`node scripts/verify-identity-transfer.mjs` exercises the real HTTP/database flow;
+its environment options are documented at the top of the script. The public
+Stealth-to-Yoga verification passed 28 assertions, including tampering, audience,
+replay, password reauthentication, sessions and account collisions. Browser proof
+also includes a fresh Yoga login after the Stealth Axxium container was stopped.
+
+The former unrestricted actor listing and capability-grant routes are no longer
+public administration APIs. Actor access is self-scoped; provisioning local
+permissions is an operator responsibility.
+
+`.github/workflows/environment-promotion.yml` calls the pinned Services controller:
+a code-owner `testing` label on an open main-targeted PR claims the testing slot
+subject to the two-hour incumbent lease; a successful merge to main promotes the
+exact merge commit to staging. The three existing repository administrators are
+listed in CODEOWNERS. These workflows activate when merged to main. Production
+has no automatic Axxium deployment entry point; it must acquire integration, e2e
+and long mutation qualification before a production deployer is enabled.

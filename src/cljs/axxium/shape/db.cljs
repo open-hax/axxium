@@ -34,8 +34,8 @@
                   :email email
                   :display_name display-name
                   :password_hash password-hash
-                  :capabilities [:cast (clj->js capabilities) :jsonb]
-                  :roles [:cast (clj->js roles) :jsonb]
+                  :capabilities [:cast [:lift capabilities] :jsonb]
+                  :roles [:cast [:lift roles] :jsonb]
                   :status status}])
       (h/returning :*)))
 
@@ -71,7 +71,7 @@
 (defn update-actor-capabilities
   [id capabilities]
   (-> (h/update :actors)
-      (h/set {:capabilities [:cast (clj->js capabilities) :jsonb]
+      (h/set {:capabilities [:cast [:lift capabilities] :jsonb]
               :updated_at [:now]})
       (h/where [:= :id id])))
 
@@ -95,7 +95,8 @@
       (h/where [:and
                 [:= :a.id actor-id]
                 [:= :s.token_hash token-hash]
-                [:> :s.expires_at [:now]]])))
+                [:> :s.expires_at [:now]]
+                [:= :a.status "active"]])))
 
 (defn delete-session-by-hash
   [token-hash]
@@ -108,7 +109,7 @@
 
 (defn health-check
   []
-  (-> (h/select [[1 :ping]])))
+  (-> (h/select [1 :ping])))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema DDL
