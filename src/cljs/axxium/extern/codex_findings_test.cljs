@@ -1,0 +1,131 @@
+(ns axxium.extern.codex-findings-test
+  "Regressions for the Codex findings on open-hax/axxium#29."
+  (:require [axxium.auth.session :as session]
+            [axxium.config :as cfg]
+            [axxium.db :as db]
+            [axxium.extern.google :as google]
+            [axxium.extern.http :as http]
+            [axxium.routes.atproto :as atproto]
+            [axxium.routes.auth :as auth]
+            [axxium.routes.google :as google-routes]
+            [axxium.schema :as schema]
+            [cljs.test :refer [deftest is]]
+            [clojure.string :as str]))
+
+(defn- routes [register!]
+  (let [handlers (atom {})
+        reg (fn [method] (fn [_ path handler] (swap! handlers assoc [method path] handler)))]
+    (with-redefs [http/post! (reg :post) http/get! (reg :get) http/delete! (reg :delete)
+                  http/with-canonical-origin (fn [_ _ handler] handler)]
+      (register! nil))
+    @handlers))
+
+(defn- result [rows] #js {:rows (clj->js rows) :rowCount (count rows)})
+
+(defn- google-db [{:keys [fail-binding? conflict?]}]
+  (let [committed (atom []) commands (atom []) released (atom 0)
+        lookups (atom 0)
+        client (fn []
+                 (let [staged (atom nil)]
+                   #js {:release (fn [_] (swap! released inc))
+                        :query
+                        (fn [sql params]
+                          (swap! commands conj sql)
+                          (cond
+                            (= sql "BEGIN") (do (reset! staged []) (js/Promise.resolve (result [])))
+                            (= sql "ROLLBACK") (do (reset! staged nil) (js/Promise.resolve (result [])))
+                            (= sql "COMMIT") (do (swap! committed into @staged) (js/Promise.resolve (result [])))
+                            (str/includes? sql "JOIN provider_bindings")
+                            (js/Promise.resolve
+                             (result (if (and conflict? (> (swap! lookups inc) 1)) [{:id "winner"}] [])))
+                            (and (str/starts-with? sql "INSERT INTO provider_bindings")
+                                 (or fail-binding? conflict?))
+                            (js/Promise.reject
+                             (if conflict?
+                               (doto (js/Error. "conflict") (aset "code" "23505")
+                                     (aset "constraint" "idx_provider_bindings_subject"))
+                               (js/Error. "binding failed")))
+                            (str/starts-with? sql "INSERT INTO")
+                            (do (swap! (if @staged staged committed) conj sql) (js/Promise.resolve (result [])))
+                            (str/includes? sql "email") (js/Promise.resolve (result []))
+                            :else (js/Promise.resolve (result [{:id (aget params 0)}]))))}))
+        direct (client)]
+    {:pool #js {:query (.-query direct) :connect #(js/Promise.resolve (client))}
+     :committed committed :commands commands :released released}))
+
+(defn- ^:async google-callback! [fixture]
+  (let [responses (atom []) actors (atom [])
+        callback (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/callback"])
+        start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])]
+    (with-redefs [db/pool (delay (:pool fixture))
+                  cfg/get-in-config (fn [_] "https://fixture.test")
+                  google/configured? (fn [] true)
+                  google/random-secret (fn [] "fixture-state")
+                  google/authorize-url (fn [& _] "https://google.test")
+                  google/verified-profile! (fn [& _] (js/Promise.resolve {:subject "g-1" :email "a@b.test" :display-name "A"}))
+                  http/set-state-cookie! (fn [& _] nil)
+                  http/clear-state-cookie! (fn [& _] nil)
+                  http/query-param (fn [_ k] (if (= k "state") "fixture-state" "code"))
+                  http/cookie (fn [_ _] "fixture-state")
+                  session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "t"}))
+                  session/set-session-cookie (fn [& _] nil)
+                  http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (start {} nil)
+      (reset! responses [])
+      (await (callback {} nil))
+      {:responses @responses :actors @actors})))
+
+(deftest ^:async google-binding-failure-rolls-back-entity-and-actor
+  (let [fixture (google-db {:fail-binding? true})
+        outcome (await (google-callback! fixture))]
+    (is (empty? (:actors outcome)))
+    (is (= 502 (:status (first (:responses outcome)))))
+    (is (empty? @(:committed fixture)))
+    (is (some #{"ROLLBACK"} @(:commands fixture)))
+    (is (= 1 @(:released fixture)))))
+
+(deftest ^:async google-binding-conflict-recovers-winning-actor
+  (let [fixture (google-db {:conflict? true})
+        outcome (await (google-callback! fixture))]
+    (is (= ["winner"] (:actors outcome)))
+    (is (= [{:redirect "/portal/index.html"}] (:responses outcome)))
+    (is (empty? @(:committed fixture)))))
+
+(deftest google-state-store-is-bounded
+  (let [entries (reduce (fn [m i] (google-routes/remember-state m 0 (str "s" i) {:expires-at (+ 1000 i)}))
+                        {} (range (+ 50 google-routes/max-pending-states)))]
+    (is (= google-routes/max-pending-states (count entries)))
+    (is (contains? entries (str "s" (+ 49 google-routes/max-pending-states))))
+    (is (not (contains? entries "s0")))
+    (is (= ["new"] (keys (google-routes/remember-state {"old" {:expires-at 5}} 10 "new" {:expires-at 20}))))))
+
+(deftest agent-creation-contract
+  (is (= {:display-name "Bot"} (schema/agent-creation-request {:display-name "  Bot "})))
+  (is (nil? (schema/agent-creation-request {:display-name "   "})))
+  (is (nil? (schema/agent-creation-request {:display-name 42})))
+  (is (nil? (schema/agent-creation-request {})))
+  (is (nil? (schema/agent-creation-request {:display-name (apply str (repeat 201 "x"))}))))
+
+(deftest ^:async logout-clears-cookie-when-session-deletion-fails
+  (let [cleared (atom 0) response (atom nil)]
+    (with-redefs [session/extract-auth-token (fn [_] "token")
+                  session/delete-session! (fn [_] (js/Promise.reject (js/Error. "db down")))
+                  session/clear-session-cookie (fn [_] (swap! cleared inc))
+                  http/send! (fn [_ status body] (reset! response {:status status :body body}))]
+      (await ((get (routes auth/register-auth-routes!) [:post "/api/auth/logout"]) {} nil))
+      (is (= 1 @cleared))
+      (is (= 200 (:status @response))))))
+
+(deftest ^:async anonymous-at-identity-lookup-returns-401
+  (let [response (atom nil)
+        handler (get (routes atproto/register-atproto-routes!) [:get "/api/atproto/resolve"])]
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve nil))
+                  http/send! (fn [_ status body] (reset! response {:status status :body body}))]
+      (await (handler {} nil))
+      (is (= 401 (:status @response))))
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "h" :auth/roles []}))
+                  db/query-one-sql (fn [_] (js/Promise.resolve {:kind "human"}))
+                  http/send! (fn [_ status body] (reset! response {:status status :body body}))]
+      (await (handler {} nil))
+      (is (= 403 (:status @response))))))

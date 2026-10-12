@@ -11,6 +11,17 @@
 (defonce ^:private pending (atom {}))
 (def ^:private state-lifetime-ms 300000)
 (def ^:private state-cookie "axxium_google_state")
+(def max-pending-states
+  "Upper bound on in-flight Google OAuth states (matches the AT OAuth store cap)."
+  1024)
+
+(defn remember-state
+  "Prune expired entries, evict the soonest-expiring beyond the cap, add the new state."
+  [entries now state entry]
+  (let [live (filter (fn [[_ e]] (> (:expires-at e) now)) entries)
+        kept (->> live (sort-by (comp :expires-at second))
+                  (take-last (dec max-pending-states)))]
+    (assoc (into {} kept) state entry)))
 
 (defn- consume-state! [state]
   (let [entry (get @pending state)]
@@ -26,16 +37,16 @@
           verifier (google/random-secret)
           now (clock/now-ms)]
       (swap! pending
-             (fn [entries]
-               (assoc (into {} (filter (fn [[_ entry]] (> (:expires-at entry) now)) entries))
-                      state {:nonce nonce :verifier verifier
-                             :expires-at (+ now state-lifetime-ms)})))
+             remember-state now state {:nonce nonce :verifier verifier
+                                       :expires-at (+ now state-lifetime-ms)})
       (http/set-state-cookie! reply state-cookie state
                               (str/starts-with?
                                (cfg/get-in-config [:axxium/public-base-url]) "https://"))
       (http/redirect! reply (google/authorize-url state nonce verifier)))))
 
-(defn- ^:async bound-actor! [{:keys [subject email display-name]}]
+(defn- ^:async bound-actor!
+  "Return the subject-bound actor, atomically creating or recovering the winning binding."
+  [{:keys [subject email display-name]}]
   (if-let [actor (await (db/query-one-sql
                          (db/q-select-actor-by-provider-subject "google" subject)))]
     actor
@@ -48,17 +59,24 @@
                             str/trim str/lower-case)
             roles (if (and (seq admin-email) (= email admin-email))
                     [:axxium/system-admin] [:axxium/user])]
-        (await (db/query-sql
-                (db/q-insert-entity {:id entity-id :kind "human"
-                                     :email email :display-name display-name})))
-        (await (db/query-sql
-                (db/q-insert-actor {:id actor-id :entity-id entity-id
-                                    :email email :display-name display-name
-                                    :capabilities [:axxium/login :axxium/read]
-                                    :roles roles :status "active"})))
-        (await (db/query-sql
-                (db/q-insert-provider-binding "google" subject actor-id)))
-        (db/query-one-sql (db/q-select-actor-by-id {:id actor-id}))))))
+        (try
+          (await
+           (db/with-transaction!
+            (fn ^:async bind-google-rows [query!]
+              (await (query! (db/q-insert-entity {:id entity-id :kind "human"
+                                                  :email email :display-name display-name})))
+              (await (query! (db/q-insert-actor {:id actor-id :entity-id entity-id
+                                                 :email email :display-name display-name
+                                                 :capabilities [:axxium/login :axxium/read]
+                                                 :roles roles :status "active"})))
+              (await (query! (db/q-insert-provider-binding "google" subject actor-id)))
+              (first (await (query! (db/q-select-actor-by-id {:id actor-id})))))))
+          (catch :default error
+            (if (db/provider-binding-conflict? error)
+              (or (await (db/query-one-sql
+                         (db/q-select-actor-by-provider-subject "google" subject)))
+                  (throw error))
+              (throw error))))))))
 
 (defn- ^:async callback! [req reply]
   (try

@@ -76,10 +76,16 @@
       (println "Login failed:" (http/error-message err))
       (http/send! reply 500 {:error "Login failed"}))))
 
-(defn- ^:async logout! [req reply]
-  (when-let [token (session/extract-auth-token req)]
-    (await (session/delete-session! token)))
-  (session/clear-session-cookie reply)
+(defn- ^:async logout!
+  "Always clear the browser session cookie, even if server-side deletion fails."
+  [req reply]
+  (try
+    (when-let [token (session/extract-auth-token req)]
+      (await (session/delete-session! token)))
+    (catch :default err
+      (println "Session deletion failed during logout:" (http/error-message err)))
+    (finally
+      (session/clear-session-cookie reply)))
   (http/send! reply 200 {:ok true}))
 
 (defn- ^:async me! [req reply]
