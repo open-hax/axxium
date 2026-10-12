@@ -6,6 +6,7 @@
             [axxium.extern.google :as google]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
+            [axxium.routes.agents :as agents]
             [axxium.routes.atproto :as atproto]
             [axxium.routes.auth :as auth]
             [axxium.routes.google :as google-routes]
@@ -139,3 +140,17 @@
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (await (handler {} nil))
       (is (= 403 (:status @response))))))
+
+(deftest ^:async invalid-agent-creation-is-rejected-by-the-route-before-db-effects
+  (let [response (atom nil) writes (atom 0)
+        handler (get (routes agents/register-agent-routes!) [:post "/api/actors/agents"])]
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "admin" :auth/roles [:axxium/system-admin]}))
+                  db/query-one-sql (fn [_] (js/Promise.resolve {:kind "human"}))
+                  db/with-transaction! (fn [_] (swap! writes inc) (js/Promise.resolve nil))
+                  http/send! (fn [_ status body] (reset! response {:status status :body body}))]
+      (doseq [body [{} {:display-name "   "} {:display-name 42} {:display-name (apply str (repeat 201 "x"))}]]
+        (reset! response nil)
+        (with-redefs [http/body (fn [_] body)]
+          (await (handler {} nil)))
+        (is (= 400 (:status @response)))))
+    (is (zero? @writes))))
