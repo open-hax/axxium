@@ -12,7 +12,7 @@
             [axxium.routes.google :as google-routes]
             [axxium.law.actor :as actor-law]
             [axxium.shape.agent :as agent-shape]
-            [cljs.test :refer [deftest is]]
+            [cljs.test :refer [async deftest is]]
             [clojure.string :as str]))
 
 (defn- routes [register!]
@@ -67,8 +67,8 @@
                   google/random-secret (fn [] "fixture-state")
                   google/authorize-url (fn [& _] "https://google.test")
                   google/verified-profile! (fn [& _] (js/Promise.resolve {:subject "g-1" :email "a@b.test" :display-name "A"}))
-                  http/set-state-cookie! (fn [_ _ value _] (reset! jar value))
-                  http/clear-state-cookie! (fn [& _] nil)
+                  http/set-state-cookie! (fn ([_ _ value _] (reset! jar value)) ([_ _ value _ _] (reset! jar value)))
+                  http/clear-state-cookie! (fn ([_ _] nil) ([_ _ _] nil))
                   http/query-param (fn [_ k] (if (= k "state") query-state "code"))
                   http/cookie (fn [_ _] @jar)
                   session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "t"}))
@@ -80,7 +80,7 @@
       (await (callback {} nil))
       {:responses @responses :actors @actors})))
 
-(deftest ^:async google-binding-failure-rolls-back-entity-and-actor
+(defn- ^:async google-binding-failure-rolls-back-entity-and-actor* []
   (let [fixture (google-db {:fail-binding? true})
         outcome (await (google-callback! fixture))]
     (is (empty? (:actors outcome)))
@@ -89,21 +89,60 @@
     (is (some #{"ROLLBACK"} @(:commands fixture)))
     (is (= 1 @(:released fixture)))))
 
-(deftest ^:async google-binding-conflict-recovers-winning-actor
+(defn- ^:async google-binding-conflict-recovers-winning-actor* []
   (let [fixture (google-db {:conflict? true})
         outcome (await (google-callback! fixture))]
     (is (= ["winner"] (:actors outcome)))
     (is (= [{:redirect "/portal/index.html"}] (:responses outcome)))
     (is (empty? @(:committed fixture)))))
 
-(deftest ^:async google-state-is-stateless-and-tamper-evident
+(defn- ^:async google-state-is-stateless-and-tamper-evident* []
   (let [keys {:secret "fixture-secret" :issuer "axxium"}
         sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))]
     (is (= {:state "s" :nonce "n" :verifier "v"} (await (jose/verify-google-state! sealed keys))))
     (is (nil? (await (jose/verify-google-state! (str sealed "x") keys))))
     (is (nil? (await (jose/verify-google-state! sealed (assoc keys :secret "other")))))))
 
-(deftest ^:async google-callback-rejects-mismatched-state
+(defn- ^:async google-start!
+  [configured?]
+  (let [start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])
+        responses (atom []) cookies (atom []) redirects (atom [])]
+    (with-redefs [cfg/get-in-config (fn [path] (case path [:jwt/secret] "fixture-secret" [:jwt/issuer] "axxium" "https://fixture.test"))
+                  google/configured? (fn [] configured?)
+                  google/random-secret (fn [] "fixture-state")
+                  google/authorize-url (fn [& _] "https://google.test")
+                  http/set-state-cookie! (fn ([_ _ value secure?] (swap! cookies conj [value secure?]))
+                                            ([_ _ value secure? _] (swap! cookies conj [value secure?])))
+                  http/redirect! (fn [_ path] (swap! redirects conj path))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (await (start {} nil))
+      {:responses @responses :cookies @cookies :redirects @redirects})))
+
+(defn- ^:async check-google-start-route!
+  []
+  (let [refused (await (google-start! false))
+        started (await (google-start! true))
+        [sealed secure?] (first (:cookies started))]
+    (is (= [{:status 503 :body {:error "Google redirect URI is not registered for this Axxium origin"}}]
+           (:responses refused)))
+    (is (empty? (:cookies refused)))
+    (is (empty? (:redirects refused)))
+    (is (empty? (:responses started)))
+    (is (= ["https://google.test"] (:redirects started)))
+    (is (= 1 (count (:cookies started))))
+    (is (true? secure?))
+    (is (= {:state "fixture-state" :nonce "fixture-state" :verifier "fixture-state"}
+           (await (jose/verify-google-state! sealed {:secret "fixture-secret" :issuer "axxium"}))))))
+
+;; cljs.test does not await a Promise returned by a deftest, so this one uses
+;; `async`/`done` to keep its assertions inside the reported run.
+(deftest google-start-route-seals-state-or-refuses-without-side-effects
+  (async done
+    (-> (check-google-start-route!)
+        (.catch (fn [e] (is (nil? e) "start route check threw")))
+        (.finally done))))
+
+(defn- ^:async google-callback-rejects-mismatched-state* []
   (let [fixture (google-db {})
         outcome (await (google-callback! fixture {:query-state "forged"}))]
     (is (= [{:status 400 :body {:error "Invalid or expired Google sign-in state"}}] (:responses outcome)))))
@@ -118,7 +157,7 @@
     (is (nil? (admit {})))
     (is (nil? (admit {:display-name (apply str (repeat 201 "x"))})))))
 
-(deftest ^:async logout-clears-cookie-when-session-deletion-fails
+(defn- ^:async logout-clears-cookie-when-session-deletion-fails* []
   (let [cleared (atom 0) response (atom nil)]
     (with-redefs [session/extract-auth-token (fn [_] "token")
                   session/delete-session! (fn [_] (js/Promise.reject (js/Error. "db down")))
@@ -128,7 +167,7 @@
       (is (= 1 @cleared))
       (is (= 200 (:status @response))))))
 
-(deftest ^:async anonymous-at-identity-lookup-returns-401
+(defn- ^:async anonymous-at-identity-lookup-returns-401* []
   (let [response (atom nil)
         handler (get (routes atproto/register-atproto-routes!) [:get "/api/atproto/resolve"])]
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve nil))
@@ -141,7 +180,7 @@
       (await (handler {} nil))
       (is (= 403 (:status @response))))))
 
-(deftest ^:async invalid-agent-creation-is-rejected-by-the-route-before-db-effects
+(defn- ^:async invalid-agent-creation-is-rejected-by-the-route-before-db-effects* []
   (let [response (atom nil) writes (atom 0)
         handler (get (routes agents/register-agent-routes!) [:post "/api/actors/agents"])]
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "admin" :auth/roles [:axxium/system-admin]}))
@@ -154,3 +193,26 @@
           (await (handler {} nil)))
         (is (= 400 (:status @response)))))
     (is (zero? @writes))))
+
+;; cljs.test does not await a Promise returned by a deftest; without `async`/`done`
+;; these assertions ran after the summary and their failures were never reported.
+(deftest google-binding-failure-rolls-back-entity-and-actor
+  (async done (-> (google-binding-failure-rolls-back-entity-and-actor*) (.catch (fn [e] (is (nil? e) "google-binding-failure-rolls-back-entity-and-actor threw"))) (.finally done))))
+
+(deftest google-binding-conflict-recovers-winning-actor
+  (async done (-> (google-binding-conflict-recovers-winning-actor*) (.catch (fn [e] (is (nil? e) "google-binding-conflict-recovers-winning-actor threw"))) (.finally done))))
+
+(deftest google-state-is-stateless-and-tamper-evident
+  (async done (-> (google-state-is-stateless-and-tamper-evident*) (.catch (fn [e] (is (nil? e) "google-state-is-stateless-and-tamper-evident threw"))) (.finally done))))
+
+(deftest google-callback-rejects-mismatched-state
+  (async done (-> (google-callback-rejects-mismatched-state*) (.catch (fn [e] (is (nil? e) "google-callback-rejects-mismatched-state threw"))) (.finally done))))
+
+(deftest logout-clears-cookie-when-session-deletion-fails
+  (async done (-> (logout-clears-cookie-when-session-deletion-fails*) (.catch (fn [e] (is (nil? e) "logout-clears-cookie-when-session-deletion-fails threw"))) (.finally done))))
+
+(deftest anonymous-at-identity-lookup-returns-401
+  (async done (-> (anonymous-at-identity-lookup-returns-401*) (.catch (fn [e] (is (nil? e) "anonymous-at-identity-lookup-returns-401 threw"))) (.finally done))))
+
+(deftest invalid-agent-creation-is-rejected-by-the-route-before-db-effects
+  (async done (-> (invalid-agent-creation-is-rejected-by-the-route-before-db-effects*) (.catch (fn [e] (is (nil? e) "invalid-agent-creation-is-rejected-by-the-route-before-db-effects threw"))) (.finally done))))
