@@ -19,7 +19,7 @@
                                (js/Promise.resolve nil)))
                     :release (fn [discard?] (swap! discarded conj discard?))}
         pool #js {:connect #(js/Promise.resolve client)}]
-    (is (= "rollback unavailable"
+    (is (= "operation failed"
            (try
              (await (pg/with-transaction! pool (fn [_] (js/Promise.reject (js/Error. "operation failed")))))
              (catch :default error (.-message error)))))

@@ -50,7 +50,7 @@
             (await (.query client "ROLLBACK"))
             (catch :default rollback-error
               (reset! discard? true)
-              (throw rollback-error)))
+              (js/console.error "ROLLBACK failed; discarding client" rollback-error)))
           (throw error)))
       (finally (.release client @discard?)))))
 
