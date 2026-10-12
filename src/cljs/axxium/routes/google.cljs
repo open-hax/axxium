@@ -3,54 +3,31 @@
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.db :as db]
-            [axxium.extern.agent-credentials :as clock]
             [axxium.extern.google :as google]
+            [axxium.extern.jose :as jose]
             [axxium.extern.http :as http]
             [clojure.string :as str]))
 
-(defonce ^:private pending (atom {}))
-(def ^:private state-lifetime-ms 300000)
 (def ^:private state-cookie "axxium_google_state")
-(def max-pending-states
-  "Upper bound on in-flight Google OAuth states (matches the AT OAuth store cap)."
-  1024)
 
-(defn- prune-expired [entries now]
-  (into {} (filter (fn [[_ e]] (> (:expires-at e) now))) entries))
+(defn- state-keys []
+  {:secret (cfg/get-in-config [:jwt/secret])
+   :issuer (cfg/get-in-config [:jwt/issuer])})
 
-(defn remember-state
-  "Prune expired entries and add the new state; return nil when live states fill the cap.
-   Anonymous starts never evict another caller's live state."
-  [entries now state entry]
-  (let [live (prune-expired entries now)]
-    (when (< (count live) max-pending-states)
-      (assoc live state entry))))
-
-(defn- consume-state! [state]
-  (let [entry (get @pending state)]
-    (swap! pending dissoc state)
-    (when (and entry (< (clock/now-ms) (:expires-at entry)))
-      entry)))
-
-(defn- start! [_req reply]
+(defn- ^:async start!
+  "Begin Google sign-in with stateless, signed browser state (no server-side store)."
+  [_req reply]
   (if-not (google/configured?)
     (http/send! reply 503 {:error "Google redirect URI is not registered for this Axxium origin"})
     (let [state (google/random-secret)
           nonce (google/random-secret)
           verifier (google/random-secret)
-          now (clock/now-ms)
-          entry {:nonce nonce :verifier verifier :expires-at (+ now state-lifetime-ms)}
-          [_ after] (swap-vals! pending
-                                (fn [entries]
-                                  (or (remember-state entries now state entry)
-                                      (prune-expired entries now))))]
-      (if-not (contains? after state)
-        (http/send! reply 503 {:error "Too many pending Google sign-ins; retry shortly"})
-        (do
-          (http/set-state-cookie! reply state-cookie state
-                                  (str/starts-with?
-                                   (cfg/get-in-config [:axxium/public-base-url]) "https://"))
-          (http/redirect! reply (google/authorize-url state nonce verifier)))))))
+          sealed (await (jose/sign-google-state!
+                         {:state state :nonce nonce :verifier verifier} (state-keys)))]
+      (http/set-state-cookie! reply state-cookie sealed
+                              (str/starts-with?
+                               (cfg/get-in-config [:axxium/public-base-url]) "https://"))
+      (http/redirect! reply (google/authorize-url state nonce verifier)))))
 
 (defn- ^:async bound-actor!
   "Return the subject-bound actor, atomically creating or recovering the winning binding."
@@ -90,8 +67,10 @@
   (try
     (let [state (http/query-param req "state")
           code (http/query-param req "code")
-          browser-state (http/cookie req state-cookie)
-          entry (when (= browser-state state) (consume-state! state))]
+          sealed (http/cookie req state-cookie)
+          opened (when (seq sealed)
+                   (await (jose/verify-google-state! sealed (state-keys))))
+          entry (when (and (seq state) (= state (:state opened))) opened)]
       (http/clear-state-cookie! reply state-cookie)
       (if (and entry (seq code))
         (let [profile (await (google/verified-profile!

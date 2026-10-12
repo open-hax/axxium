@@ -5,6 +5,7 @@
             [axxium.db :as db]
             [axxium.extern.google :as google]
             [axxium.extern.http :as http]
+            [axxium.extern.jose :as jose]
             [axxium.routes.atproto :as atproto]
             [axxium.routes.auth :as auth]
             [axxium.routes.google :as google-routes]
@@ -54,25 +55,26 @@
     {:pool #js {:query (.-query direct) :connect #(js/Promise.resolve (client))}
      :committed committed :commands commands :released released}))
 
-(defn- ^:async google-callback! [fixture]
-  (let [responses (atom []) actors (atom [])
+(defn- ^:async google-callback!
+  [fixture & [{:keys [query-state] :or {query-state "fixture-state"}}]]
+  (let [responses (atom []) actors (atom []) jar (atom nil)
         callback (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/callback"])
         start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])]
     (with-redefs [db/pool (delay (:pool fixture))
-                  cfg/get-in-config (fn [_] "https://fixture.test")
+                  cfg/get-in-config (fn [path] (case path [:jwt/secret] "fixture-secret" [:jwt/issuer] "axxium" "https://fixture.test"))
                   google/configured? (fn [] true)
                   google/random-secret (fn [] "fixture-state")
                   google/authorize-url (fn [& _] "https://google.test")
                   google/verified-profile! (fn [& _] (js/Promise.resolve {:subject "g-1" :email "a@b.test" :display-name "A"}))
-                  http/set-state-cookie! (fn [& _] nil)
+                  http/set-state-cookie! (fn [_ _ value _] (reset! jar value))
                   http/clear-state-cookie! (fn [& _] nil)
-                  http/query-param (fn [_ k] (if (= k "state") "fixture-state" "code"))
-                  http/cookie (fn [_ _] "fixture-state")
+                  http/query-param (fn [_ k] (if (= k "state") query-state "code"))
+                  http/cookie (fn [_ _] @jar)
                   session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "t"}))
                   session/set-session-cookie (fn [& _] nil)
                   http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
-      (start {} nil)
+      (await (start {} nil))
       (reset! responses [])
       (await (callback {} nil))
       {:responses @responses :actors @actors})))
@@ -93,13 +95,17 @@
     (is (= [{:redirect "/portal/index.html"}] (:responses outcome)))
     (is (empty? @(:committed fixture)))))
 
-(deftest google-state-store-is-bounded-without-evicting-live-states
-  (let [full (reduce (fn [m i] (google-routes/remember-state m 0 (str "s" i) {:expires-at 1000}))
-                     {} (range google-routes/max-pending-states))]
-    (is (= google-routes/max-pending-states (count full)))
-    (is (nil? (google-routes/remember-state full 0 "attacker" {:expires-at 1000})))
-    (is (contains? (google-routes/remember-state full 2000 "new" {:expires-at 3000}) "new"))
-    (is (= ["new"] (keys (google-routes/remember-state {"old" {:expires-at 5}} 10 "new" {:expires-at 20}))))))
+(deftest ^:async google-state-is-stateless-and-tamper-evident
+  (let [keys {:secret "fixture-secret" :issuer "axxium"}
+        sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))]
+    (is (= {:state "s" :nonce "n" :verifier "v"} (await (jose/verify-google-state! sealed keys))))
+    (is (nil? (await (jose/verify-google-state! (str sealed "x") keys))))
+    (is (nil? (await (jose/verify-google-state! sealed (assoc keys :secret "other")))))))
+
+(deftest ^:async google-callback-rejects-mismatched-state
+  (let [fixture (google-db {})
+        outcome (await (google-callback! fixture {:query-state "forged"}))]
+    (is (= [{:status 400 :body {:error "Invalid or expired Google sign-in state"}}] (:responses outcome)))))
 
 (deftest agent-creation-contract
   (let [admit (fn [body] (let [r (agent-shape/creation-request body)]
