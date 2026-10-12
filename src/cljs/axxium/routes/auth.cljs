@@ -1,163 +1,109 @@
 (ns axxium.routes.auth
-  "Authentication routes for Axxium.
-   Provides login, signup, logout, and OAuth callbacks.
-   Designed to be consumed by proxx, knoxx, and openplanner."
-  (:require [clojure.string :as str]
+  "Axxium password sign-in and public auth configuration."
+  (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.db :as db]
-            [axxium.auth.session :as session]
-            [axxium.schema :as schema]
-            [axxium.extern.bcrypt :as bcrypt]))
-
-(defn- body-map [req]
-  (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
-
-(defn- http-error [status code message]
-  (let [err (js/Error. message)]
-    (set! (.-statusCode err) status)
-    (set! (.-code err) code)
-    err))
-
-(defn- hash-password [password]
-  (let [salt-rounds (cfg/get-in-config [:password/salt-rounds])]
-    (bcrypt/hash password salt-rounds)))
-
-(defn- verify-password [password hash]
-  (bcrypt/compare password hash))
+            [axxium.extern.bcrypt :as bcrypt]
+            [axxium.extern.google :as google]
+            [axxium.extern.http :as http]
+            [clojure.string :as str]))
 
 (defn- sanitize-actor [actor]
   (dissoc actor :password_hash))
 
-(defn ^:async handle-signup [req reply]
+(defn- ^:async signup! [req reply]
   (try
-    (let [body (body-map req)
-          email (str/lower-case (str/trim (str (:email body))))
-          password (str (:password body))
-          display-name (str/trim (str (or (:display-name body) (:display_name body) email)))]
+    (let [body (http/body req)
+          email (-> (or (:email body) "") str str/trim str/lower-case)
+          password (str (or (:password body) ""))
+          display-name (-> (or (:display-name body) (:display_name body) email)
+                           str str/trim)
+          bootstrap-admin-email (-> (cfg/get-in-config [:oauth/bootstrap-admin-email])
+                                    str str/trim str/lower-case)]
       (cond
         (str/blank? email)
-        (.send (.code reply 400) (clj->js {:error "email is required"}))
+        (http/send! reply 400 {:error "email is required"})
 
-        (str/blank? password)
-        (.send (.code reply 400) (clj->js {:error "password is required"}))
+        (and (seq bootstrap-admin-email) (= email bootstrap-admin-email))
+        (http/send! reply 403 {:error "This email is reserved for federated sign-in"})
 
         (< (count password) 8)
-        (.send (.code reply 400) (clj->js {:error "password must be at least 8 characters"}))
+        (http/send! reply 400 {:error "password must be at least 8 characters"})
+
+        (await (db/query-one-sql (db/q-select-actor-by-email {:email email})))
+        (http/send! reply 409 {:error "An account with this email already exists"})
 
         :else
-        (let [existing (await (db/query-one-sql
-                                (db/q-select-actor-by-email {:email email})))]
-          (when existing
-            (throw (http-error 409 "email_exists" "An account with this email already exists")))
-          (let [password-hash (await (hash-password password))
-                entity-id (str "entity_" (random-uuid))
-                actor-id (str "actor_" (random-uuid))
-                _ (await (db/query-sql (db/q-insert-entity {:id entity-id
-                                                            :kind "human"
-                                                            :email email
-                                                            :display-name display-name})))
-                _ (await (db/query-sql (db/q-insert-actor {:id actor-id
-                                                            :entity-id entity-id
-                                                            :email email
-                                                            :display-name display-name
-                                                            :password-hash password-hash
-                                                            :capabilities [:axxium/login :axxium/read :axxium/write]
-                                                            :roles [:axxium/user]
-                                                            :status "active"})))
-                actor (await (db/query-one-sql (db/q-select-actor-by-id {:id actor-id})))
-                actor (js->clj actor :keywordize-keys true)
+        (let [password-hash (await (bcrypt/hash password
+                                                (cfg/get-in-config [:password/salt-rounds])))
+              entity-id (str "entity_" (random-uuid))
+              actor-id (str "actor_" (random-uuid))]
+          (await (db/query-sql (db/q-insert-entity
+                                {:id entity-id :kind "human" :email email
+                                 :display-name display-name})))
+          (await (db/query-sql (db/q-insert-actor
+                                {:id actor-id :entity-id entity-id :email email
+                                 :display-name display-name :password-hash password-hash
+                                 :capabilities [:axxium/login :axxium/read]
+                                 :roles [:axxium/user] :status "active"})))
+          (let [actor (await (db/query-one-sql (db/q-select-actor-by-id {:id actor-id})))
                 {:keys [token]} (await (session/create-session! actor))]
             (session/set-session-cookie reply token)
-            (.send reply (clj->js
-                          {:ok true
-                           :actor (sanitize-actor actor)
-                           :token token}))))))
-    (catch js/Error err
-      (.send (.code reply (or (.-statusCode err) 500))
-             (clj->js {:error (or (.-message err) "Signup failed")
-                       :code (or (.-code err) "unknown")})))))
+            (http/send! reply 200 {:ok true :actor (sanitize-actor actor)
+                                   :token token})))))
+    (catch :default err
+      (println "Signup failed:" (http/error-message err))
+      (http/send! reply 500 {:error "Signup failed"}))))
 
-(defn ^:async handle-login [req reply]
+(defn- ^:async login! [req reply]
   (try
-    (let [body (body-map req)
-          email (str/lower-case (str/trim (str (:email body))))
-          password (str (:password body))]
+    (let [body (http/body req)
+          email (-> (or (:email body) "") str str/trim str/lower-case)
+          password (str (or (:password body) ""))]
       (if (or (str/blank? email) (str/blank? password))
-        (.send (.code reply 400) (clj->js {:error "email and password are required"}))
+        (http/send! reply 400 {:error "email and password are required"})
         (let [actor (await (db/query-one-sql
-                            (db/q-select-actor-by-email-active {:email email})))]
-          (if-not actor
-            (throw (http-error 401 "invalid_credentials" "Invalid email or password"))
-            (let [actor (js->clj actor :keywordize-keys true)
-                  valid? (await (verify-password password (:password_hash actor)))]
-              (if-not valid?
-                (throw (http-error 401 "invalid_credentials" "Invalid email or password"))
-                (let [{:keys [token]} (await (session/create-session! actor))]
-                  (session/set-session-cookie reply token)
-                  (.send reply (clj->js
-                                {:ok true
-                                 :actor (sanitize-actor actor)
-                                 :token token})))))))))))
-     (catch js/Error err
-       (.send (.code reply (or (.-statusCode err) 500))
-              (clj->js {:error (or (.-message err) "Login failed")
-                        :code (or (.-code err) "unknown")})))
+                            (db/q-select-actor-by-email-active {:email email})))
+              valid? (and (string? (:password_hash actor))
+                          (await (bcrypt/compare password (:password_hash actor))))]
+          (if valid?
+            (let [{:keys [token]} (await (session/create-session! actor))]
+              (session/set-session-cookie reply token)
+              (http/send! reply 200 {:ok true :actor (sanitize-actor actor)
+                                     :token token}))
+            (http/send! reply 401 {:error "Invalid email or password"})))))
+    (catch :default err
+      (println "Login failed:" (http/error-message err))
+      (http/send! reply 500 {:error "Login failed"}))))
 
-(defn register-signup-route!
-  "POST /api/auth/signup — Email/password registration."
-  [app]
-  (.post app "/api/auth/signup" handle-signup))
+(defn- ^:async logout! [req reply]
+  (when-let [token (session/extract-auth-token req)]
+    (await (session/delete-session! token)))
+  (session/clear-session-cookie reply)
+  (http/send! reply 200 {:ok true}))
 
-(defn register-login-route!
-  "POST /api/auth/login — Email/password login."
-  [app]
-  (.post app "/api/auth/login" handle-login))
+(defn- ^:async me! [req reply]
+  (if-let [context (await (session/resolve-auth-context req))]
+    (if-let [actor (await (db/query-one-sql
+                           (db/q-select-actor-by-id {:id (:auth/actor-id context)})))]
+      (http/send! reply 200 {:ok true :actor (sanitize-actor actor)})
+      (http/send! reply 401 {:error "Actor not found"}))
+    (http/send! reply 401 {:error "Unauthorized"})))
 
-(defn register-logout-route!
-  "POST /api/auth/logout — Clear session."
-  [app]
-  (.post app "/api/auth/logout"
-         (fn [req reply]
-           (let [token (session/extract-auth-token req)]
-             (when token
-               (session/delete-session! token))
-             (session/clear-session-cookie reply)
-             (.send reply (clj->js {:ok true}))))))
+(defn- config! [_req reply]
+  (http/send! reply 200
+              {:githubEnabled false
+               :googleEnabled (boolean (google/configured?))
+               :googleLoginUrl "/api/auth/google/start"
+               :atprotoEnabled true
+               :atprotoLoginUrl "/api/auth/atproto/start"
+               :publicBaseUrl (cfg/get-in-config [:axxium/public-base-url])
+               :loginUrl "/api/auth/login"
+               :signupUrl "/api/auth/signup"}))
 
-(defn register-me-route!
-  "GET /api/auth/me — Get current actor."
-  [app]
-  (.get app "/api/auth/me"
-        (fn [req reply]
-          (-> (session/resolve-auth-context req)
-              (.then (fn [ctx]
-                       (if-not ctx
-                         (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
-                         (-> (db/query-one-sql
-                              (db/q-select-actor-by-id {:id (:auth/actor-id ctx)}))
-                             (.then (fn [actor]
-                                      (if-not actor
-                                        (.send (.code reply 401) (clj->js {:error "Actor not found"}))
-                                        (.send reply (clj->js
-                                                      {:ok true
-                                                       :actor (sanitize-actor (js->clj actor :keywordize-keys true))})))))))))))))
-
-(defn register-config-route!
-  "GET /api/auth/config — Public auth configuration."
-  [app]
-  (.get app "/api/auth/config"
-        (fn [_req reply]
-          (.send reply (clj->js
-                        {:githubEnabled (cfg/get-in-config [:oauth/github-enabled])
-                         :publicBaseUrl (cfg/get-in-config [:axxium/public-base-url])
-                         :loginUrl "/api/auth/login"
-                         :signupUrl "/api/auth/signup"})))))
-
-(defn register-auth-routes!
-  "Register all auth routes on the Fastify app."
-  [app]
-  (register-config-route! app)
-  (register-signup-route! app)
-  (register-login-route! app)
-  (register-logout-route! app)
-  (register-me-route! app))
+(defn register-auth-routes! [app]
+  (http/get! app "/api/auth/config" config!)
+  (http/post! app "/api/auth/signup" signup!)
+  (http/post! app "/api/auth/login" login!)
+  (http/post! app "/api/auth/logout" logout!)
+  (http/get! app "/api/auth/me" me!))

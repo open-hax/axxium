@@ -1,0 +1,24 @@
+[:test] Compiling ...
+========= Running Tests =======================
+
+Testing axxium.extern.atproto-oauth-test
+
+Testing axxium.extern.http-test
+
+Testing axxium.extern.identity-routes-test
+Agent creation failed: actor insert failed
+Credential listing failed: database unavailable
+Credential revocation failed: database unavailable
+
+Testing axxium.extern.json-test
+
+Testing axxium.extern.pg-test
+
+Testing axxium.law.identity-test
+
+Ran 22 tests containing 78 assertions.
+0 failures, 0 errors.
+===============================================
+[:test] Build completed. (84 files, 9 compiled, 0 warnings, 2.11s)
+shadow-cljs - config: /home/err/.codex/worktrees/axxium-personal1-native-20261006/shadow-cljs.edn
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/tmp/axxium-personal1-java-20261006 -Dmaven.repo.local=/tmp/axxium-personal1-java-20261006/.m2/repository
