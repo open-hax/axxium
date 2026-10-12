@@ -103,6 +103,35 @@
     (is (nil? (await (jose/verify-google-state! (str sealed "x") keys))))
     (is (nil? (await (jose/verify-google-state! sealed (assoc keys :secret "other")))))))
 
+(defn- ^:async sign-raw-google-state!
+  "Sign an arbitrary payload exactly as the state sealer does, bypassing its input contract."
+  [payload secret]
+  (-> (new jose/SignJWT (clj->js payload))
+      (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
+      (.setIssuedAt)
+      (.setIssuer "axxium")
+      (.setAudience "axxium-google-oauth-state")
+      (.setExpirationTime "5m")
+      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (await)))
+
+(defn- ^:async google-state-rejects-signed-payloads-outside-the-contract* []
+  (let [keys {:secret "fixture-secret" :issuer "axxium"}]
+    (doseq [payload [{:state "s" :nonce "n"}
+                     {:state "s" :nonce "n" :verifier 42}
+                     {:state "" :nonce "n" :verifier "v"}
+                     {:nonce "n" :verifier "v"}
+                     {:state "s" :nonce nil :verifier "v"}]]
+      (is (nil? (await (jose/verify-google-state! (await (sign-raw-google-state! payload "fixture-secret")) keys)))
+          (str "signed payload outside the Google-state contract was admitted: " (pr-str payload))))
+    (is (= {:state "s" :nonce "n" :verifier "v"}
+           (await (jose/verify-google-state! (await (sign-raw-google-state! {:state "s" :nonce "n" :verifier "v" :extra 1} "fixture-secret")) keys))))
+    (is (= :refused
+           (try (await (jose/sign-google-state! {:state "s" :nonce "n"} keys))
+                :sealed
+                (catch :default _ :refused)))
+        "sealing claims outside the Google-state contract must throw")))
+
 (defn- ^:async google-start!
   [configured?]
   (let [start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])
@@ -216,3 +245,6 @@
 
 (deftest invalid-agent-creation-is-rejected-by-the-route-before-db-effects
   (async done (-> (invalid-agent-creation-is-rejected-by-the-route-before-db-effects*) (.catch (fn [e] (is (nil? e) "invalid-agent-creation-is-rejected-by-the-route-before-db-effects threw"))) (.finally done))))
+
+(deftest google-state-rejects-signed-payloads-outside-the-contract
+  (async done (-> (google-state-rejects-signed-payloads-outside-the-contract*) (.catch (fn [e] (is (nil? e) "google-state-rejects-signed-payloads-outside-the-contract threw"))) (.finally done))))
