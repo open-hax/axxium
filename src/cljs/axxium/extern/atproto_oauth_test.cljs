@@ -68,7 +68,7 @@
 ;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
 ;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
 (deftest oauth-session-operations-serialize-by-key
-  (async done (-> (oauth-session-operations-serialize-by-key*) (.catch (fn [e] (is (nil? e) "oauth-session-operations-serialize-by-key threw"))) (.finally done))))
+  (async done (-> (oauth-session-operations-serialize-by-key*) (.catch (fn [e] (is false (str "oauth-session-operations-serialize-by-key rejected: " (pr-str e))))) (.finally done))))
 
 (deftest failed-session-operation-releases-only-its-own-position
-  (async done (-> (failed-session-operation-releases-only-its-own-position*) (.catch (fn [e] (is (nil? e) "failed-session-operation-releases-only-its-own-position threw"))) (.finally done))))
+  (async done (-> (failed-session-operation-releases-only-its-own-position*) (.catch (fn [e] (is false (str "failed-session-operation-releases-only-its-own-position rejected: " (pr-str e))))) (.finally done))))

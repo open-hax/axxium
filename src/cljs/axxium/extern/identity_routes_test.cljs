@@ -216,28 +216,28 @@
 ;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
 ;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
 (deftest unauthenticated-agent-operations-use-401
-  (async done (-> (unauthenticated-agent-operations-use-401*) (.catch (fn [e] (is (nil? e) "unauthenticated-agent-operations-use-401 threw"))) (.finally done))))
+  (async done (-> (unauthenticated-agent-operations-use-401*) (.catch (fn [e] (is false (str "unauthenticated-agent-operations-use-401 rejected: " (pr-str e))))) (.finally done))))
 
 (deftest authenticated-nonadministrators-use-403
-  (async done (-> (authenticated-nonadministrators-use-403*) (.catch (fn [e] (is (nil? e) "authenticated-nonadministrators-use-403 threw"))) (.finally done))))
+  (async done (-> (authenticated-nonadministrators-use-403*) (.catch (fn [e] (is false (str "authenticated-nonadministrators-use-403 rejected: " (pr-str e))))) (.finally done))))
 
 (deftest agent-insert-failure-leaves-no-orphan-entity
-  (async done (-> (agent-insert-failure-leaves-no-orphan-entity*) (.catch (fn [e] (is (nil? e) "agent-insert-failure-leaves-no-orphan-entity threw"))) (.finally done))))
+  (async done (-> (agent-insert-failure-leaves-no-orphan-entity*) (.catch (fn [e] (is false (str "agent-insert-failure-leaves-no-orphan-entity rejected: " (pr-str e))))) (.finally done))))
 
 (deftest credential-database-failures-have-controlled-responses
-  (async done (-> (credential-database-failures-have-controlled-responses*) (.catch (fn [e] (is (nil? e) "credential-database-failures-have-controlled-responses threw"))) (.finally done))))
+  (async done (-> (credential-database-failures-have-controlled-responses*) (.catch (fn [e] (is false (str "credential-database-failures-have-controlled-responses rejected: " (pr-str e))))) (.finally done))))
 
 (deftest conflicting-first-login-rolls-back-and-returns-existing-actor
-  (async done (-> (conflicting-first-login-rolls-back-and-returns-existing-actor*) (.catch (fn [e] (is (nil? e) "conflicting-first-login-rolls-back-and-returns-existing-actor threw"))) (.finally done))))
+  (async done (-> (conflicting-first-login-rolls-back-and-returns-existing-actor*) (.catch (fn [e] (is false (str "conflicting-first-login-rolls-back-and-returns-existing-actor rejected: " (pr-str e))))) (.finally done))))
 
 (deftest concurrent-first-logins-converge-without-orphans
-  (async done (-> (concurrent-first-logins-converge-without-orphans*) (.catch (fn [e] (is (nil? e) "concurrent-first-logins-converge-without-orphans threw"))) (.finally done))))
+  (async done (-> (concurrent-first-logins-converge-without-orphans*) (.catch (fn [e] (is false (str "concurrent-first-logins-converge-without-orphans rejected: " (pr-str e))))) (.finally done))))
 
 (deftest agent-success-commits-both-records
-  (async done (-> (agent-success-commits-both-records*) (.catch (fn [e] (is (nil? e) "agent-success-commits-both-records threw"))) (.finally done))))
+  (async done (-> (agent-success-commits-both-records*) (.catch (fn [e] (is false (str "agent-success-commits-both-records rejected: " (pr-str e))))) (.finally done))))
 
 (deftest credential-success-and-not-found-responses-are-preserved
-  (async done (-> (credential-success-and-not-found-responses-are-preserved*) (.catch (fn [e] (is (nil? e) "credential-success-and-not-found-responses-are-preserved threw"))) (.finally done))))
+  (async done (-> (credential-success-and-not-found-responses-are-preserved*) (.catch (fn [e] (is false (str "credential-success-and-not-found-responses-are-preserved rejected: " (pr-str e))))) (.finally done))))
 
 (deftest unrelated-first-login-errors-roll-back-without-recovery
-  (async done (-> (unrelated-first-login-errors-roll-back-without-recovery*) (.catch (fn [e] (is (nil? e) "unrelated-first-login-errors-roll-back-without-recovery threw"))) (.finally done))))
+  (async done (-> (unrelated-first-login-errors-roll-back-without-recovery*) (.catch (fn [e] (is false (str "unrelated-first-login-errors-roll-back-without-recovery rejected: " (pr-str e))))) (.finally done))))

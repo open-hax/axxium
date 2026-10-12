@@ -29,4 +29,4 @@
 ;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
 ;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
 (deftest rollback-failure-discards-and-releases-client
-  (async done (-> (rollback-failure-discards-and-releases-client*) (.catch (fn [e] (is (nil? e) "rollback-failure-discards-and-releases-client threw"))) (.finally done))))
+  (async done (-> (rollback-failure-discards-and-releases-client*) (.catch (fn [e] (is false (str "rollback-failure-discards-and-releases-client rejected: " (pr-str e))))) (.finally done))))

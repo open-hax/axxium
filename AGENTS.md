@@ -36,7 +36,7 @@ When modeling domains, you must strictly differentiate between the grammar of mo
     (deftest foo-test
       (async done
         (-> (foo-test*)
-            (.catch (fn [e] (is (nil? e) "foo-test threw")))
+            (.catch (fn [e] (is false (str "foo-test rejected: " (pr-str e)))))
             (.finally done))))
     ```
 - Clojure Idioms:
