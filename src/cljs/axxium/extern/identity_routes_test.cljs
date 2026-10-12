@@ -85,6 +85,7 @@
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve nil))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (doseq [[_ handler] (agent-handlers)]
+        (reset! response nil)
         (await (handler {} nil))
         (is (= 401 (:status @response)))))))
 
@@ -94,6 +95,7 @@
                   db/query-one-sql (fn [_] (js/Promise.resolve {:kind "human"}))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (doseq [[_ handler] (agent-handlers)]
+        (reset! response nil)
         (await (handler {} nil))
         (is (= 403 (:status @response)))))))
 
