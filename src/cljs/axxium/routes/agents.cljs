@@ -5,7 +5,7 @@
             [axxium.extern.http :as http]
             [axxium.law.actor :as law]
             [axxium.routes.auth-context :as auth]
-            [axxium.schema :as schema]))
+            [axxium.shape.agent :as agent-shape]))
 
 (defn- ^:async agent-actor
   "Return the actor only when its linked entity is an agent."
@@ -18,7 +18,8 @@
   "Atomically create paired agent records after administrator admission."
   [req reply _context]
   (try
-    (if-let [{name :display-name} (schema/agent-creation-request (http/body req))]
+    (if-let [{name :display-name} (let [request (agent-shape/creation-request (http/body req))]
+                                     (when (law/valid-agent-creation-request? request) request))]
         (let [entity-id (str "entity_" (random-uuid))
               actor-id (str "actor_" (random-uuid))]
           (await

@@ -15,13 +15,16 @@
   "Upper bound on in-flight Google OAuth states (matches the AT OAuth store cap)."
   1024)
 
+(defn- prune-expired [entries now]
+  (into {} (filter (fn [[_ e]] (> (:expires-at e) now))) entries))
+
 (defn remember-state
-  "Prune expired entries, evict the soonest-expiring beyond the cap, add the new state."
+  "Prune expired entries and add the new state; return nil when live states fill the cap.
+   Anonymous starts never evict another caller's live state."
   [entries now state entry]
-  (let [live (filter (fn [[_ e]] (> (:expires-at e) now)) entries)
-        kept (->> live (sort-by (comp :expires-at second))
-                  (take-last (dec max-pending-states)))]
-    (assoc (into {} kept) state entry)))
+  (let [live (prune-expired entries now)]
+    (when (< (count live) max-pending-states)
+      (assoc live state entry))))
 
 (defn- consume-state! [state]
   (let [entry (get @pending state)]
@@ -35,14 +38,19 @@
     (let [state (google/random-secret)
           nonce (google/random-secret)
           verifier (google/random-secret)
-          now (clock/now-ms)]
-      (swap! pending
-             remember-state now state {:nonce nonce :verifier verifier
-                                       :expires-at (+ now state-lifetime-ms)})
-      (http/set-state-cookie! reply state-cookie state
-                              (str/starts-with?
-                               (cfg/get-in-config [:axxium/public-base-url]) "https://"))
-      (http/redirect! reply (google/authorize-url state nonce verifier)))))
+          now (clock/now-ms)
+          entry {:nonce nonce :verifier verifier :expires-at (+ now state-lifetime-ms)}
+          [_ after] (swap-vals! pending
+                                (fn [entries]
+                                  (or (remember-state entries now state entry)
+                                      (prune-expired entries now))))]
+      (if-not (contains? after state)
+        (http/send! reply 503 {:error "Too many pending Google sign-ins; retry shortly"})
+        (do
+          (http/set-state-cookie! reply state-cookie state
+                                  (str/starts-with?
+                                   (cfg/get-in-config [:axxium/public-base-url]) "https://"))
+          (http/redirect! reply (google/authorize-url state nonce verifier)))))))
 
 (defn- ^:async bound-actor!
   "Return the subject-bound actor, atomically creating or recovering the winning binding."

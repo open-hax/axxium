@@ -8,7 +8,8 @@
             [axxium.routes.atproto :as atproto]
             [axxium.routes.auth :as auth]
             [axxium.routes.google :as google-routes]
-            [axxium.schema :as schema]
+            [axxium.law.actor :as actor-law]
+            [axxium.shape.agent :as agent-shape]
             [cljs.test :refer [deftest is]]
             [clojure.string :as str]))
 
@@ -92,20 +93,23 @@
     (is (= [{:redirect "/portal/index.html"}] (:responses outcome)))
     (is (empty? @(:committed fixture)))))
 
-(deftest google-state-store-is-bounded
-  (let [entries (reduce (fn [m i] (google-routes/remember-state m 0 (str "s" i) {:expires-at (+ 1000 i)}))
-                        {} (range (+ 50 google-routes/max-pending-states)))]
-    (is (= google-routes/max-pending-states (count entries)))
-    (is (contains? entries (str "s" (+ 49 google-routes/max-pending-states))))
-    (is (not (contains? entries "s0")))
+(deftest google-state-store-is-bounded-without-evicting-live-states
+  (let [full (reduce (fn [m i] (google-routes/remember-state m 0 (str "s" i) {:expires-at 1000}))
+                     {} (range google-routes/max-pending-states))]
+    (is (= google-routes/max-pending-states (count full)))
+    (is (nil? (google-routes/remember-state full 0 "attacker" {:expires-at 1000})))
+    (is (contains? (google-routes/remember-state full 2000 "new" {:expires-at 3000}) "new"))
     (is (= ["new"] (keys (google-routes/remember-state {"old" {:expires-at 5}} 10 "new" {:expires-at 20}))))))
 
 (deftest agent-creation-contract
-  (is (= {:display-name "Bot"} (schema/agent-creation-request {:display-name "  Bot "})))
-  (is (nil? (schema/agent-creation-request {:display-name "   "})))
-  (is (nil? (schema/agent-creation-request {:display-name 42})))
-  (is (nil? (schema/agent-creation-request {})))
-  (is (nil? (schema/agent-creation-request {:display-name (apply str (repeat 201 "x"))}))))
+  (let [admit (fn [body] (let [r (agent-shape/creation-request body)]
+                           (when (actor-law/valid-agent-creation-request? r) r)))]
+    (is (= {:display-name "Bot"} (agent-shape/creation-request {:display-name "  Bot "})))
+    (is (= {:display-name "Bot"} (admit {:display-name "  Bot "})))
+    (is (nil? (admit {:display-name "   "})))
+    (is (nil? (admit {:display-name 42})))
+    (is (nil? (admit {})))
+    (is (nil? (admit {:display-name (apply str (repeat 201 "x"))})))))
 
 (deftest ^:async logout-clears-cookie-when-session-deletion-fails
   (let [cleared (atom 0) response (atom nil)]

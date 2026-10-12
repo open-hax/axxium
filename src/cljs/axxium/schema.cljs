@@ -2,8 +2,7 @@
   "Malli schemas for Axxium identity and auth kernel.
    These are the canonical data shapes that proxx, knoxx, and openplanner consume."
   (:require [malli.core :as m]
-            [malli.registry :as mr]
-            [clojure.string :as str]))
+            [malli.registry :as mr]))
 
 ;; ─── Core Primitives ───────────────────────────────────────────────
 
@@ -97,21 +96,6 @@
    [:client/grant-types [:vector :string]]
    [:client/scopes [:vector :string]]
    [:client/created-at :inst]])
-
-;; ─── Agent Creation Contract ───────────────────────────────────────
-
-(def AgentCreationRequest
-  "Admitted input for POST /api/actors/agents after trimming display-name."
-  [:map {:closed false}
-   [:display-name [:string {:min 1 :max 200}]]])
-
-(defn agent-creation-request
-  "Decode a raw agent-creation body into the contract shape, or nil when invalid."
-  [body]
-  (let [display-name (:display-name body)
-        request {:display-name (when (string? display-name)
-                                 (str/trim display-name))}]
-    (when (m/validate AgentCreationRequest request {:registry (m/default-schemas)}) request)))
 
 ;; ─── Registry ──────────────────────────────────────────────────────
 
