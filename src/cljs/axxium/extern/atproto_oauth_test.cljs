@@ -1,6 +1,6 @@
 (ns axxium.extern.atproto-oauth-test
   (:require [axxium.extern.atproto-oauth :as oauth]
-            [cljs.test :refer [deftest is]]))
+            [cljs.test :refer [async deftest is]]))
 
 (deftest abandoned-authorizations-are-bounded
   (let [store (oauth/new-oauth-store)]
@@ -14,7 +14,7 @@
     (is (contains? #{"native" "web"} (:application_type metadata)))
     (is (seq (:redirect_uris metadata)))))
 
-(deftest ^:async oauth-session-operations-serialize-by-key
+(defn- ^:async oauth-session-operations-serialize-by-key* []
   (let [release-first (atom nil)
         second-started (atom false)
         first-result (oauth/with-local-oauth-lock
@@ -33,7 +33,7 @@
     (is (= :second (await second-result)))
     (is @second-started)))
 
-(deftest ^:async failed-session-operation-releases-only-its-own-position
+(defn- ^:async failed-session-operation-releases-only-its-own-position* []
   (let [reject-first (atom nil)
         release-second (atom nil)
         third-started (atom false)
@@ -64,3 +64,11 @@
       (is (= :after-cleanup
              (await (oauth/with-local-oauth-lock
                      "failing-session" (fn [] :after-cleanup))))))))
+
+;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
+;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
+(deftest oauth-session-operations-serialize-by-key
+  (async done (-> (oauth-session-operations-serialize-by-key*) (.catch (fn [e] (is false (str "oauth-session-operations-serialize-by-key rejected: " (pr-str e))))) (.finally done))))
+
+(deftest failed-session-operation-releases-only-its-own-position
+  (async done (-> (failed-session-operation-releases-only-its-own-position*) (.catch (fn [e] (is false (str "failed-session-operation-releases-only-its-own-position rejected: " (pr-str e))))) (.finally done))))

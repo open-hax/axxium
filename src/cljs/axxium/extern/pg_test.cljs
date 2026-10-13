@@ -1,7 +1,7 @@
 (ns axxium.extern.pg-test
   "PostgreSQL transaction failure and error-identity boundary fixtures."
   (:require [axxium.extern.pg :as pg]
-            [cljs.test :refer [deftest is]]))
+            [cljs.test :refer [async deftest is]]))
 
 (deftest only-provider-subject-uniqueness-conflicts-qualify-for-recovery
   (is (pg/provider-binding-conflict? #js {:code "23505" :constraint "idx_provider_bindings_subject"}))
@@ -9,7 +9,7 @@
   (is (not (pg/provider-binding-conflict? #js {:code "23505" :constraint "actors_pkey"})))
   (is (not (pg/provider-binding-conflict? (js/Error. "unrelated")))))
 
-(deftest ^:async rollback-failure-discards-and-releases-client
+(defn- ^:async rollback-failure-discards-and-releases-client* []
   (let [commands (atom [])
         discarded (atom [])
         client #js {:query (fn [sql]
@@ -25,3 +25,8 @@
              (catch :default error (.-message error)))))
     (is (= ["BEGIN" "ROLLBACK"] @commands))
     (is (= [true] @discarded))))
+
+;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
+;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
+(deftest rollback-failure-discards-and-releases-client
+  (async done (-> (rollback-failure-discards-and-releases-client*) (.catch (fn [e] (is false (str "rollback-failure-discards-and-releases-client rejected: " (pr-str e))))) (.finally done))))
