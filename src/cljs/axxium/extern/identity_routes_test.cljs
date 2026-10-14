@@ -7,7 +7,7 @@
             [axxium.extern.http :as http]
             [axxium.routes.agents :as agents]
             [axxium.routes.atproto-oauth :as atproto]
-            [cljs.test :refer [deftest is]]
+            [cljs.test :refer [async deftest is]]
             [clojure.string :as str]))
 
 (defn- agent-handlers []
@@ -80,7 +80,7 @@
       (session/set-session-cookie nil "session-token")
       (is (= 604800 (:max-age @options))))))
 
-(deftest ^:async unauthenticated-agent-operations-use-401
+(defn- ^:async unauthenticated-agent-operations-use-401* []
   (let [response (atom nil)]
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve nil))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
@@ -89,7 +89,7 @@
         (await (handler {} nil))
         (is (= 401 (:status @response)))))))
 
-(deftest ^:async authenticated-nonadministrators-use-403
+(defn- ^:async authenticated-nonadministrators-use-403* []
   (let [response (atom nil)]
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "human" :auth/roles []}))
                   db/query-one-sql (fn [_] (js/Promise.resolve {:kind "human"}))
@@ -99,7 +99,7 @@
         (await (handler {} nil))
         (is (= 403 (:status @response)))))))
 
-(deftest ^:async agent-insert-failure-leaves-no-orphan-entity
+(defn- ^:async agent-insert-failure-leaves-no-orphan-entity* []
   (let [{:keys [pool committed commands released]} (database-fixture {:fail-actor? true})
         response (atom nil)]
     (with-redefs [db/pool (delay pool)
@@ -113,7 +113,7 @@
       (is (= "ROLLBACK" (last @commands)))
       (is (= 1 @released)))))
 
-(deftest ^:async credential-database-failures-have-controlled-responses
+(defn- ^:async credential-database-failures-have-controlled-responses* []
   (let [response (atom nil)
         lookups (atom 0)]
     (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "admin" :auth/roles [:axxium/system-admin]}))
@@ -150,7 +150,7 @@
         (await (callback {} nil)))
       {:responses @responses :actors @actors})))
 
-(deftest ^:async conflicting-first-login-rolls-back-and-returns-existing-actor
+(defn- ^:async conflicting-first-login-rolls-back-and-returns-existing-actor* []
   (let [fixture (database-fixture {:conflict? true})
         outcome (await (run-callbacks! fixture false))]
     (is (= ["winning-actor"] (:actors outcome)))
@@ -159,7 +159,7 @@
     (is (some #{"ROLLBACK"} @(:commands fixture)))
     (is (= 1 @(:released fixture)))))
 
-(deftest ^:async concurrent-first-logins-converge-without-orphans
+(defn- ^:async concurrent-first-logins-converge-without-orphans* []
   (let [fixture (database-fixture {:concurrent? true})
         outcome (await (run-callbacks! fixture true))]
     (is (= 2 (count (:actors outcome))))
@@ -168,7 +168,7 @@
     (is (= 2 (count (filter :redirect (:responses outcome)))))
     (is (= 2 @(:released fixture)))))
 
-(deftest ^:async agent-success-commits-both-records
+(defn- ^:async agent-success-commits-both-records* []
   (let [{:keys [pool committed commands released]} (database-fixture {})
         response (atom nil)]
     (with-redefs [db/pool (delay pool)
@@ -183,7 +183,7 @@
       (is (= "COMMIT" (last @commands)))
       (is (= 1 @released)))))
 
-(deftest ^:async credential-success-and-not-found-responses-are-preserved
+(defn- ^:async credential-success-and-not-found-responses-are-preserved* []
   (let [response (atom nil)
         calls (atom 0)
         revoked (atom [])]
@@ -205,10 +205,39 @@
         (await ((get handlers [:delete "/api/actors/:id/credentials/:credentialId"]) {} nil))
         (is (= {:status 200 :body {:ok true}} @response))))))
 
-(deftest ^:async unrelated-first-login-errors-roll-back-without-recovery
+(defn- ^:async unrelated-first-login-errors-roll-back-without-recovery* []
   (let [fixture (database-fixture {:fail-actor? true})
         outcome (await (run-callbacks! fixture false))]
     (is (empty? (:actors outcome)))
     (is (= [{:status 502 :body {:error "AT Protocol sign-in failed"}}] (:responses outcome)))
     (is (empty? @(:committed fixture)))
     (is (= 1 @(:released fixture)))))
+
+;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
+;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
+(deftest unauthenticated-agent-operations-use-401
+  (async done (-> (unauthenticated-agent-operations-use-401*) (.catch (fn [e] (is false (str "unauthenticated-agent-operations-use-401 rejected: " (pr-str e))))) (.finally done))))
+
+(deftest authenticated-nonadministrators-use-403
+  (async done (-> (authenticated-nonadministrators-use-403*) (.catch (fn [e] (is false (str "authenticated-nonadministrators-use-403 rejected: " (pr-str e))))) (.finally done))))
+
+(deftest agent-insert-failure-leaves-no-orphan-entity
+  (async done (-> (agent-insert-failure-leaves-no-orphan-entity*) (.catch (fn [e] (is false (str "agent-insert-failure-leaves-no-orphan-entity rejected: " (pr-str e))))) (.finally done))))
+
+(deftest credential-database-failures-have-controlled-responses
+  (async done (-> (credential-database-failures-have-controlled-responses*) (.catch (fn [e] (is false (str "credential-database-failures-have-controlled-responses rejected: " (pr-str e))))) (.finally done))))
+
+(deftest conflicting-first-login-rolls-back-and-returns-existing-actor
+  (async done (-> (conflicting-first-login-rolls-back-and-returns-existing-actor*) (.catch (fn [e] (is false (str "conflicting-first-login-rolls-back-and-returns-existing-actor rejected: " (pr-str e))))) (.finally done))))
+
+(deftest concurrent-first-logins-converge-without-orphans
+  (async done (-> (concurrent-first-logins-converge-without-orphans*) (.catch (fn [e] (is false (str "concurrent-first-logins-converge-without-orphans rejected: " (pr-str e))))) (.finally done))))
+
+(deftest agent-success-commits-both-records
+  (async done (-> (agent-success-commits-both-records*) (.catch (fn [e] (is false (str "agent-success-commits-both-records rejected: " (pr-str e))))) (.finally done))))
+
+(deftest credential-success-and-not-found-responses-are-preserved
+  (async done (-> (credential-success-and-not-found-responses-are-preserved*) (.catch (fn [e] (is false (str "credential-success-and-not-found-responses-are-preserved rejected: " (pr-str e))))) (.finally done))))
+
+(deftest unrelated-first-login-errors-roll-back-without-recovery
+  (async done (-> (unrelated-first-login-errors-roll-back-without-recovery*) (.catch (fn [e] (is false (str "unrelated-first-login-errors-roll-back-without-recovery rejected: " (pr-str e))))) (.finally done))))
