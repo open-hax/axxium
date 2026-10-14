@@ -5,7 +5,7 @@
             [axxium.extern.http :as http]
             [axxium.law.actor :as law]
             [axxium.routes.auth-context :as auth]
-            [clojure.string :as str]))
+            [axxium.shape.agent :as agent-shape]))
 
 (defn- ^:async agent-actor
   "Return the actor only when its linked entity is an agent."
@@ -18,10 +18,8 @@
   "Atomically create paired agent records after administrator admission."
   [req reply _context]
   (try
-    (let [{:keys [display-name]} (http/body req)
-          name (some-> display-name str/trim)]
-      (if (or (str/blank? name) (> (count name) 200))
-        (http/send! reply 400 {:error "display-name must be 1–200 characters"})
+    (if-let [{name :display-name} (let [request (agent-shape/creation-request (http/body req))]
+                                     (when (law/valid-agent-creation-request? request) request))]
         (let [entity-id (str "entity_" (random-uuid))
               actor-id (str "actor_" (random-uuid))]
           (await
@@ -33,7 +31,8 @@
                               {:id actor-id :entity-id entity-id :display-name name
                                :capabilities [] :roles [] :status "active"}))))))
           (http/send! reply 201 {:actor {:id actor-id :entity_id entity-id
-                                        :kind "agent" :display_name name}}))))
+                                        :kind "agent" :display_name name}}))
+        (http/send! reply 400 {:error "display-name must be 1–200 characters"}))
     (catch :default err
       (println "Agent creation failed:" (http/error-message err))
       (http/send! reply 500 {:error "Could not create agent"}))))

@@ -3,39 +3,35 @@
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.db :as db]
-            [axxium.extern.agent-credentials :as clock]
             [axxium.extern.google :as google]
+            [axxium.extern.jose :as jose]
             [axxium.extern.http :as http]
             [clojure.string :as str]))
 
-(defonce ^:private pending (atom {}))
-(def ^:private state-lifetime-ms 300000)
 (def ^:private state-cookie "axxium_google_state")
 
-(defn- consume-state! [state]
-  (let [entry (get @pending state)]
-    (swap! pending dissoc state)
-    (when (and entry (< (clock/now-ms) (:expires-at entry)))
-      entry)))
+(defn- state-keys []
+  {:secret (cfg/get-in-config [:jwt/secret])
+   :issuer (cfg/get-in-config [:jwt/issuer])})
 
-(defn- start! [_req reply]
+(defn- ^:async start!
+  "Begin Google sign-in with stateless, signed browser state (no server-side store)."
+  [_req reply]
   (if-not (google/configured?)
     (http/send! reply 503 {:error "Google redirect URI is not registered for this Axxium origin"})
     (let [state (google/random-secret)
           nonce (google/random-secret)
           verifier (google/random-secret)
-          now (clock/now-ms)]
-      (swap! pending
-             (fn [entries]
-               (assoc (into {} (filter (fn [[_ entry]] (> (:expires-at entry) now)) entries))
-                      state {:nonce nonce :verifier verifier
-                             :expires-at (+ now state-lifetime-ms)})))
-      (http/set-state-cookie! reply state-cookie state
+          sealed (await (jose/sign-google-state!
+                         {:state state :nonce nonce :verifier verifier} (state-keys)))]
+      (http/set-state-cookie! reply state-cookie sealed
                               (str/starts-with?
                                (cfg/get-in-config [:axxium/public-base-url]) "https://"))
       (http/redirect! reply (google/authorize-url state nonce verifier)))))
 
-(defn- ^:async bound-actor! [{:keys [subject email display-name]}]
+(defn- ^:async bound-actor!
+  "Return the subject-bound actor, atomically creating or recovering the winning binding."
+  [{:keys [subject email display-name]}]
   (if-let [actor (await (db/query-one-sql
                          (db/q-select-actor-by-provider-subject "google" subject)))]
     actor
@@ -48,24 +44,33 @@
                             str/trim str/lower-case)
             roles (if (and (seq admin-email) (= email admin-email))
                     [:axxium/system-admin] [:axxium/user])]
-        (await (db/query-sql
-                (db/q-insert-entity {:id entity-id :kind "human"
-                                     :email email :display-name display-name})))
-        (await (db/query-sql
-                (db/q-insert-actor {:id actor-id :entity-id entity-id
-                                    :email email :display-name display-name
-                                    :capabilities [:axxium/login :axxium/read]
-                                    :roles roles :status "active"})))
-        (await (db/query-sql
-                (db/q-insert-provider-binding "google" subject actor-id)))
-        (db/query-one-sql (db/q-select-actor-by-id {:id actor-id}))))))
+        (try
+          (await
+           (db/with-transaction!
+            (fn ^:async bind-google-rows [query!]
+              (await (query! (db/q-insert-entity {:id entity-id :kind "human"
+                                                  :email email :display-name display-name})))
+              (await (query! (db/q-insert-actor {:id actor-id :entity-id entity-id
+                                                 :email email :display-name display-name
+                                                 :capabilities [:axxium/login :axxium/read]
+                                                 :roles roles :status "active"})))
+              (await (query! (db/q-insert-provider-binding "google" subject actor-id)))
+              (first (await (query! (db/q-select-actor-by-id {:id actor-id})))))))
+          (catch :default error
+            (if (db/provider-binding-conflict? error)
+              (or (await (db/query-one-sql
+                         (db/q-select-actor-by-provider-subject "google" subject)))
+                  (throw error))
+              (throw error))))))))
 
 (defn- ^:async callback! [req reply]
   (try
     (let [state (http/query-param req "state")
           code (http/query-param req "code")
-          browser-state (http/cookie req state-cookie)
-          entry (when (= browser-state state) (consume-state! state))]
+          sealed (http/cookie req state-cookie)
+          opened (when (seq sealed)
+                   (await (jose/verify-google-state! sealed (state-keys))))
+          entry (when (and (seq state) (= state (:state opened))) opened)]
       (http/clear-state-cookie! reply state-cookie)
       (if (and entry (seq code))
         (let [profile (await (google/verified-profile!
