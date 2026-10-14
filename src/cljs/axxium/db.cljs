@@ -70,27 +70,40 @@
     (pg/query! @pool sql-str [])))
 
 (defn- ^:async ensure-unique-actors-email-index!
-  "Replace the legacy non-unique email index atomically. Refuse startup when
-   duplicate non-NULL emails already exist so we never drop the old index and
-   then fail CREATE UNIQUE INDEX with the service left indexless."
+  "Replace the legacy non-unique email index atomically when it is still
+   present. Skip when idx_actors_email is already unique so rolling restarts
+   do not repeatedly lock and rescan actors. Refuse startup when duplicate
+   non-NULL emails already exist so we never drop the old index and then fail
+   CREATE UNIQUE INDEX with the service left indexless."
   []
   (let [{:keys [rows]}
         (await
          (pg/query!
           @pool
-          (str "SELECT email, COUNT(*)::int AS n FROM actors "
-               "WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1")
-          []))]
-    (when (seq rows)
-      (throw (ex-info
-              "Cannot enforce unique actors.email: duplicate emails present"
-              {:duplicates rows})))
-    (await
-     (pg/with-transaction!
-      @pool
-      (fn ^:async migrate-email-index! [connection]
-        (await (pg/query! connection (q/drop-index-actors-email) []))
-        (await (pg/query! connection (q/create-index-actors-email) [])))))))
+          (str "SELECT i.indisunique AS is_unique "
+               "FROM pg_class c "
+               "JOIN pg_index i ON i.indexrelid = c.oid "
+               "WHERE c.relname = 'idx_actors_email'")
+          []))
+        already-unique? (boolean (:is_unique (first rows)))]
+    (when-not already-unique?
+      (let [{:keys [rows]}
+            (await
+             (pg/query!
+              @pool
+              (str "SELECT email, COUNT(*)::int AS n FROM actors "
+                   "WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1")
+              []))]
+        (when (seq rows)
+          (throw (ex-info
+                  "Cannot enforce unique actors.email: duplicate emails present"
+                  {:duplicates rows})))
+        (await
+         (pg/with-transaction!
+          @pool
+          (fn ^:async migrate-email-index! [connection]
+            (await (pg/query! connection (q/drop-index-actors-email) []))
+            (await (pg/query! connection (q/create-index-actors-email) [])))))))))
 
 (defn init-schema!
   "Initialize database schema. Idempotent."

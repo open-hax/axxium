@@ -58,13 +58,22 @@
               (first (await (query! (db/q-select-actor-by-id {:id actor-id})))))))
           (catch :default error
             ;; Unique email or provider-binding: the winner finished first. Reload
-            ;; by provider subject (atomic txn wrote binding with the actor).
-            (if (or (db/provider-binding-conflict? error)
-                    (db/actor-email-conflict? error))
+            ;; by provider subject when that winner was this Google flow.
+            (cond
+              (db/provider-binding-conflict? error)
               (or (await (db/query-one-sql
-                         (db/q-select-actor-by-provider-subject "google" subject)))
+                          (db/q-select-actor-by-provider-subject "google" subject)))
                   (throw error))
-              (throw error))))))))
+
+              (db/actor-email-conflict? error)
+              (or (await (db/query-one-sql
+                          (db/q-select-actor-by-provider-subject "google" subject)))
+                  ;; Password signup (or another flow) won the email with no
+                  ;; Google binding for this subject — surface ownership, not 502.
+                  (throw (ex-info "Email is already bound to another Axxium actor"
+                                  {:status 409})))
+
+              :else (throw error))))))))
 
 (defn- ^:async callback! [req reply]
   (try
