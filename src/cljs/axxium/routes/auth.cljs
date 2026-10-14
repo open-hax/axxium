@@ -37,20 +37,31 @@
         (let [password-hash (await (bcrypt/hash password
                                                 (cfg/get-in-config [:password/salt-rounds])))
               entity-id (str "entity_" (random-uuid))
-              actor-id (str "actor_" (random-uuid))]
-          (await (db/query-sql (db/q-insert-entity
+              actor-id (str "actor_" (random-uuid))
+              conflict? (atom false)]
+          (try
+            (await
+             (db/with-transaction!
+              (fn ^:async signup-rows [query!]
+                (await (query! (db/q-insert-entity
                                 {:id entity-id :kind "human" :email email
                                  :display-name display-name})))
-          (await (db/query-sql (db/q-insert-actor
+                (await (query! (db/q-insert-actor
                                 {:id actor-id :entity-id entity-id :email email
                                  :display-name display-name :password-hash password-hash
                                  :capabilities [:axxium/login :axxium/read]
-                                 :roles [:axxium/user] :status "active"})))
-          (let [actor (await (db/query-one-sql (db/q-select-actor-by-id {:id actor-id})))
-                {:keys [token]} (await (session/create-session! actor))]
-            (session/set-session-cookie reply token)
-            (http/send! reply 200 {:ok true :actor (sanitize-actor actor)
-                                   :token token})))))
+                                 :roles [:axxium/user] :status "active"}))))))
+            (catch :default err
+              (if (db/actor-email-conflict? err)
+                (do (reset! conflict? true)
+                    (http/send! reply 409 {:error "An account with this email already exists"}))
+                (throw err))))
+          (when-not @conflict?
+            (let [actor (await (db/query-one-sql (db/q-select-actor-by-id {:id actor-id})))
+                  {:keys [token]} (await (session/create-session! actor))]
+              (session/set-session-cookie reply token)
+              (http/send! reply 200 {:ok true :actor (sanitize-actor actor)
+                                     :token token}))))))
     (catch :default err
       (println "Signup failed:" (http/error-message err))
       (http/send! reply 500 {:error "Signup failed"}))))

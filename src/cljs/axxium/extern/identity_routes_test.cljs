@@ -120,7 +120,7 @@
                   db/query-one-sql (fn [_] (if (= 1 (swap! lookups inc))
                                             (js/Promise.resolve {:kind "human"})
                                             (js/Promise.reject (js/Error. "database unavailable"))))
-                  http/param (fn [_ _] "fixture-id")
+                  http/param (fn [_ name] (if (= name "credentialId") "11111111-1111-4111-8111-111111111111" "fixture-id"))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (doseq [path [[:get "/api/actors/:id/credentials"] [:delete "/api/actors/:id/credentials/:credentialId"]]]
         (reset! lookups 0)
@@ -194,7 +194,7 @@
                                                               {:kind "agent"})))
                   db/query-all-sql (fn [_] (js/Promise.resolve [{:id "credential"}]))
                   db/query-sql (fn [_] (js/Promise.resolve @revoked))
-                  http/param (fn [_ _] "fixture-id")
+                  http/param (fn [_ name] (if (= name "credentialId") "11111111-1111-4111-8111-111111111111" "fixture-id"))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (let [handlers (agent-handlers)]
         (await ((get handlers [:get "/api/actors/:id/credentials"]) {} nil))

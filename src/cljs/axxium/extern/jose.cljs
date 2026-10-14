@@ -19,6 +19,8 @@
 (defn verify-actor! [token {:keys [secret issuer audience]}]
   (let [key (.encode (new (.-TextEncoder js/globalThis)) secret)]
     (-> (jwtVerify token key #js {:issuer issuer :audience audience
+                                  :algorithms #js ["HS256"]
+                                  :requiredClaims #js ["exp"]
                                   :clockTolerance 60})
         (.then (fn [result]
                  (js->clj (.-payload result) :keywordize-keys true))))))

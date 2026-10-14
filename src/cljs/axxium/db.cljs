@@ -47,6 +47,11 @@
   [error]
   (pg/provider-binding-conflict? error))
 
+(defn actor-email-conflict?
+  "Recognize only the actors.email uniqueness conflict for signup races."
+  [error]
+  (pg/actor-email-conflict? error))
+
 (defn query-one-sql
   "Execute HoneySQL query and return first row or nil."
   [honey-map]
@@ -64,19 +69,56 @@
   (let [[sql-str _params] (honey->sql honey-map)]
     (pg/query! @pool sql-str [])))
 
-(defn init-schema!
-  "Initialize database schema. Idempotent."
+(defn- ^:async actors-email-index-on!
+  "Return {:is_unique .. :qualified_name ..} for idx_actors_email on the
+   application's actors table, or nil when absent."
+  [connection]
+  (let [{:keys [rows]} (await (pg/query! connection (q/select-actors-email-index) []))]
+    (first rows)))
+
+(defn- ^:async migrate-email-index!
+  "Inside one transaction: lock actor writes, re-check the index, refuse on
+   duplicate non-NULL emails, then swap the legacy index for the unique one.
+   Throwing rolls back, so the legacy index is never dropped without its
+   unique replacement."
+  [connection]
+  (await (pg/query! connection (q/lock-actors-for-email-index) []))
+  (let [index (await (actors-email-index-on! connection))]
+    (when-not (:is_unique index)
+      (let [{:keys [rows]} (await (pg/query! connection (q/select-duplicate-actor-emails) []))]
+        (when (seq rows)
+          (throw (ex-info
+                  "Cannot enforce unique actors.email: duplicate emails present"
+                  {:duplicates rows}))))
+      (when-let [qualified-name (:qualified_name index)]
+        (await (pg/query! connection (q/drop-index-actors-email qualified-name) [])))
+      (await (pg/query! connection (q/create-index-actors-email) [])))))
+
+(defn- ^:async ensure-unique-actors-email-index!
+  "Replace the legacy non-unique email index when it is still present.
+   Fast path: skip (no lock) when the actors table's idx_actors_email is
+   already unique, so rolling restarts do not lock and rescan actors.
+   Otherwise the duplicate check and swap run under a table lock in one
+   transaction, so an older process cannot commit a duplicate between the
+   check and CREATE UNIQUE INDEX."
   []
-  (-> (exec-ddl! (q/create-table-entities))
-      (.then (fn [_] (exec-ddl! (q/create-table-actors))))
-      (.then (fn [_] (exec-ddl! (q/create-table-sessions))))
-      (.then (fn [_] (exec-ddl! (q/create-table-oauth-clients))))
-      (.then (fn [_] (exec-ddl! (q/create-table-agent-credentials))))
-      (.then (fn [_] (exec-ddl! (q/create-table-provider-bindings))))
-      (.then (fn [_] (pg/query! @pool (q/create-index-provider-subject) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-actors-email) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-actor) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-expires) [])))))
+  (let [index (await (actors-email-index-on! @pool))]
+    (when-not (:is_unique index)
+      (await (pg/with-transaction! @pool migrate-email-index!)))))
+
+(defn ^:async init-schema!
+  "Initialize database schema. Idempotent. DDL runs sequentially in order."
+  []
+  (await (exec-ddl! (q/create-table-entities)))
+  (await (exec-ddl! (q/create-table-actors)))
+  (await (exec-ddl! (q/create-table-sessions)))
+  (await (exec-ddl! (q/create-table-oauth-clients)))
+  (await (exec-ddl! (q/create-table-agent-credentials)))
+  (await (exec-ddl! (q/create-table-provider-bindings)))
+  (await (pg/query! @pool (q/create-index-provider-subject) []))
+  (await (ensure-unique-actors-email-index!))
+  (await (pg/query! @pool (q/create-index-sessions-actor) []))
+  (await (pg/query! @pool (q/create-index-sessions-expires) [])))
 
 ;; Re-export query builders for convenience
 (def q-select-actor-by-id q/select-actor-by-id)

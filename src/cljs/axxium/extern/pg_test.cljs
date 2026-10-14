@@ -30,3 +30,8 @@
 ;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
 (deftest rollback-failure-discards-and-releases-client
   (async done (-> (rollback-failure-discards-and-releases-client*) (.catch (fn [e] (is false (str "rollback-failure-discards-and-releases-client rejected: " (pr-str e))))) (.finally done))))
+
+(deftest actor-email-conflict-is-exact
+  (is (pg/actor-email-conflict? #js {:code "23505" :constraint "idx_actors_email"}))
+  (is (not (pg/actor-email-conflict? #js {:code "23505" :constraint "idx_provider_bindings_subject"})))
+  (is (not (pg/actor-email-conflict? #js {:code "23503" :constraint "idx_actors_email"}))))

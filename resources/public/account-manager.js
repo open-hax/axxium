@@ -24,7 +24,13 @@ class AxxiumAccountManager extends HTMLElement {
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    const result = await response.json();
+    let result = {};
+    try { result = await response.json(); } catch (error) {
+      // Error responses may be bodyless/non-JSON → {}. Successful responses
+      // must yield parseable JSON so a one-time credential token is never
+      // silently dropped (including SyntaxError on malformed bodies).
+      if (response.ok) throw error;
+    }
     if (!response.ok) {
       throw Object.assign(new Error(result.error || `HTTP ${response.status}`), { status: response.status });
     }

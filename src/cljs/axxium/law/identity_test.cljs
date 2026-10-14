@@ -16,3 +16,15 @@
     (is (not (atproto/identity? "localhost")))
     (is (not (atproto/identity? "did:web:localhost/path")))
     (is (not (atproto/identity? (apply str (repeat 600 "a")))))))
+
+
+(deftest credential-id-must-be-a-uuid-string
+  (is (true? (actor/valid-credential-id? "e619cb36-f788-457d-ec3f-76d5fd47d1cc")))
+  (is (true? (actor/valid-credential-id? "E619CB36-F788-457D-EC3F-76D5FD47D1CC")))
+  (is (false? (actor/valid-credential-id? "not-a-uuid")))
+  (is (false? (actor/valid-credential-id? "fixture-id")))
+  (is (false? (actor/valid-credential-id? "")))
+  (is (false? (actor/valid-credential-id? nil)))
+  (is (false? (actor/valid-credential-id? 42)))
+  (is (false? (actor/valid-credential-id?
+               "e619cb36-f788-457d-ec3f-76d5fd47d1cc\n"))))
