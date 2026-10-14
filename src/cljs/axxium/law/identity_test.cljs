@@ -11,7 +11,11 @@
 (deftest identity-input-is-bounded-and-parsed
   (testing "valid AT Protocol identities"
     (is (atproto/did? "did:plc:ewvi7nxzyoun6zhxrhs64oiz"))
-    (is (atproto/handle? "atproto.com")))
+    (is (atproto/handle? "atproto.com"))
+    (is (atproto/did? "did:web:example.com:users:alice")
+        "path-based did:web identifiers use colon-delimited segments")
+    (is (atproto/did? "did:web:localhost%3A8443")
+        "did:web ports are percent-encoded"))
   (testing "unresolvable or unsafe identity shapes"
     (is (not (atproto/identity? "localhost")))
     (is (not (atproto/identity? "did:web:localhost/path")))

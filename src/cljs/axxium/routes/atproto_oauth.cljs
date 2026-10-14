@@ -90,22 +90,40 @@
         (catch :default _
           (http/send! reply 502 {:error "AT Protocol sign-in could not start"}))))))
 
+(defn- ^:async revoke-provider-tokens!
+  "Best-effort revocation of the provider OAuth session once Axxium no longer
+   needs it. A transient revocation failure is logged, never surfaced: it must
+   not invalidate a sign-in whose identity was already verified and bound."
+  [oauth-session]
+  (try
+    (await (oauth/revoke! oauth-session))
+    (catch :default err
+      (println "AT Protocol token revocation failed:" (http/error-message err)))))
+
+(defn- ^:async complete-callback!
+  "Validate browser state and DID, then bind the identity and start the
+   Axxium session. Provider tokens are revoked afterwards on every outcome."
+  [req reply browser-state {:keys [did state session]}]
+  (try
+    (if (and (= browser-state state) (atproto-law/did? did))
+      (let [actor (await (if (str/starts-with? state "link|")
+                           (link-actor! req did (second (str/split state #"\|")))
+                           (bound-actor! did)))
+            {:keys [token]} (await (session/create-session! actor))]
+        (session/set-session-cookie reply token)
+        (http/redirect! reply "/portal/index.html"))
+      (http/send! reply 400 {:error "AT Protocol identity or browser state mismatch"}))
+    (finally
+      (await (revoke-provider-tokens! session)))))
+
 (defn- ^:async callback! [req reply]
   (let [browser-state (http/cookie req state-cookie)]
     (http/clear-state-cookie! reply state-cookie callback-path)
     (if-not (seq browser-state)
       (http/send! reply 400 {:error "Missing AT Protocol sign-in state"})
       (try
-        (let [{:keys [did state session]} (await (oauth/callback! (http/request-url req)))
-              _ (await (oauth/revoke! session))]
-          (if (and (= browser-state state) (atproto-law/did? did))
-            (let [actor (await (if (str/starts-with? state "link|")
-                                 (link-actor! req did (second (str/split state #"\|")))
-                                 (bound-actor! did)))
-                  {:keys [token]} (await (session/create-session! actor))]
-              (session/set-session-cookie reply token)
-              (http/redirect! reply "/portal/index.html"))
-            (http/send! reply 400 {:error "AT Protocol identity or browser state mismatch"})))
+        (await (complete-callback! req reply browser-state
+                                   (await (oauth/callback! (http/request-url req)))))
         (catch :default err
           (let [status (:status (ex-data err))]
             (http/send! reply (or status 502)
