@@ -86,10 +86,16 @@
   (try
     (let [actor-id (http/param req "id")
           credential-id (http/param req "credentialId")]
-      (if (and (await (agent-actor actor-id))
-               (seq (await (db/query-sql
-                            (db/q-revoke-agent-credential credential-id actor-id)))))
+      (cond
+        (not (law/valid-credential-id? credential-id))
+        (http/send! reply 400 {:error "Invalid credential id"})
+
+        (and (await (agent-actor actor-id))
+             (seq (await (db/query-sql
+                          (db/q-revoke-agent-credential credential-id actor-id)))))
         (http/send! reply 200 {:ok true})
+
+        :else
         (http/send! reply 404 {:error "Credential not found"})))
     (catch :default err
       (println "Credential revocation failed:" (http/error-message err))

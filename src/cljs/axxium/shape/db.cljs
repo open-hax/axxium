@@ -234,9 +234,14 @@
 (defn create-index-provider-subject []
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_bindings_subject ON provider_bindings(provider, subject)")
 
+(defn drop-index-actors-email
+  "Remove the legacy non-unique email index so the unique index can replace it."
+  []
+  "DROP INDEX IF EXISTS idx_actors_email")
+
 (defn create-index-actors-email
   []
-  "CREATE INDEX IF NOT EXISTS idx_actors_email ON actors(email)")
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_actors_email ON actors(email)")
 
 (defn create-index-sessions-actor
   []

@@ -59,3 +59,10 @@
   [error]
   (and (= "23505" (.-code error))
        (= "idx_provider_bindings_subject" (.-constraint error))))
+
+(defn actor-email-conflict?
+  "Decode PostgreSQL's exact actors.email unique-constraint failure."
+  [error]
+  (and (= "23505" (.-code error))
+       (= "idx_actors_email" (.-constraint error))))
+

@@ -47,6 +47,11 @@
   [error]
   (pg/provider-binding-conflict? error))
 
+(defn actor-email-conflict?
+  "Recognize only the actors.email uniqueness conflict for signup races."
+  [error]
+  (pg/actor-email-conflict? error))
+
 (defn query-one-sql
   "Execute HoneySQL query and return first row or nil."
   [honey-map]
@@ -74,6 +79,7 @@
       (.then (fn [_] (exec-ddl! (q/create-table-agent-credentials))))
       (.then (fn [_] (exec-ddl! (q/create-table-provider-bindings))))
       (.then (fn [_] (pg/query! @pool (q/create-index-provider-subject) [])))
+      (.then (fn [_] (pg/query! @pool (q/drop-index-actors-email) [])))
       (.then (fn [_] (pg/query! @pool (q/create-index-actors-email) [])))
       (.then (fn [_] (pg/query! @pool (q/create-index-sessions-actor) [])))
       (.then (fn [_] (pg/query! @pool (q/create-index-sessions-expires) [])))))

@@ -23,7 +23,9 @@
     {:token value :actor actor}))
 
 (defn ^:async verify-session
-  "Verify a session token. Returns promise of actor or nil."
+  "Verify a session token. Returns promise of actor or nil.
+   JWT verification failures return nil (401 upstream). Database errors
+   propagate on both the JWT and axx_ branches so a DB outage surfaces as 500."
   [token]
   (cond
     (str/blank? token) nil
@@ -31,12 +33,12 @@
     (await (db/query-one-sql
             (db/q-select-active-agent-credential (secrets/token-hash token))))
     :else
-    (try
-      (let [claims (await (token/verify-token token))]
-        (await (db/query-one-sql
-                (db/q-select-actor-by-session
-                 (:sub claims) (secrets/token-hash token)))))
-      (catch :default _ nil))))
+    (when-let [claims (try
+                        (await (token/verify-token token))
+                        (catch :default _ nil))]
+      (await (db/query-one-sql
+              (db/q-select-actor-by-session
+               (:sub claims) (secrets/token-hash token)))))))
 
 (defn delete-session!
   "Delete a session by token."

@@ -12,8 +12,6 @@
             [cljs.test :refer [async deftest is]]
             [clojure.string :as str]))
 
-(def ^:private fixture-credential-id "11111111-1111-4111-8111-111111111111")
-
 (defn- routes [register!]
   (let [handlers (atom {})
         reg (fn [method] (fn [_ path handler] (swap! handlers assoc [method path] handler)))]
