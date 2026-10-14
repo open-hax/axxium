@@ -267,7 +267,11 @@
   (async done (-> (unrelated-first-login-errors-roll-back-without-recovery*) (.catch (fn [e] (is false (str "unrelated-first-login-errors-roll-back-without-recovery rejected: " (pr-str e))))) (.finally done))))
 
 (deftest revocation-failure-does-not-fail-verified-sign-in
-  (async done (-> (revocation-failure-does-not-fail-verified-sign-in*) (.catch (fn [e] (is false (str "revocation-failure-does-not-fail-verified-sign-in rejected: " (pr-str e))))) (.finally done))))
+  (async done (-> (revocation-failure-does-not-fail-verified-sign-in*)
+                  (.catch (fn [e] (is false (str "revocation-failure-does-not-fail-verified-sign-in rejected: " (pr-str e)))))
+                  (.finally done))))
 
 (deftest mismatched-state-still-revokes-provider-tokens
-  (async done (-> (mismatched-state-still-revokes-provider-tokens*) (.catch (fn [e] (is false (str "mismatched-state-still-revokes-provider-tokens rejected: " (pr-str e))))) (.finally done))))
+  (async done (-> (mismatched-state-still-revokes-provider-tokens*)
+                  (.catch (fn [e] (is false (str "mismatched-state-still-revokes-provider-tokens rejected: " (pr-str e)))))
+                  (.finally done))))
