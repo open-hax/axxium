@@ -168,7 +168,7 @@
 (deftest google-start-route-seals-state-or-refuses-without-side-effects
   (async done
     (-> (check-google-start-route!)
-        (.catch (fn [e] (is (nil? e) "start route check threw")))
+        (.catch (fn [e] (is false (str "start route check threw: " (pr-str e)))))
         (.finally done))))
 
 (defn- ^:async google-callback-rejects-mismatched-state* []
@@ -226,25 +226,25 @@
 ;; cljs.test does not await a Promise returned by a deftest; without `async`/`done`
 ;; these assertions ran after the summary and their failures were never reported.
 (deftest google-binding-failure-rolls-back-entity-and-actor
-  (async done (-> (google-binding-failure-rolls-back-entity-and-actor*) (.catch (fn [e] (is (nil? e) "google-binding-failure-rolls-back-entity-and-actor threw"))) (.finally done))))
+  (async done (-> (google-binding-failure-rolls-back-entity-and-actor*) (.catch (fn [e] (is false (str "google-binding-failure-rolls-back-entity-and-actor threw: " (pr-str e))))) (.finally done))))
 
 (deftest google-binding-conflict-recovers-winning-actor
-  (async done (-> (google-binding-conflict-recovers-winning-actor*) (.catch (fn [e] (is (nil? e) "google-binding-conflict-recovers-winning-actor threw"))) (.finally done))))
+  (async done (-> (google-binding-conflict-recovers-winning-actor*) (.catch (fn [e] (is false (str "google-binding-conflict-recovers-winning-actor threw: " (pr-str e))))) (.finally done))))
 
 (deftest google-state-is-stateless-and-tamper-evident
-  (async done (-> (google-state-is-stateless-and-tamper-evident*) (.catch (fn [e] (is (nil? e) "google-state-is-stateless-and-tamper-evident threw"))) (.finally done))))
+  (async done (-> (google-state-is-stateless-and-tamper-evident*) (.catch (fn [e] (is false (str "google-state-is-stateless-and-tamper-evident threw: " (pr-str e))))) (.finally done))))
 
 (deftest google-callback-rejects-mismatched-state
-  (async done (-> (google-callback-rejects-mismatched-state*) (.catch (fn [e] (is (nil? e) "google-callback-rejects-mismatched-state threw"))) (.finally done))))
+  (async done (-> (google-callback-rejects-mismatched-state*) (.catch (fn [e] (is false (str "google-callback-rejects-mismatched-state threw: " (pr-str e))))) (.finally done))))
 
 (deftest logout-clears-cookie-when-session-deletion-fails
-  (async done (-> (logout-clears-cookie-when-session-deletion-fails*) (.catch (fn [e] (is (nil? e) "logout-clears-cookie-when-session-deletion-fails threw"))) (.finally done))))
+  (async done (-> (logout-clears-cookie-when-session-deletion-fails*) (.catch (fn [e] (is false (str "logout-clears-cookie-when-session-deletion-fails threw: " (pr-str e))))) (.finally done))))
 
 (deftest anonymous-at-identity-lookup-returns-401
-  (async done (-> (anonymous-at-identity-lookup-returns-401*) (.catch (fn [e] (is (nil? e) "anonymous-at-identity-lookup-returns-401 threw"))) (.finally done))))
+  (async done (-> (anonymous-at-identity-lookup-returns-401*) (.catch (fn [e] (is false (str "anonymous-at-identity-lookup-returns-401 threw: " (pr-str e))))) (.finally done))))
 
 (deftest invalid-agent-creation-is-rejected-by-the-route-before-db-effects
-  (async done (-> (invalid-agent-creation-is-rejected-by-the-route-before-db-effects*) (.catch (fn [e] (is (nil? e) "invalid-agent-creation-is-rejected-by-the-route-before-db-effects threw"))) (.finally done))))
+  (async done (-> (invalid-agent-creation-is-rejected-by-the-route-before-db-effects*) (.catch (fn [e] (is false (str "invalid-agent-creation-is-rejected-by-the-route-before-db-effects threw: " (pr-str e))))) (.finally done))))
 
 (deftest google-state-rejects-signed-payloads-outside-the-contract
-  (async done (-> (google-state-rejects-signed-payloads-outside-the-contract*) (.catch (fn [e] (is (nil? e) "google-state-rejects-signed-payloads-outside-the-contract threw"))) (.finally done))))
+  (async done (-> (google-state-rejects-signed-payloads-outside-the-contract*) (.catch (fn [e] (is false (str "google-state-rejects-signed-payloads-outside-the-contract threw: " (pr-str e))))) (.finally done))))
