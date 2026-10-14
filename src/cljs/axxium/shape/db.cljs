@@ -234,10 +234,37 @@
 (defn create-index-provider-subject []
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_bindings_subject ON provider_bindings(provider, subject)")
 
-(defn drop-index-actors-email
-  "Remove the legacy non-unique email index so the unique index can replace it."
+(defn select-actors-email-index
+  "Describe idx_actors_email on the application's actors table only.
+   Scoped by indrelid so a same-named index in another schema is ignored;
+   qualified_name is the quoted schema.index for a targeted DROP."
   []
-  "DROP INDEX IF EXISTS idx_actors_email")
+  (str "SELECT i.indisunique AS is_unique, "
+       "format('%I.%I', n.nspname, c.relname) AS qualified_name "
+       "FROM pg_index i "
+       "JOIN pg_class c ON c.oid = i.indexrelid "
+       "JOIN pg_namespace n ON n.oid = c.relnamespace "
+       "WHERE c.relname = 'idx_actors_email' "
+       "AND i.indrelid = to_regclass('actors')"))
+
+(defn lock-actors-for-email-index
+  "Block actor writes (and concurrent migrators) for the email-index swap.
+   ACCESS EXCLUSIVE up front because DROP INDEX needs it anyway; taking it
+   first avoids a lock upgrade that could deadlock with in-flight requests."
+  []
+  "LOCK TABLE actors IN ACCESS EXCLUSIVE MODE")
+
+(defn select-duplicate-actor-emails
+  "List non-NULL emails shared by more than one actor."
+  []
+  (str "SELECT email, COUNT(*)::int AS n FROM actors "
+       "WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1"))
+
+(defn drop-index-actors-email
+  "Remove the legacy non-unique email index so the unique index can replace it.
+   qualified-name comes from select-actors-email-index (already identifier-quoted)."
+  [qualified-name]
+  (str "DROP INDEX IF EXISTS " qualified-name))
 
 (defn create-index-actors-email
   []
