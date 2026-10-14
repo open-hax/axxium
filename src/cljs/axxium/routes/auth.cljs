@@ -77,16 +77,21 @@
       (http/send! reply 500 {:error "Login failed"}))))
 
 (defn- ^:async logout!
-  "Always clear the browser session cookie, even if server-side deletion fails."
+  "Clear the browser session cookie always. Report failure when server-side
+  deletion rejects so a surviving session token is not treated as logged out."
   [req reply]
-  (try
-    (when-let [token (session/extract-auth-token req)]
-      (await (session/delete-session! token)))
-    (catch :default err
-      (println "Session deletion failed during logout:" (http/error-message err)))
-    (finally
-      (session/clear-session-cookie reply)))
-  (http/send! reply 200 {:ok true}))
+  (let [deletion-failed? (atom false)]
+    (try
+      (when-let [token (session/extract-auth-token req)]
+        (await (session/delete-session! token)))
+      (catch :default err
+        (reset! deletion-failed? true)
+        (println "Session deletion failed during logout:" (http/error-message err)))
+      (finally
+        (session/clear-session-cookie reply)))
+    (if @deletion-failed?
+      (http/send! reply 500 {:error "Logout failed"})
+      (http/send! reply 200 {:ok true}))))
 
 (defn- ^:async me! [req reply]
   (if-let [context (await (session/resolve-auth-context req))]

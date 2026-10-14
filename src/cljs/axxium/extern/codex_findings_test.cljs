@@ -176,6 +176,42 @@
         outcome (await (google-callback! fixture {:query-state "forged"}))]
     (is (= [{:status 400 :body {:error "Invalid or expired Google sign-in state"}}] (:responses outcome)))))
 
+(defn- ^:async sign-raw-google-state-without-exp!
+  "Sign state claims with HS256 but omit exp, for verifying requiredClaims."
+  [payload secret]
+  (-> (new jose/SignJWT (clj->js payload))
+      (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
+      (.setIssuedAt)
+      (.setIssuer "axxium")
+      (.setAudience "axxium-google-oauth-state")
+      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (await)))
+
+(defn- ^:async google-state-rejects-empty-secret-and-missing-exp* []
+  (let [keys {:secret "fixture-secret" :issuer "axxium"}
+        sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))]
+    (is (= :refused
+           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} {:secret "" :issuer "axxium"}))
+                :sealed
+                (catch :default _ :refused)))
+        "empty secret must not seal Google OAuth state")
+    (is (= :refused
+           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} {:secret nil :issuer "axxium"}))
+                :sealed
+                (catch :default _ :refused)))
+        "nil secret must not seal Google OAuth state")
+    (is (nil? (await (jose/verify-google-state! sealed {:secret "" :issuer "axxium"})))
+        "empty secret must not verify")
+    (is (nil? (await (jose/verify-google-state! sealed {:secret nil :issuer "axxium"})))
+        "nil secret must not verify")
+    (is (nil? (await (jose/verify-google-state!
+                      (await (sign-raw-google-state-without-exp! {:state "s" :nonce "n" :verifier "v"} "fixture-secret"))
+                      keys)))
+        "state tokens without exp must not verify")))
+
+(deftest google-state-rejects-empty-secret-and-missing-exp
+  (async done (-> (google-state-rejects-empty-secret-and-missing-exp*) (.catch (fn [e] (is false (str "google-state-rejects-empty-secret-and-missing-exp threw: " (pr-str e))))) (.finally done))))
+
 (deftest agent-creation-contract
   (let [admit (fn [body] (let [r (agent-shape/creation-request body)]
                            (when (actor-law/valid-agent-creation-request? r) r)))]
@@ -194,7 +230,8 @@
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))]
       (await ((get (routes auth/register-auth-routes!) [:post "/api/auth/logout"]) {} nil))
       (is (= 1 @cleared))
-      (is (= 200 (:status @response))))))
+      (is (= 500 (:status @response)))
+      (is (= {:error "Logout failed"} (:body @response))))))
 
 (defn- ^:async anonymous-at-identity-lookup-returns-401* []
   (let [response (atom nil)

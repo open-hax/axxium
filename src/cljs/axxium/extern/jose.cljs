@@ -34,6 +34,8 @@
   "Seal Google OAuth state, nonce and PKCE verifier into a 5-minute HS256 token.
   Throws when the claims fail `axxium.law.google-state/GoogleState`."
   [claims {:keys [secret issuer]}]
+  (when-not (seq secret)
+    (throw (ex-info "Google OAuth state secret is missing" {})))
   (let [{:keys [state nonce verifier] :as admitted} (select-keys claims [:state :nonce :verifier])]
     (when-not (google-state-law/valid-google-state? admitted)
       (throw (ex-info "Google OAuth state is outside its contract" {:contract :axxium.law.google-state/GoogleState})))
@@ -51,12 +53,14 @@
   "Return {:state :nonce :verifier} for a valid sealed state token whose claims
   satisfy `axxium.law.google-state/GoogleState`, or nil."
   [token {:keys [secret issuer]}]
-  (let [key (.encode (new (.-TextEncoder js/globalThis)) secret)]
-    (try
-      (let [result (await (jwtVerify (str token) key #js {:issuer issuer :audience google-state-audience
-                                                          :algorithms #js ["HS256"]}))
-            claims (google-state-claims (.-payload result))]
-        (when (google-state-law/valid-google-state? claims)
-          claims))
-      (catch :default _
-        nil))))
+  (when (seq secret)
+    (let [key (.encode (new (.-TextEncoder js/globalThis)) secret)]
+      (try
+        (let [result (await (jwtVerify (str token) key #js {:issuer issuer :audience google-state-audience
+                                                            :algorithms #js ["HS256"]
+                                                            :requiredClaims #js ["exp"]}))
+              claims (google-state-claims (.-payload result))]
+          (when (google-state-law/valid-google-state? claims)
+            claims))
+        (catch :default _
+          nil)))))
