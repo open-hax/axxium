@@ -103,18 +103,36 @@
       (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
       (await)))
 
+(defn- ^:async sign-actor-with-algorithm!
+  [claims secret algorithm]
+  (-> (new jose/SignJWT (clj->js claims))
+      (.setProtectedHeader #js {"alg" algorithm "typ" "JWT"})
+      (.setIssuedAt)
+      (.setIssuer "axxium")
+      (.setAudience "axxium-api")
+      (.setExpirationTime "1h")
+      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (await)))
+
 (defn- ^:async verify-actor-requires-hs256-and-exp*
   []
   (let [opts {:secret "fixture-secret" :issuer "axxium" :audience "axxium-api"}
         sealed (await (jose/sign-actor! {:sub "actor"} (assoc opts :expiry-hours 1)))
-        no-exp (await (sign-actor-without-exp! {:sub "actor"} "fixture-secret"))]
+        no-exp (await (sign-actor-without-exp! {:sub "actor"} "fixture-secret"))
+        wrong-alg (await (sign-actor-with-algorithm! {:sub "actor"} "fixture-secret" "HS384"))]
     (is (= "actor" (:sub (await (jose/verify-actor! sealed opts)))))
     (is (= :rejected
            (try
              (await (jose/verify-actor! no-exp opts))
              :accepted
              (catch :default _ :rejected)))
-        "actor tokens without exp must be rejected")))
+        "actor tokens without exp must be rejected")
+    (is (= :rejected
+           (try
+             (await (jose/verify-actor! wrong-alg opts))
+             :accepted
+             (catch :default _ :rejected)))
+        "actor tokens signed with non-HS256 algorithms must be rejected")))
 
 (defn- ^:async signup-actor-failure-rolls-back-entity*
   []

@@ -106,19 +106,19 @@
     (when-not (:is_unique index)
       (await (pg/with-transaction! @pool migrate-email-index!)))))
 
-(defn init-schema!
-  "Initialize database schema. Idempotent."
+(defn ^:async init-schema!
+  "Initialize database schema. Idempotent. DDL runs sequentially in order."
   []
-  (-> (exec-ddl! (q/create-table-entities))
-      (.then (fn [_] (exec-ddl! (q/create-table-actors))))
-      (.then (fn [_] (exec-ddl! (q/create-table-sessions))))
-      (.then (fn [_] (exec-ddl! (q/create-table-oauth-clients))))
-      (.then (fn [_] (exec-ddl! (q/create-table-agent-credentials))))
-      (.then (fn [_] (exec-ddl! (q/create-table-provider-bindings))))
-      (.then (fn [_] (pg/query! @pool (q/create-index-provider-subject) [])))
-      (.then (fn [_] (ensure-unique-actors-email-index!)))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-actor) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-expires) [])))))
+  (await (exec-ddl! (q/create-table-entities)))
+  (await (exec-ddl! (q/create-table-actors)))
+  (await (exec-ddl! (q/create-table-sessions)))
+  (await (exec-ddl! (q/create-table-oauth-clients)))
+  (await (exec-ddl! (q/create-table-agent-credentials)))
+  (await (exec-ddl! (q/create-table-provider-bindings)))
+  (await (pg/query! @pool (q/create-index-provider-subject) []))
+  (await (ensure-unique-actors-email-index!))
+  (await (pg/query! @pool (q/create-index-sessions-actor) []))
+  (await (pg/query! @pool (q/create-index-sessions-expires) [])))
 
 ;; Re-export query builders for convenience
 (def q-select-actor-by-id q/select-actor-by-id)
