@@ -57,7 +57,10 @@
               (await (query! (db/q-insert-provider-binding "google" subject actor-id)))
               (first (await (query! (db/q-select-actor-by-id {:id actor-id})))))))
           (catch :default error
-            (if (db/provider-binding-conflict? error)
+            ;; Unique email or provider-binding: the winner finished first. Reload
+            ;; by provider subject (atomic txn wrote binding with the actor).
+            (if (or (db/provider-binding-conflict? error)
+                    (db/actor-email-conflict? error))
               (or (await (db/query-one-sql
                          (db/q-select-actor-by-provider-subject "google" subject)))
                   (throw error))

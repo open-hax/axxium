@@ -69,6 +69,29 @@
   (let [[sql-str _params] (honey->sql honey-map)]
     (pg/query! @pool sql-str [])))
 
+(defn- ^:async ensure-unique-actors-email-index!
+  "Replace the legacy non-unique email index atomically. Refuse startup when
+   duplicate non-NULL emails already exist so we never drop the old index and
+   then fail CREATE UNIQUE INDEX with the service left indexless."
+  []
+  (let [{:keys [rows]}
+        (await
+         (pg/query!
+          @pool
+          (str "SELECT email, COUNT(*)::int AS n FROM actors "
+               "WHERE email IS NOT NULL GROUP BY email HAVING COUNT(*) > 1")
+          []))]
+    (when (seq rows)
+      (throw (ex-info
+              "Cannot enforce unique actors.email: duplicate emails present"
+              {:duplicates rows})))
+    (await
+     (pg/with-transaction!
+      @pool
+      (fn ^:async migrate-email-index! [connection]
+        (await (pg/query! connection (q/drop-index-actors-email) []))
+        (await (pg/query! connection (q/create-index-actors-email) [])))))))
+
 (defn init-schema!
   "Initialize database schema. Idempotent."
   []
@@ -79,8 +102,7 @@
       (.then (fn [_] (exec-ddl! (q/create-table-agent-credentials))))
       (.then (fn [_] (exec-ddl! (q/create-table-provider-bindings))))
       (.then (fn [_] (pg/query! @pool (q/create-index-provider-subject) [])))
-      (.then (fn [_] (pg/query! @pool (q/drop-index-actors-email) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-actors-email) [])))
+      (.then (fn [_] (ensure-unique-actors-email-index!)))
       (.then (fn [_] (pg/query! @pool (q/create-index-sessions-actor) [])))
       (.then (fn [_] (pg/query! @pool (q/create-index-sessions-expires) [])))))
 

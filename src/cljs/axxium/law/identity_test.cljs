@@ -25,4 +25,6 @@
   (is (false? (actor/valid-credential-id? "fixture-id")))
   (is (false? (actor/valid-credential-id? "")))
   (is (false? (actor/valid-credential-id? nil)))
-  (is (false? (actor/valid-credential-id? 42))))
+  (is (false? (actor/valid-credential-id? 42)))
+  (is (false? (actor/valid-credential-id?
+               "e619cb36-f788-457d-ec3f-76d5fd47d1cc\n"))))

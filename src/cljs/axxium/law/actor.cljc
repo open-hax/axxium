@@ -16,9 +16,13 @@
   (m/validate AgentCreationRequest request {:registry (m/default-schemas)}))
 
 (defn valid-credential-id?
-  "Admit a credential path id only when it is a UUID string the uuid column can bind."
+  "Admit a credential path id only when it is a UUID string the uuid column can bind.
+   Length is checked explicitly: Malli :re uses re-find, and JS $ can match before a
+   trailing newline, which PostgreSQL would then reject as a non-uuid."
   [id]
-  (m/validate CredentialId id {:registry (m/default-schemas)}))
+  (and (string? id)
+       (= 36 (count id))
+       (m/validate CredentialId id {:registry (m/default-schemas)})))
 
 (defn system-admin? [context entity]
   (and (= "human" (:kind entity))
