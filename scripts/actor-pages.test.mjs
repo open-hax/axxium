@@ -147,3 +147,17 @@ test('request errors propagate (403 handling stays with the caller)', async () =
   const forbidden = Object.assign(new Error('Forbidden'), { status: 403 });
   await assert.rejects(fetchAllActors(async () => { throw forbidden; }), (e) => e === forbidden);
 });
+
+test('exactly MAX_ACTOR_PAGES full pages is accepted after an empty probe', async () => {
+  // 1000 × 100 = 100_000 actors: last in-bound page is full, but offset 100_000
+  // is empty — must succeed (Codex PRRT_kwDOU4Vg086s1cwJ).
+  const { request, calls } = pagedApi(100_000);
+  assert.equal((await fetchAllActors(request)).length, 100_000);
+  assert.ok(calls.includes('/api/actors?limit=100&offset=100000'), 'must probe one past the bound');
+  assert.ok(!calls.includes('/api/actors?limit=100&offset=100100'));
+});
+
+test('a non-empty probe past the page bound still rejects', async () => {
+  const { request } = pagedApi(100_001);
+  await assert.rejects(fetchAllActors(request), (e) => /pagination bound/.test(e.message) && e.status === 502);
+});

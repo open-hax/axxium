@@ -42,7 +42,16 @@ export async function fetchAllActors(request, pageSize = ACTOR_PAGE_SIZE) {
         addedThisPass += 1;
       }
       if (rows.length < pageSize) break;
-      if (page === MAX_ACTOR_PAGES - 1) hitPageCap = true;
+      if (page === MAX_ACTOR_PAGES - 1) {
+        // Last in-bound page was full. Probe one past the bound so an
+        // exactly-at-the-limit registry (MAX_ACTOR_PAGES × pageSize) is
+        // accepted; reject only when the probe still returns a row.
+        const probe = parseActorPage(
+          await request(`/api/actors?limit=${pageSize}&offset=${MAX_ACTOR_PAGES * pageSize}`),
+        );
+        if (probe.length > 0) hitPageCap = true;
+        break;
+      }
     }
     if (hitPageCap) {
       throw Object.assign(

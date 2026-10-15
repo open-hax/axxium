@@ -52,6 +52,18 @@
   (= :atproto/state-store-full (:axxium/reason (ex-data error))))
 
 
+(defn- project-dpop-jwk
+  "Keep the private JWK members the law contract requires for each kty."
+  [jwk]
+  (let [kty (or (:kty jwk) (get jwk "kty"))
+        get* (fn [k] (or (get jwk k) (get jwk (name k))))]
+    (case kty
+      "EC" {:kty "EC" :crv (get* :crv) :x (get* :x) :y (get* :y) :d (get* :d)}
+      "OKP" {:kty "OKP" :crv (get* :crv) :x (get* :x) :d (get* :d)}
+      "RSA" {:kty "RSA" :n (get* :n) :e (get* :e) :d (get* :d)}
+      ;; Unknown/missing kty: leave a minimal map so the contract refuses it.
+      {:kty kty})))
+
 (defn- oauth-saved-state-claims
   "Project a NodeSavedState JS handle (or CLJ test fixture) into the law contract."
   [value]
@@ -65,7 +77,7 @@
      :verifier (if (map? value) (:verifier value) (aget value "verifier"))
      :auth-method {:method (or (:method auth) (get auth "method"))
                    :kid (or (:kid auth) (get auth "kid"))}
-     :dpop-jwk {:kty (or (:kty jwk) (get jwk "kty"))}
+     :dpop-jwk (project-dpop-jwk jwk)
      :app-state (if (map? value) (:app-state value) (aget value "appState"))}))
 
 (defn- admit-oauth-saved-state!

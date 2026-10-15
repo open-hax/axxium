@@ -8,7 +8,7 @@
   #js {:iss "https://bsky.social"
        :verifier (str "verifier-" label)
        :authMethod #js {:method "none"}
-       :dpopJwk #js {:kty "EC" :crv "P-256" :x "x" :y "y"}})
+       :dpopJwk #js {:kty "EC" :crv "P-256" :x "x" :y "y" :d "d"}})
 
 
 (deftest abandoned-authorizations-are-bounded
