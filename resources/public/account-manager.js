@@ -1,4 +1,6 @@
 // A self-contained account control usable wherever Axxium is served at the same origin.
+import { fetchAllActors } from './actor-pages.js';
+
 class AxxiumAccountManager extends HTMLElement {
   constructor() {
     super();
@@ -45,7 +47,7 @@ class AxxiumAccountManager extends HTMLElement {
       const me = await this.request('/api/auth/me');
       this.actor = me.actor;
       try {
-        this.actors = (await this.request('/api/actors')).actors;
+        this.actors = await fetchAllActors((path) => this.request(path));
         if (this.credentialPanelActor) {
           this.credentials = (await this.request(`/api/actors/${encodeURIComponent(this.credentialPanelActor)}/credentials`)).credentials;
         }

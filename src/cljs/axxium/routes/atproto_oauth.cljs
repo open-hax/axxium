@@ -37,6 +37,25 @@
               (or (await (db/query-one-sql selection)) (throw error))
               (throw error))))))))
 
+(defn- already-bound-elsewhere []
+  (ex-info "AT identity is already bound to another actor" {:status 409}))
+
+(defn- ^:async insert-link-binding!
+  "Insert the DID binding for actor-id. A concurrent link that won the unique
+   provider/subject index is reloaded: the same actor succeeds, another is 409."
+  [did actor-id]
+  (try
+    (await (db/query-sql (db/q-insert-provider-binding "atproto" did actor-id)))
+    (catch :default error
+      (if (db/provider-binding-conflict? error)
+        (let [winner (await (db/query-one-sql
+                             (db/q-select-actor-by-provider-subject "atproto" did)))]
+          (cond
+            (nil? winner) (throw error)
+            (not= actor-id (:id winner)) (throw (already-bound-elsewhere))
+            :else nil))
+        (throw error)))))
+
 (defn- ^:async link-actor! [req did expected-actor-id]
   (let [context (await (session/resolve-auth-context req))
         actor-id (:auth/actor-id context)
@@ -50,14 +69,13 @@
       (throw (ex-info "A human Axxium session is required to link an AT identity" {:status 403}))
 
       (and binding (not= actor-id (:id binding)))
-      (throw (ex-info "AT identity is already bound to another actor" {:status 409}))
+      (throw (already-bound-elsewhere))
 
       :else
       (do
         (when-not binding
-          (await (db/query-sql
-                  (db/q-insert-provider-binding "atproto" did actor-id))))
-        (db/query-one-sql (db/q-select-actor-by-id {:id actor-id}))))))
+          (await (insert-link-binding! did actor-id)))
+        (await (db/query-one-sql (db/q-select-actor-by-id {:id actor-id})))))))
 
 (defn- metadata! [_req reply]
   (http/send! reply 200 (oauth/client-metadata)))
@@ -87,8 +105,10 @@
                                    (cfg/get-in-config [:axxium/public-base-url]) "https://")
                                   callback-path)
           (http/redirect! reply authorize-url))
-        (catch :default _
-          (http/send! reply 502 {:error "AT Protocol sign-in could not start"}))))))
+        (catch :default error
+          (if (oauth/state-store-full? error)
+            (http/send! reply 503 {:error "Too many AT Protocol sign-ins in progress; try again shortly"})
+            (http/send! reply 502 {:error "AT Protocol sign-in could not start"})))))))
 
 (defn- ^:async revoke-provider-tokens!
   "Best-effort revocation of the provider OAuth session once Axxium no longer

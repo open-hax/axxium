@@ -26,10 +26,50 @@
         (when (identical? (.get locks key) drained)
           (.delete locks key))))))
 
+(def ^:private oauth-ttl-ms 1800000)
+(def ^:private oauth-max-entries 1024)
+
 (defn new-oauth-store
-  "Bound abandoned OAuth state and short-lived SDK sessions in memory."
+  "Bound short-lived SDK sessions in memory (LRU; sessions are revoked right
+   after identity binding, so eviction only drops already-finished work)."
   []
-  (SimpleStoreMemory. #js {:ttl 1800000 :max 1024}))
+  (SimpleStoreMemory. #js {:ttl oauth-ttl-ms :max oauth-max-entries}))
+
+(defn state-store-full-error []
+  (ex-info "AT Protocol authorization state store is full"
+           {:status 503 :axxium/reason :atproto/state-store-full}))
+
+(defn state-store-full? [error]
+  (= :atproto/state-store-full (:axxium/reason (ex-data error))))
+
+(defn new-oauth-state-store
+  "Bounded in-memory authorization state that never evicts a live entry.
+   Expired entries are purged first; a new key at capacity is refused with
+   `state-store-full-error`, so a burst of public sign-in starts can't push
+   out an earlier user's state before its callback arrives."
+  ([] (new-oauth-state-store {}))
+  ([{:keys [ttl-ms max now] :or {ttl-ms oauth-ttl-ms max oauth-max-entries now #(js/Date.now)}}]
+   (let [entries (js/Map.)
+         live (fn [k]
+                (when-let [entry (.get entries k)]
+                  (if (< (now) (:expires entry))
+                    entry
+                    (do (.delete entries k) nil))))
+         purge! (fn []
+                  (let [t (now)]
+                    (.forEach entries (fn [entry k _]
+                                        (when-not (< t (:expires entry))
+                                          (.delete entries k))))))]
+     #js {:get (fn [k] (when-let [entry (live k)] (:value entry)))
+          :set (fn [k value]
+                 (when-not (live k)
+                   (when (<= max (.-size entries)) (purge!))
+                   (when (<= max (.-size entries))
+                     (throw (state-store-full-error))))
+                 (.set entries k {:value value :expires (+ (now) ttl-ms)})
+                 nil)
+          :del (fn [k] (.delete entries k) nil)
+          :clear (fn [] (.clear entries) nil)})))
 
 (defn- metadata []
   (let [base (cfg/get-in-config [:axxium/public-base-url])
@@ -55,7 +95,7 @@
   (delay
     (NodeOAuthClient.
      #js {:clientMetadata (metadata)
-          :stateStore (new-oauth-store)
+          :stateStore (new-oauth-state-store)
           :sessionStore (new-oauth-store)
           :requestLock with-local-oauth-lock})))
 
