@@ -70,6 +70,27 @@ class AxxiumAccountManager extends HTMLElement {
     await this.refresh();
   }
 
+  // The one-time credential secret is rendered first, independent of the
+  // signed-in view, so a transient refresh failure (actor reset to null)
+  // after a successful issuance can never hide the only copy of the secret.
+  renderIssuedToken(content) {
+    if (!this.issuedToken) return;
+    const once = document.createElement('section');
+    const heading = document.createElement('h2');
+    heading.textContent = 'New credential — copy it now';
+    const code = document.createElement('code');
+    code.textContent = this.issuedToken;
+    const copy = document.createElement('button');
+    copy.textContent = 'Copy credential';
+    copy.addEventListener('click', () => navigator.clipboard.writeText(this.issuedToken));
+    const dismiss = document.createElement('button');
+    dismiss.className = 'secondary';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', () => { this.issuedToken = ''; this.render(); });
+    once.append(heading, code, copy, dismiss);
+    content.append(once);
+  }
+
   render() {
     const root = this.shadowRoot;
     root.innerHTML = `<style>
@@ -95,6 +116,7 @@ class AxxiumAccountManager extends HTMLElement {
       error.textContent = this.message;
       content.append(error);
     }
+    this.renderIssuedToken(content);
     if (!this.actor) {
       const section = document.createElement('section');
       section.innerHTML = `<h2>Enter Axxium</h2><form id="login">
@@ -222,22 +244,6 @@ class AxxiumAccountManager extends HTMLElement {
         panel.append(row);
       }
       content.append(panel);
-    }
-    if (this.issuedToken) {
-      const once = document.createElement('section');
-      const heading = document.createElement('h2');
-      heading.textContent = 'New credential — copy it now';
-      const code = document.createElement('code');
-      code.textContent = this.issuedToken;
-      const copy = document.createElement('button');
-      copy.textContent = 'Copy credential';
-      copy.addEventListener('click', () => navigator.clipboard.writeText(this.issuedToken));
-      const dismiss = document.createElement('button');
-      dismiss.className = 'secondary';
-      dismiss.textContent = 'Dismiss';
-      dismiss.addEventListener('click', () => { this.issuedToken = ''; this.render(); });
-      once.append(heading, code, copy, dismiss);
-      content.append(once);
     }
   }
 }

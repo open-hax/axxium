@@ -131,24 +131,48 @@
 (defn- start-callbacks [callback]
   #js [(callback {} nil) (callback {} nil)])
 
-(defn- ^:async run-callbacks! [fixture concurrent?]
+(defn- ^:async run-callbacks!
+  ([fixture concurrent?] (await (run-callbacks! fixture concurrent? {})))
+  ([fixture concurrent? {:keys [revoke! cookie]
+                          :or {revoke! (fn [_] (js/Promise.resolve nil)) cookie "fixture-state"}}]
   (let [responses (atom [])
         actors (atom [])
+        events (atom [])
         callback (callback-handler)]
     (with-redefs [db/pool (delay (:pool fixture))
-                  http/cookie (fn [_ _] "fixture-state")
+                  http/cookie (fn [_ _] cookie)
                   http/clear-state-cookie! (fn ([_ _] nil) ([_ _ _] nil))
                   http/request-url (fn [_] "https://fixture.test/callback")
                   oauth/callback! (fn [_] (js/Promise.resolve {:did "did:plc:abcdefghijklmnopqrstuvwx" :state "fixture-state" :session nil}))
-                  oauth/revoke! (fn [_] (js/Promise.resolve nil))
-                  session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
+                  oauth/revoke! (fn [s] (swap! events conj :revoke) (revoke! s))
+                  session/create-session! (fn [actor] (swap! events conj :session) (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
                   session/set-session-cookie (fn [& _] nil)
                   http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
       (if concurrent?
         (await (js/Promise.all (start-callbacks callback)))
         (await (callback {} nil)))
-      {:responses @responses :actors @actors})))
+      {:responses @responses :actors @actors :events @events}))))
+
+(defn- ^:async revocation-failure-does-not-fail-verified-sign-in* []
+  (let [fixture (database-fixture {:conflict? true})
+        outcome (await (run-callbacks! fixture false
+                                       {:revoke! (fn [_] (js/Promise.reject (js/Error. "revocation endpoint unavailable")))}))]
+    (is (= [{:redirect "/portal/index.html"}] (:responses outcome))
+        "a rejected token revocation must not turn a verified sign-in into 502")
+    (is (= ["winning-actor"] (:actors outcome)))
+    (is (= [:session :revoke] (:events outcome))
+        "identity is bound and the session issued before provider tokens are revoked")))
+
+(defn- ^:async mismatched-state-still-revokes-provider-tokens* []
+  (let [fixture (database-fixture {})
+        revoked (atom 0)
+        outcome (await (run-callbacks! fixture false
+                                       {:cookie "other-state"
+                                        :revoke! (fn [_] (swap! revoked inc) (js/Promise.resolve nil))}))]
+    (is (= [{:status 400 :body {:error "AT Protocol identity or browser state mismatch"}}] (:responses outcome)))
+    (is (= 1 @revoked) "provider tokens are revoked even when the callback is rejected")
+    (is (empty? (:actors outcome)))))
 
 (defn- ^:async conflicting-first-login-rolls-back-and-returns-existing-actor* []
   (let [fixture (database-fixture {:conflict? true})
@@ -241,3 +265,13 @@
 
 (deftest unrelated-first-login-errors-roll-back-without-recovery
   (async done (-> (unrelated-first-login-errors-roll-back-without-recovery*) (.catch (fn [e] (is false (str "unrelated-first-login-errors-roll-back-without-recovery rejected: " (pr-str e))))) (.finally done))))
+
+(deftest revocation-failure-does-not-fail-verified-sign-in
+  (async done (-> (revocation-failure-does-not-fail-verified-sign-in*)
+                  (.catch (fn [e] (is false (str "revocation-failure-does-not-fail-verified-sign-in rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(deftest mismatched-state-still-revokes-provider-tokens
+  (async done (-> (mismatched-state-still-revokes-provider-tokens*)
+                  (.catch (fn [e] (is false (str "mismatched-state-still-revokes-provider-tokens rejected: " (pr-str e)))))
+                  (.finally done))))
