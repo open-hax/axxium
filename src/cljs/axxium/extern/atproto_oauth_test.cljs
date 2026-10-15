@@ -9,6 +9,27 @@
     (is (nil? (.get store "state-0")))
     (is (= 1024 (.get store "state-1024")))))
 
+(deftest live-authorization-state-is-never-evicted
+  (let [now (atom 0)
+        store (oauth/new-oauth-state-store {:ttl-ms 1000 :max 3 :now (fn [] @now)})
+        refusal (fn [k] (try (.set store k :new) nil (catch :default e e)))]
+    (doseq [n (range 3)] (.set store (str "state-" n) n))
+    (let [error (refusal "state-3")]
+      (is (= 503 (:status (ex-data error))) "a start at capacity is refused, not admitted by eviction")
+      (is (oauth/state-store-full? error)))
+    (is (= 0 (.get store "state-0")) "an earlier user's live state survives later starts")
+    (.set store "state-1" :replaced)
+    (is (= :replaced (.get store "state-1")) "rewriting a live key needs no new capacity")
+    (.del store "state-2")
+    (.set store "state-3" 3)
+    (is (= 3 (.get store "state-3")) "a consumed state frees capacity")
+    (reset! now 1000)
+    (is (nil? (.get store "state-0")) "state expires at its TTL")
+    (.set store "state-4" 4)
+    (.set store "state-5" 5)
+    (is (= 5 (.get store "state-5")) "expired entries free capacity")
+    (is (nil? (refusal "state-6")) "freed capacity admits a new start")))
+
 (deftest configured-client-metadata-is-accepted-by-the-sdk
   (let [metadata (oauth/client-metadata)]
     (is (contains? #{"native" "web"} (:application_type metadata)))
