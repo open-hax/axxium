@@ -32,3 +32,9 @@
   (is (false? (actor/valid-credential-id? 42)))
   (is (false? (actor/valid-credential-id?
                "e619cb36-f788-457d-ec3f-76d5fd47d1cc\n"))))
+
+(deftest concurrent-binding-admission-classifies-winners
+  (is (= :missing (atproto/concurrent-binding-admission "actor-a" nil)))
+  (is (= :same-actor (atproto/concurrent-binding-admission "actor-a" {:id "actor-a"})))
+  (is (= :other-actor (atproto/concurrent-binding-admission "actor-a" {:id "actor-b"}))))
+

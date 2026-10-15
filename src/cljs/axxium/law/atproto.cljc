@@ -16,3 +16,14 @@
 
 (defn identity? [value]
   (or (did? value) (handle? value)))
+
+(defn concurrent-binding-admission
+  "Classify a concurrent provider/subject unique-index winner for a link attempt.
+   Pure contract: the route queries and persists; this only decides admissibility.
+   Returns :missing (winner vanished), :same-actor (proceed), or :other-actor (409)."
+  [requesting-actor-id winner]
+  (cond
+    (nil? winner) :missing
+    (= requesting-actor-id (:id winner)) :same-actor
+    :else :other-actor))
+

@@ -27,6 +27,12 @@
           (.delete locks key))))))
 
 (def ^:private oauth-ttl-ms 1800000)
+;; Browser state cookie maxAge is 300s (extern.http/set-state-cookie!). After
+;; that an honest callback is rejected for a missing cookie, so retaining the
+;; server entry for the full session TTL only wastes capacity on the public
+;; start endpoint. Authorization state uses this shorter TTL; sessionStore keeps
+;; oauth-ttl-ms because sessions are revoked after binding.
+(def auth-state-ttl-ms 300000)
 (def ^:private oauth-max-entries 1024)
 
 (defn new-oauth-store
@@ -48,7 +54,7 @@
    `state-store-full-error`, so a burst of public sign-in starts can't push
    out an earlier user's state before its callback arrives."
   ([] (new-oauth-state-store {}))
-  ([{:keys [ttl-ms max now] :or {ttl-ms oauth-ttl-ms max oauth-max-entries now #(js/Date.now)}}]
+  ([{:keys [ttl-ms max now] :or {ttl-ms auth-state-ttl-ms max oauth-max-entries now #(js/Date.now)}}]
    (let [entries (js/Map.)
          live (fn [k]
                 (when-let [entry (.get entries k)]

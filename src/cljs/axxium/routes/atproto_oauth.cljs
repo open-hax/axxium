@@ -50,10 +50,10 @@
       (if (db/provider-binding-conflict? error)
         (let [winner (await (db/query-one-sql
                              (db/q-select-actor-by-provider-subject "atproto" did)))]
-          (cond
-            (nil? winner) (throw error)
-            (not= actor-id (:id winner)) (throw (already-bound-elsewhere))
-            :else nil))
+          (case (atproto-law/concurrent-binding-admission actor-id winner)
+            :missing (throw error)
+            :other-actor (throw (already-bound-elsewhere))
+            :same-actor nil))
         (throw error)))))
 
 (defn- ^:async link-actor! [req did expected-actor-id]

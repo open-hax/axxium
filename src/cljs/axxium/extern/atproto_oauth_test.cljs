@@ -30,6 +30,18 @@
     (is (= 5 (.get store "state-5")) "expired entries free capacity")
     (is (nil? (refusal "state-6")) "freed capacity admits a new start")))
 
+(deftest authorization-state-ttl-matches-browser-cookie
+  ;; set-state-cookie! maxAge is 300s; default state-store TTL must match so a
+  ;; burst of abandoned starts cannot retain unevictable entries for 30 minutes.
+  (is (= 300000 oauth/auth-state-ttl-ms))
+  (let [now (atom 0)
+        store (oauth/new-oauth-state-store {:max 2 :now (fn [] @now)})]
+    (.set store "early" :v)
+    (reset! now 299999)
+    (is (= :v (.get store "early")) "state remains live until the cookie would expire")
+    (reset! now 300000)
+    (is (nil? (.get store "early")) "state expires with the browser cookie")))
+
 (deftest configured-client-metadata-is-accepted-by-the-sdk
   (let [metadata (oauth/client-metadata)]
     (is (contains? #{"native" "web"} (:application_type metadata)))
