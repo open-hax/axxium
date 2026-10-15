@@ -2,6 +2,7 @@
   "AT Protocol OAuth client boundary. The official SDK verifies issuer, account
    DID, PKCE, PAR, and DPoP. OAuth tokens are revoked after identity binding."
   (:require [axxium.config :as cfg]
+            [axxium.law.atproto :as atproto-law]
             ["@atproto-labs/simple-store-memory" :refer [SimpleStoreMemory]]
             ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]))
 
@@ -27,12 +28,14 @@
           (.delete locks key))))))
 
 (def ^:private oauth-ttl-ms 1800000)
-;; Browser state cookie maxAge is 300s (extern.http/set-state-cookie!). After
-;; that an honest callback is rejected for a missing cookie, so retaining the
-;; server entry for the full session TTL only wastes capacity on the public
-;; start endpoint. Authorization state uses this shorter TTL; sessionStore keeps
+;; Browser state cookie maxAge is 300s (extern.http/set-state-cookie!). The
+;; SDK writes authorization state during authorize! before the route can set
+;; that cookie, so the store TTL includes a margin for PAR/authorize latency
+;; and still stays far below the 30-minute session TTL. sessionStore keeps
 ;; oauth-ttl-ms because sessions are revoked after binding.
-(def auth-state-ttl-ms 300000)
+(def ^:private state-cookie-max-age-ms 300000)
+(def ^:private auth-state-authorize-margin-ms 60000)
+(def auth-state-ttl-ms (+ state-cookie-max-age-ms auth-state-authorize-margin-ms))
 (def ^:private oauth-max-entries 1024)
 
 (defn new-oauth-store
@@ -52,7 +55,8 @@
   "Bounded in-memory authorization state that never evicts a live entry.
    Expired entries are purged first; a new key at capacity is refused with
    `state-store-full-error`, so a burst of public sign-in starts can't push
-   out an earlier user's state before its callback arrives."
+   out an earlier user's state before its callback arrives. Keys and values
+   are admitted only when they satisfy `axxium.law.atproto` store contracts."
   ([] (new-oauth-state-store {}))
   ([{:keys [ttl-ms max now] :or {ttl-ms auth-state-ttl-ms max oauth-max-entries now #(js/Date.now)}}]
    (let [entries (js/Map.)
@@ -66,12 +70,29 @@
                     (.forEach entries (fn [entry k _]
                                         (when-not (< t (:expires entry))
                                           (.delete entries k))))))]
-     #js {:get (fn [k] (when-let [entry (live k)] (:value entry)))
+     #js {:get (fn [k]
+                 (when-let [entry (live k)]
+                   (let [value (:value entry)]
+                     (when-not (and (atproto-law/valid-oauth-state-store-key? k)
+                                    (atproto-law/valid-oauth-state-store-value? value))
+                       (.delete entries k)
+                       (throw (ex-info "OAuth state-store entry failed its contract on read"
+                                       {:contract :axxium.law.atproto/oauth-state-store-entry})))
+                     value)))
           :set (fn [k value]
-                 (when-not (live k)
-                   (when (<= max (.-size entries)) (purge!))
-                   (when (<= max (.-size entries))
-                     (throw (state-store-full-error))))
+                 (when-not (atproto-law/valid-oauth-state-store-key? k)
+                   (throw (ex-info "OAuth state-store key is outside its contract"
+                                   {:contract :axxium.law.atproto/OAuthStateStoreKey})))
+                 (when-not (atproto-law/valid-oauth-state-store-value? value)
+                   (throw (ex-info "OAuth state-store value is outside its contract"
+                                   {:contract :axxium.law.atproto/oauth-state-store-value})))
+                 (let [already (some? (live k))]
+                   (when-not already
+                     (when (<= max (.-size entries)) (purge!)))
+                   (case (atproto-law/auth-state-capacity-admission
+                          (.-size entries) max already)
+                     :admit nil
+                     :refuse (throw (state-store-full-error))))
                  (.set entries k {:value value :expires (+ (now) ttl-ms)})
                  nil)
           :del (fn [k] (.delete entries k) nil)

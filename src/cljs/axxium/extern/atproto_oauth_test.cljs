@@ -12,35 +12,46 @@
 (deftest live-authorization-state-is-never-evicted
   (let [now (atom 0)
         store (oauth/new-oauth-state-store {:ttl-ms 1000 :max 3 :now (fn [] @now)})
-        refusal (fn [k] (try (.set store k :new) nil (catch :default e e)))]
-    (doseq [n (range 3)] (.set store (str "state-" n) n))
+        entry (fn [n] {:n n})
+        refusal (fn [k] (try (.set store k (entry :new)) nil (catch :default e e)))]
+    (doseq [n (range 3)] (.set store (str "state-" n) (entry n)))
     (let [error (refusal "state-3")]
       (is (= 503 (:status (ex-data error))) "a start at capacity is refused, not admitted by eviction")
       (is (oauth/state-store-full? error)))
-    (is (= 0 (.get store "state-0")) "an earlier user's live state survives later starts")
-    (.set store "state-1" :replaced)
-    (is (= :replaced (.get store "state-1")) "rewriting a live key needs no new capacity")
+    (is (= (entry 0) (.get store "state-0")) "an earlier user's live state survives later starts")
+    (.set store "state-1" (entry :replaced))
+    (is (= (entry :replaced) (.get store "state-1")) "rewriting a live key needs no new capacity")
     (.del store "state-2")
-    (.set store "state-3" 3)
-    (is (= 3 (.get store "state-3")) "a consumed state frees capacity")
+    (.set store "state-3" (entry 3))
+    (is (= (entry 3) (.get store "state-3")) "a consumed state frees capacity")
     (reset! now 1000)
     (is (nil? (.get store "state-0")) "state expires at its TTL")
-    (.set store "state-4" 4)
-    (.set store "state-5" 5)
-    (is (= 5 (.get store "state-5")) "expired entries free capacity")
+    (.set store "state-4" (entry 4))
+    (.set store "state-5" (entry 5))
+    (is (= (entry 5) (.get store "state-5")) "expired entries free capacity")
     (is (nil? (refusal "state-6")) "freed capacity admits a new start")))
 
 (deftest authorization-state-ttl-matches-browser-cookie
-  ;; set-state-cookie! maxAge is 300s; default state-store TTL must match so a
-  ;; burst of abandoned starts cannot retain unevictable entries for 30 minutes.
-  (is (= 300000 oauth/auth-state-ttl-ms))
+  ;; Cookie maxAge is 300s; store TTL adds a 60s authorize/PAR margin so state
+  ;; cannot expire while the cookie is still valid after a slow authorize!.
+  (is (= 360000 oauth/auth-state-ttl-ms))
   (let [now (atom 0)
-        store (oauth/new-oauth-state-store {:max 2 :now (fn [] @now)})]
-    (.set store "early" :v)
-    (reset! now 299999)
-    (is (= :v (.get store "early")) "state remains live until the cookie would expire")
-    (reset! now 300000)
-    (is (nil? (.get store "early")) "state expires with the browser cookie")))
+        store (oauth/new-oauth-state-store {:max 2 :now (fn [] @now)})
+        value {:v true}]
+    (.set store "early" value)
+    (reset! now 359999)
+    (is (= value (.get store "early")) "state remains live through cookie lifetime plus margin")
+    (reset! now 360000)
+    (is (nil? (.get store "early")) "state expires after the authorize margin")))
+
+(deftest oauth-state-store-rejects-contract-violations
+  (let [store (oauth/new-oauth-state-store {:max 2})
+        refuse (fn [k v] (try (.set store k v) :admitted (catch :default e e)))]
+    (is (ex-data (refuse "" {:ok true})) "empty key is refused")
+    (is (ex-data (refuse "k" "primitive")) "primitive string value is refused")
+    (is (ex-data (refuse "k" 42)) "primitive number value is refused")
+    (.set store "k" {:ok true})
+    (is (= {:ok true} (.get store "k")))))
 
 (deftest configured-client-metadata-is-accepted-by-the-sdk
   (let [metadata (oauth/client-metadata)]

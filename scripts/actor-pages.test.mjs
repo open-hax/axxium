@@ -75,6 +75,47 @@ test('a mid-pagination revocation that shifts offsets is recovered on reconcile'
   assert.equal(new Set(ids).size, ids.length);
 });
 
+
+test('reconcile continues past a full page of already-known actors', async () => {
+  // 250 actors; after offsets 0 and 100, revoke actor_100 so actor_200 shifts
+  // into offset 199. Pass 1 page 0 is all known → must still reach offset 100.
+  let live = Array.from({ length: 250 }, (_, i) => ({ id: `actor_${i}` }));
+  let requests = 0;
+  const request = async (path) => {
+    requests += 1;
+    const url = new URL(path, 'http://portal.test');
+    const limit = Number(url.searchParams.get('limit'));
+    const offset = Number(url.searchParams.get('offset'));
+    if (requests === 3) {
+      // Before first offset-200 fetch: revoke actor_100.
+      live = live.filter((a) => a.id !== 'actor_100');
+    }
+    return { actors: live.slice(offset, offset + limit) };
+  };
+  const ids = (await fetchAllActors(request)).map((a) => a.id);
+  assert.ok(ids.includes('actor_200'), 'actor shifted across a later page must be recovered');
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('a full first page still reconciles when the next offset is empty after a shift', async () => {
+  // 101 actors; after page 0 (100 rows), revoke actor_0 so actor_100 moves to
+  // offset 99 and offset 100 returns []. Must still reconcile.
+  let live = Array.from({ length: 101 }, (_, i) => ({ id: `actor_${i}` }));
+  let page0 = false;
+  const request = async (path) => {
+    const url = new URL(path, 'http://portal.test');
+    const limit = Number(url.searchParams.get('limit'));
+    const offset = Number(url.searchParams.get('offset'));
+    if (offset === 0) page0 = true;
+    else if (page0 && live.some((a) => a.id === 'actor_0')) {
+      live = live.filter((a) => a.id !== 'actor_0');
+    }
+    return { actors: live.slice(offset, offset + limit) };
+  };
+  const ids = (await fetchAllActors(request)).map((a) => a.id);
+  assert.ok(ids.includes('actor_100'), 'actor shifted into page 0 must be recovered');
+});
+
 test('malformed actor-page payloads are rejected', async () => {
   assert.throws(() => parseActorPage(null), /Malformed/);
   assert.throws(() => parseActorPage({}), /actors must be an array/);

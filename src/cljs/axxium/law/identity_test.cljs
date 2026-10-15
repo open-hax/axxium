@@ -38,3 +38,17 @@
   (is (= :same-actor (atproto/concurrent-binding-admission "actor-a" {:id "actor-a"})))
   (is (= :other-actor (atproto/concurrent-binding-admission "actor-a" {:id "actor-b"}))))
 
+(deftest auth-state-capacity-admission-decides-new-keys
+  (is (= :admit (atproto/auth-state-capacity-admission 3 3 true)))
+  (is (= :admit (atproto/auth-state-capacity-admission 2 3 false)))
+  (is (= :refuse (atproto/auth-state-capacity-admission 3 3 false))))
+
+(deftest oauth-state-store-contracts
+  (is (true? (atproto/valid-oauth-state-store-key? "state-abc")))
+  (is (false? (atproto/valid-oauth-state-store-key? "")))
+  (is (false? (atproto/valid-oauth-state-store-key? nil)))
+  (is (true? (boolean (atproto/valid-oauth-state-store-value? {:opaque true}))))
+  (is (false? (boolean (atproto/valid-oauth-state-store-value? nil))))
+  (is (false? (boolean (atproto/valid-oauth-state-store-value? "x"))))
+  (is (false? (boolean (atproto/valid-oauth-state-store-value? 1)))))
+
