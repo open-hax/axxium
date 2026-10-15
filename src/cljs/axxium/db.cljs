@@ -4,6 +4,7 @@
    Following knoxx patterns."
   (:require [axxium.config :as cfg]
             [axxium.extern.pg :as pg]
+            [axxium.extern.json :as json]
             [axxium.shape.db :as q]
             [honey.sql :as sql]))
 
@@ -18,14 +19,38 @@
 (defn- honey->sql
   "Format a HoneySQL map to [sql-str params]."
   [honey-map]
-  (sql/format honey-map {:numbered true}))
+  (let [formatted (sql/format honey-map {:numbered true})]
+    [(first formatted) (rest formatted)]))
+
+(defn- ^:async query-on!
+  "Execute a HoneySQL query through one opaque pool/client handle."
+  [connection honey-map]
+  (let [[sql-str params] (honey->sql honey-map)
+        {:keys [rows]} (await (pg/query! connection sql-str params))]
+    rows))
 
 (defn query-sql
   "Execute a HoneySQL query. Returns promise of rows."
   [honey-map]
-  (let [[sql-str params] (honey->sql honey-map)]
-    (-> (pg/query! @pool sql-str params)
-        (.then :rows))))
+  (query-on! @pool honey-map))
+
+(defn with-transaction!
+  "Run an operation with a HoneySQL query function bound to one transaction."
+  [operation]
+  (pg/with-transaction!
+   @pool
+   (fn [connection]
+     (operation (fn [honey-map] (query-on! connection honey-map))))))
+
+(defn provider-binding-conflict?
+  "Recognize only the provider/subject uniqueness conflict for sign-in recovery."
+  [error]
+  (pg/provider-binding-conflict? error))
+
+(defn actor-email-conflict?
+  "Recognize only the actors.email uniqueness conflict for signup races."
+  [error]
+  (pg/actor-email-conflict? error))
 
 (defn query-one-sql
   "Execute HoneySQL query and return first row or nil."
@@ -44,26 +69,82 @@
   (let [[sql-str _params] (honey->sql honey-map)]
     (pg/query! @pool sql-str [])))
 
-(defn init-schema!
-  "Initialize database schema. Idempotent."
+(defn- ^:async actors-email-index-on!
+  "Return {:is_unique .. :qualified_name ..} for idx_actors_email on the
+   application's actors table, or nil when absent."
+  [connection]
+  (let [{:keys [rows]} (await (pg/query! connection (q/select-actors-email-index) []))]
+    (first rows)))
+
+(defn- ^:async migrate-email-index!
+  "Inside one transaction: lock actor writes, re-check the index, refuse on
+   duplicate non-NULL emails, then swap the legacy index for the unique one.
+   Throwing rolls back, so the legacy index is never dropped without its
+   unique replacement."
+  [connection]
+  (await (pg/query! connection (q/lock-actors-for-email-index) []))
+  (let [index (await (actors-email-index-on! connection))]
+    (when-not (:is_unique index)
+      (let [{:keys [rows]} (await (pg/query! connection (q/select-duplicate-actor-emails) []))]
+        (when (seq rows)
+          (throw (ex-info
+                  "Cannot enforce unique actors.email: duplicate emails present"
+                  {:duplicates rows}))))
+      (when-let [qualified-name (:qualified_name index)]
+        (await (pg/query! connection (q/drop-index-actors-email qualified-name) [])))
+      (await (pg/query! connection (q/create-index-actors-email) [])))))
+
+(defn- ^:async ensure-unique-actors-email-index!
+  "Replace the legacy non-unique email index when it is still present.
+   Fast path: skip (no lock) when the actors table's idx_actors_email is
+   already unique, so rolling restarts do not lock and rescan actors.
+   Otherwise the duplicate check and swap run under a table lock in one
+   transaction, so an older process cannot commit a duplicate between the
+   check and CREATE UNIQUE INDEX."
   []
-  (-> (exec-ddl! (q/create-table-entities))
-      (.then (fn [_] (exec-ddl! (q/create-table-actors))))
-      (.then (fn [_] (exec-ddl! (q/create-table-sessions))))
-      (.then (fn [_] (exec-ddl! (q/create-table-oauth-clients))))
-      (.then (fn [_] (pg/query! @pool (q/create-index-actors-email) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-actor) [])))
-      (.then (fn [_] (pg/query! @pool (q/create-index-sessions-expires) [])))))
+  (let [index (await (actors-email-index-on! @pool))]
+    (when-not (:is_unique index)
+      (await (pg/with-transaction! @pool migrate-email-index!)))))
+
+(defn ^:async init-schema!
+  "Initialize database schema. Idempotent. DDL runs sequentially in order."
+  []
+  (await (exec-ddl! (q/create-table-entities)))
+  (await (exec-ddl! (q/create-table-actors)))
+  (await (exec-ddl! (q/create-table-sessions)))
+  (await (exec-ddl! (q/create-table-oauth-clients)))
+  (await (exec-ddl! (q/create-table-agent-credentials)))
+  (await (exec-ddl! (q/create-table-provider-bindings)))
+  (await (pg/query! @pool (q/create-index-provider-subject) []))
+  (await (ensure-unique-actors-email-index!))
+  (await (pg/query! @pool (q/create-index-sessions-actor) []))
+  (await (pg/query! @pool (q/create-index-sessions-expires) [])))
 
 ;; Re-export query builders for convenience
 (def q-select-actor-by-id q/select-actor-by-id)
 (def q-select-actor-by-email q/select-actor-by-email)
 (def q-select-actor-by-email-active q/select-actor-by-email-active)
+(def q-select-entity-for-actor q/select-entity-for-actor)
+(def q-select-active-agent-credential q/select-active-agent-credential)
+(def q-select-actor-by-provider-subject q/select-actor-by-provider-subject)
+(def q-insert-provider-binding q/insert-provider-binding)
+(def q-insert-agent-credential q/insert-agent-credential)
+(def q-revoke-agent-credential q/revoke-agent-credential)
+(def q-select-agent-credentials q/select-agent-credentials)
 (def q-select-actors-active q/select-actors-active)
-(def q-insert-actor q/insert-actor)
+(defn q-insert-actor
+  "Build an actor insert with JSON-encoded capabilities and roles."
+  [actor]
+  (q/insert-actor
+   (-> actor
+       (assoc :capabilities-json (json/encode (:capabilities actor)))
+       (assoc :roles-json (json/encode (:roles actor))))))
 (def q-insert-entity q/insert-entity)
 (def q-select-entity-by-id q/select-entity-by-id)
-(def q-update-actor-capabilities q/update-actor-capabilities)
+(defn q-update-actor-capabilities
+  "Build an actor capabilities update with JSON encoding at the boundary."
+  [id capabilities]
+  (q/update-actor-capabilities id (json/encode capabilities)))
 (def q-insert-session q/insert-session)
 (def q-select-actor-by-session q/select-actor-by-session)
 (def q-delete-session-by-hash q/delete-session-by-hash)

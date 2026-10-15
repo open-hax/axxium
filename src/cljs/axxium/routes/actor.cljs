@@ -1,98 +1,81 @@
 (ns axxium.routes.actor
-  "Actor registry routes for Axxium."
+  "Authenticated actor registry and administrator account controls."
   (:require [axxium.db :as db]
-            [axxium.auth.session :as session]))
+            [axxium.extern.http :as http]
+            [axxium.routes.auth-context :as auth]))
 
 (defn- sanitize-actor [actor]
   (dissoc actor :password_hash))
 
-(defn- with-auth [handler-fn]
-  (fn [req reply]
-    (-> (session/resolve-auth-context req)
-        (.then
-          (fn [ctx]
-            (if-not ctx
-              (.send (.code reply 401) (clj->js {:error "Unauthorized"}))
-              (handler-fn req reply ctx)))))))
-
-(defn- clamp-pagination [limit offset]
-  (let [parsed-limit (js/parseInt limit 10)
-        parsed-offset (js/parseInt offset 10)
-        safe-limit (if (or (js/Number.isNaN parsed-limit) (< parsed-limit 1)) 50 parsed-limit)
-        safe-offset (if (or (js/Number.isNaN parsed-offset) (< parsed-offset 0)) 0 parsed-offset)
-        clamped-limit (js/Math.min safe-limit 100)]
-    [clamped-limit safe-offset]))
+(defn- pagination [req]
+  (let [limit (or (http/parse-int (http/query-param req "limit")) 50)
+        offset (or (http/parse-int (http/query-param req "offset")) 0)]
+    {:limit (min 100 (max 1 limit)) :offset (max 0 offset)}))
 
 (defn- register-list-actors-route! [app]
-  (.get app "/api/actors"
-    (with-auth
-      (fn [req reply _ctx]
-        (let [limit (or (aget (aget req "query") "limit") "50")
-              offset (or (aget (aget req "query") "offset") "0")
-              [clamped-limit safe-offset] (clamp-pagination limit offset)]
-          (-> (db/query-all-sql
-                (db/q-select-actors-active {:limit clamped-limit :offset safe-offset}))
-              (.then
-                (fn [actors]
-                  (.send reply (clj->js {:ok true
-                                         :actors (map sanitize-actor actors)
-                                         :count (count actors)}))))))))))
+  (http/get! app "/api/actors"
+             (auth/with-admin
+              (fn [req reply _context]
+                (-> (db/query-all-sql (db/q-select-actors-active (pagination req)))
+                    (.then (fn [actors]
+                             (http/send! reply 200
+                                         {:ok true
+                                          :actors (mapv sanitize-actor actors)
+                                          :count (count actors)}))))))))
 
 (defn- register-get-actor-route! [app]
-  (.get app "/api/actors/:id"
-    (with-auth
-      (fn [req reply _ctx]
-        (let [actor-id (aget (aget req "params") "id")]
-          (-> (db/query-one-sql
-                (db/q-select-actor-by-id {:id actor-id}))
-              (.then
-                (fn [actor]
-                  (if-not actor
-                    (.send (.code reply 404) (clj->js {:error "Actor not found"}))
-                    (.send reply (clj->js {:ok true
-                                           :actor (sanitize-actor (js->clj actor :keywordize-keys true))}))))))))))
+  (http/get! app "/api/actors/:id"
+             (auth/with-admin
+              (fn [req reply _context]
+                (-> (db/query-one-sql
+                     (db/q-select-actor-by-id {:id (http/param req "id")}))
+                    (.then (fn [actor]
+                             (if actor
+                               (http/send! reply 200
+                                           {:ok true :actor (sanitize-actor actor)})
+                               (http/send! reply 404 {:error "Actor not found"})))))))))
 
 (defn- register-get-me-route! [app]
-  (.get app "/api/actors/me"
-    (with-auth
-      (fn [_req reply ctx]
-        (-> (db/query-one-sql
-              (db/q-select-actor-by-id {:id (:auth/actor-id ctx)}))
-            (.then
-              (fn [actor]
-                (if-not actor
-                  (.send (.code reply 404) (clj->js {:error "Actor not found"}))
-                  (.send reply (clj->js {:ok true
-                                         :actor (sanitize-actor (js->clj actor :keywordize-keys true))}))))))))))
+  (http/get! app "/api/actors/me"
+             (auth/with-auth
+              (fn [_req reply context]
+                (-> (db/query-one-sql
+                     (db/q-select-actor-by-id {:id (:auth/actor-id context)}))
+                    (.then (fn [actor]
+                             (if actor
+                               (http/send! reply 200
+                                           {:ok true :actor (sanitize-actor actor)})
+                               (http/send! reply 404 {:error "Actor not found"})))))))))
 
 (defn- register-get-entity-route! [app]
-  (.get app "/api/entities/:id"
-    (with-auth
-      (fn [req reply _ctx]
-        (let [entity-id (aget (aget req "params") "id")]
-          (-> (db/query-one-sql
-                (db/q-select-entity-by-id {:id entity-id}))
-              (.then
-                (fn [entity]
-                  (if-not entity
-                    (.send (.code reply 404) (clj->js {:error "Entity not found"}))
-                    (.send reply (clj->js {:ok true
-                                           :entity (js->clj entity :keywordize-keys true)})))))))))))
+  (http/get! app "/api/entities/:id"
+             (auth/with-admin
+              (fn [req reply _context]
+                (-> (db/query-one-sql
+                     (db/q-select-entity-by-id {:id (http/param req "id")}))
+                    (.then (fn [entity]
+                             (if entity
+                               (http/send! reply 200 {:ok true :entity entity})
+                               (http/send! reply 404 {:error "Entity not found"})))))))))
 
 (defn- register-update-capabilities-route! [app]
-  (.post app "/api/actors/:id/capabilities"
-    (with-auth
-      (fn [req reply ctx]
-        (let [actor-id (aget (aget req "params") "id")
-              body (js->clj (or (aget req "body") #js {}) :keywordize-keys true)
-              capabilities (:capabilities body)]
-          (-> (db/query-sql
-                (db/q-update-actor-capabilities actor-id capabilities))
-              (.then
-                (fn [_]
-                  (.send reply (clj->js {:ok true})))))))))))
+  (http/post! app "/api/actors/:id/capabilities"
+              (auth/with-admin
+               (fn [req reply _context]
+                 (let [capabilities (:capabilities (http/body req))]
+                   (if (and (vector? capabilities)
+                            (<= (count capabilities) 64)
+                            (every? string? capabilities))
+                     (-> (db/query-sql
+                          (db/q-update-actor-capabilities
+                           (http/param req "id") capabilities))
+                         (.then (fn [_] (http/send! reply 200 {:ok true}))))
+                     (http/send! reply 400
+                                 {:error "capabilities must be a list of strings"})))))))
 
-(defn register-actor-routes! [app]
+(defn register-actor-routes!
+  "Mount actor and entity endpoints with shared authentication and admin admission."
+  [app]
   (register-list-actors-route! app)
   (register-get-actor-route! app)
   (register-get-me-route! app)

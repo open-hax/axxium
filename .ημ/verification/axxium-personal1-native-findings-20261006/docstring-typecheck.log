@@ -1,0 +1,8 @@
+
+> @open-hax/axxium@0.1.0 typecheck
+> shadow-cljs compile server --force-spawn --config-merge {:nrepl {:port 0}}
+
+[:server] Compiling ...
+[:server] Build completed. (92 files, 13 compiled, 0 warnings, 1.57s)
+shadow-cljs - config: /home/err/.codex/worktrees/axxium-personal1-native-20261006/shadow-cljs.edn
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/tmp/axxium-personal1-java-20261006 -Dmaven.repo.local=/tmp/axxium-personal1-java-20261006/.m2/repository

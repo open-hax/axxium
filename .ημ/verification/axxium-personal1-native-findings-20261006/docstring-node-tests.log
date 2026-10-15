@@ -1,0 +1,18 @@
+
+Testing axxium.extern.atproto-oauth-test
+
+Testing axxium.extern.http-test
+
+Testing axxium.extern.identity-routes-test
+Agent creation failed: actor insert failed
+Credential listing failed: database unavailable
+Credential revocation failed: database unavailable
+
+Testing axxium.extern.json-test
+
+Testing axxium.extern.pg-test
+
+Testing axxium.law.identity-test
+
+Ran 22 tests containing 78 assertions.
+0 failures, 0 errors.
