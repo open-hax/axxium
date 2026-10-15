@@ -42,17 +42,26 @@
   "Contract for keys stored in the AT Protocol OAuth authorization-state store."
   [:string {:min 1 :max 2048}])
 
+(def OAuthSavedState
+  "Plain representation of NodeSavedState (InternalStateData with dpopJwk).
+   Validated at the state-store boundary before the SDK opaque handle is kept."
+  [:map
+   [:iss [:string {:min 1 :max 2048}]]
+   [:verifier [:string {:min 1 :max 2048}]]
+   [:auth-method
+    [:or
+     [:map [:method [:= "none"]]]
+     [:map [:method [:= "private_key_jwt"]]
+      [:kid [:string {:min 1 :max 256}]]]]]
+   [:dpop-jwk [:map [:kty [:string {:min 1 :max 16}]]]]
+   [:app-state {:optional true} [:maybe [:string {:min 0 :max 8192}]]]])
+
 (defn valid-oauth-state-store-key?
   "Admit an OAuth state-store key only when it is a bounded non-empty string."
   [k]
   (m/validate OAuthStateStoreKey k {:registry (m/default-schemas)}))
 
-(defn valid-oauth-state-store-value?
-  "Admit an OAuth state-store value only when it is a non-null non-primitive
-   object (the SDK's opaque authorization-state handle)."
-  [v]
-  (and (some? v)
-       (not (string? v))
-       (not (number? v))
-       (not (boolean? v))
-       (not (fn? v))))
+(defn valid-oauth-saved-state?
+  "Admit a plain NodeSavedState claims map only when required fields are present."
+  [claims]
+  (m/validate OAuthSavedState claims {:registry (m/default-schemas)}))

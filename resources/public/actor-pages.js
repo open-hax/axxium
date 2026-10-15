@@ -29,6 +29,7 @@ export async function fetchAllActors(request, pageSize = ACTOR_PAGE_SIZE) {
   let firstPageWasShort = false;
   for (let pass = 0; pass < MAX_RECONCILE_PASSES; pass += 1) {
     let addedThisPass = 0;
+    let hitPageCap = false;
     for (let page = 0; page < MAX_ACTOR_PAGES; page += 1) {
       const offset = page * pageSize;
       const rows = parseActorPage(await request(`/api/actors?limit=${pageSize}&offset=${offset}`));
@@ -40,11 +41,15 @@ export async function fetchAllActors(request, pageSize = ACTOR_PAGE_SIZE) {
         byId.set(actor.id, actor);
         addedThisPass += 1;
       }
-      // Stop only on a short page. A full page of already-known IDs can still
-      // hide a later shifted actor further down the offset space.
       if (rows.length < pageSize) break;
+      if (page === MAX_ACTOR_PAGES - 1) hitPageCap = true;
     }
-    // A short first page cannot skip across pages; otherwise always reconcile.
+    if (hitPageCap) {
+      throw Object.assign(
+        new Error(`Actor registry exceeds pagination bound (${MAX_ACTOR_PAGES} pages × ${pageSize})`),
+        { status: 502 },
+      );
+    }
     if (pass === 0 && firstPageWasShort) break;
     if (pass > 0 && addedThisPass === 0) break;
   }

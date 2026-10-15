@@ -112,7 +112,7 @@
       (h/from [:actors :a])
       (h/join [:entities :e] [:= :e.id :a.entity_id])
       (h/where [:= :a.status "active"])
-      (h/order-by [:a.created_at :desc])
+      (h/order-by [:a.created_at :desc] [:a.id :desc])
       (h/limit limit)
       (h/offset offset)))
 

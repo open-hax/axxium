@@ -116,6 +116,18 @@ test('a full first page still reconciles when the next offset is empty after a s
   assert.ok(ids.includes('actor_100'), 'actor shifted into page 0 must be recovered');
 });
 
+
+test('exceeding the page bound rejects instead of returning a truncated list', async () => {
+  const request = async (path) => {
+    const url = new URL(path, 'http://portal.test');
+    const limit = Number(url.searchParams.get('limit'));
+    const offset = Number(url.searchParams.get('offset'));
+    // Every page is full through the bound.
+    return { actors: Array.from({ length: limit }, (_, i) => ({ id: `actor_${offset + i}` })) };
+  };
+  await assert.rejects(fetchAllActors(request), (e) => /pagination bound/.test(e.message) && e.status === 502);
+});
+
 test('malformed actor-page payloads are rejected', async () => {
   assert.throws(() => parseActorPage(null), /Malformed/);
   assert.throws(() => parseActorPage({}), /actors must be an array/);

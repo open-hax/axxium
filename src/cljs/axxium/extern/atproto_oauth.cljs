@@ -51,6 +51,38 @@
 (defn state-store-full? [error]
   (= :atproto/state-store-full (:axxium/reason (ex-data error))))
 
+
+(defn- oauth-saved-state-claims
+  "Project a NodeSavedState JS handle (or CLJ test fixture) into the law contract."
+  [value]
+  (let [auth (if (map? value)
+               (:auth-method value)
+               (js->clj (aget value "authMethod") :keywordize-keys true))
+        jwk (if (map? value)
+              (:dpop-jwk value)
+              (js->clj (aget value "dpopJwk") :keywordize-keys true))]
+    {:iss (if (map? value) (:iss value) (aget value "iss"))
+     :verifier (if (map? value) (:verifier value) (aget value "verifier"))
+     :auth-method {:method (or (:method auth) (get auth "method"))
+                   :kid (or (:kid auth) (get auth "kid"))}
+     :dpop-jwk {:kty (or (:kty jwk) (get jwk "kty"))}
+     :app-state (if (map? value) (:app-state value) (aget value "appState"))}))
+
+(defn- admit-oauth-saved-state!
+  "Refuse a state-store value that is outside `axxium.law.atproto/OAuthSavedState`."
+  [value]
+  (let [claims (oauth-saved-state-claims value)
+        ;; Drop nil optional kid for method none; drop nil app-state.
+        claims (cond-> claims
+                 (nil? (:kid (:auth-method claims)))
+                 (update :auth-method dissoc :kid)
+                 (nil? (:app-state claims))
+                 (dissoc :app-state))]
+    (when-not (atproto-law/valid-oauth-saved-state? claims)
+      (throw (ex-info "OAuth state-store value is outside its contract"
+                      {:contract :axxium.law.atproto/OAuthSavedState})))
+    value))
+
 (defn new-oauth-state-store
   "Bounded in-memory authorization state that never evicts a live entry.
    Expired entries are purged first; a new key at capacity is refused with
@@ -73,19 +105,16 @@
      #js {:get (fn [k]
                  (when-let [entry (live k)]
                    (let [value (:value entry)]
-                     (when-not (and (atproto-law/valid-oauth-state-store-key? k)
-                                    (atproto-law/valid-oauth-state-store-value? value))
+                     (when-not (atproto-law/valid-oauth-state-store-key? k)
                        (.delete entries k)
-                       (throw (ex-info "OAuth state-store entry failed its contract on read"
-                                       {:contract :axxium.law.atproto/oauth-state-store-entry})))
-                     value)))
+                       (throw (ex-info "OAuth state-store key failed its contract on read"
+                                       {:contract :axxium.law.atproto/OAuthStateStoreKey})))
+                     (admit-oauth-saved-state! value))))
           :set (fn [k value]
                  (when-not (atproto-law/valid-oauth-state-store-key? k)
                    (throw (ex-info "OAuth state-store key is outside its contract"
                                    {:contract :axxium.law.atproto/OAuthStateStoreKey})))
-                 (when-not (atproto-law/valid-oauth-state-store-value? value)
-                   (throw (ex-info "OAuth state-store value is outside its contract"
-                                   {:contract :axxium.law.atproto/oauth-state-store-value})))
+                 (admit-oauth-saved-state! value)
                  (let [already (some? (live k))]
                    (when-not already
                      (when (<= max (.-size entries)) (purge!)))

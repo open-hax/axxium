@@ -43,12 +43,23 @@
   (is (= :admit (atproto/auth-state-capacity-admission 2 3 false)))
   (is (= :refuse (atproto/auth-state-capacity-admission 3 3 false))))
 
-(deftest oauth-state-store-contracts
+(deftest oauth-saved-state-contract
   (is (true? (atproto/valid-oauth-state-store-key? "state-abc")))
   (is (false? (atproto/valid-oauth-state-store-key? "")))
   (is (false? (atproto/valid-oauth-state-store-key? nil)))
-  (is (true? (boolean (atproto/valid-oauth-state-store-value? {:opaque true}))))
-  (is (false? (boolean (atproto/valid-oauth-state-store-value? nil))))
-  (is (false? (boolean (atproto/valid-oauth-state-store-value? "x"))))
-  (is (false? (boolean (atproto/valid-oauth-state-store-value? 1)))))
+  (is (true? (atproto/valid-oauth-saved-state?
+              {:iss "https://bsky.social"
+               :verifier "abc"
+               :auth-method {:method "none"}
+               :dpop-jwk {:kty "EC"}})))
+  (is (true? (atproto/valid-oauth-saved-state?
+              {:iss "https://bsky.social"
+               :verifier "abc"
+               :auth-method {:method "private_key_jwt" :kid "k1"}
+               :dpop-jwk {:kty "EC"}
+               :app-state "link|actor|tok"})))
+  (is (false? (atproto/valid-oauth-saved-state? {})))
+  (is (false? (atproto/valid-oauth-saved-state?
+               {:iss "https://bsky.social" :verifier "abc"
+                :auth-method {:method "none"}}))))
 
