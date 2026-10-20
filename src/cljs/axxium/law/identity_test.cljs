@@ -110,3 +110,14 @@
   (is (false? (actor/valid-actor-page-cursor? nil)))
   (is (false? (actor/valid-actor-page-cursor? 42)))
   (is (false? (actor/valid-actor-page-cursor? (apply str (repeat 257 "a"))))))
+
+(deftest atproto-start-rate-admission-decides-per-client-starts
+  ;; CodeRabbit cr-comment:v1:807a96710a9886471dc27c5f (riatzukiza/axxium#10):
+  ;; one client must not fill the shared authorization-state store.
+  (is (= :admit (atproto/atproto-start-rate-admission 0 10)))
+  (is (= :admit (atproto/atproto-start-rate-admission 9 10)))
+  (is (= :refuse (atproto/atproto-start-rate-admission 10 10)))
+  (is (< (* atproto/atproto-start-max-per-window
+            (/ 360000 atproto/atproto-start-window-ms))
+         1024)
+      "one client's live-state share stays far below the 1024-entry store"))

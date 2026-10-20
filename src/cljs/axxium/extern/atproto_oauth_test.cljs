@@ -155,3 +155,15 @@
       (is (= :axxium.law.atproto/OAuthStateStoreKey (:contract (ex-data (lookup k))))
           (str "absent malformed key " (pr-str (if (string? k) (count k) k)) " is refused")))
     (is (nil? (.get store "absent-but-valid")) "an absent valid key is ordinary missing state")))
+
+(deftest atproto-start-limiter-bounds-each-client
+  (let [now (atom 0)
+        admit? (oauth/new-start-limiter {:window-ms 1000 :max 2 :max-clients 2 :now (fn [] @now)})]
+    (is (true? (admit? "1.1.1.1")))
+    (is (true? (admit? "1.1.1.1")))
+    (is (false? (admit? "1.1.1.1")) "a client over its per-window share is refused")
+    (is (true? (admit? "2.2.2.2")) "other clients keep their own share")
+    (is (false? (admit? "3.3.3.3")) "tracked clients are bounded; a new client at capacity fails closed")
+    (reset! now 1000)
+    (is (true? (admit? "1.1.1.1")) "the window slides")
+    (is (true? (admit? "3.3.3.3")) "expired clients free tracking capacity")))

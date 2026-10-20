@@ -356,3 +356,32 @@
   (async done (-> (start-at-capacity-is-503*)
                   (.catch (fn [e] (is false (str "start-at-capacity-is-503 rejected: " (pr-str e)))))
                   (.finally done))))
+
+(defn- ^:async start-is-rate-limited-per-client* []
+  ;; CodeRabbit cr-comment:v1:807a96710a9886471dc27c5f: a public client cannot
+  ;; consume the shared authorization-state capacity with repeated starts.
+  (let [routes (atom {})
+        responses (atom [])
+        authorizations (atom 0)]
+    (with-redefs [http/get! (fn [_ path handler] (swap! routes assoc path handler))
+                  http/with-canonical-origin (fn [_ _ handler] handler)]
+      (atproto/register-atproto-oauth-routes! nil))
+    (with-redefs [oauth/start-limiter (delay (oauth/new-start-limiter {:window-ms 60000 :max 3}))
+                  http/query-param (fn [_ k] (when (= k "identity") "alice.example.com"))
+                  oauth/authorize! (fn [_ _] (swap! authorizations inc) (js/Promise.resolve "https://pds.example/authorize"))
+                  http/set-state-cookie! (fn [& _] nil)
+                  http/redirect! (fn [_ url] (swap! responses conj {:redirect url}))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (doseq [_ (range 4)]
+        (await ((get @routes "/api/auth/atproto/start") #js {:ip "203.0.113.7"} nil)))
+      (await ((get @routes "/api/auth/atproto/start") #js {:ip "198.51.100.9"} nil))
+      (is (= 4 @authorizations) "the refused start never reaches the SDK or the state store")
+      (is (= {:status 429 :body {:error "Too many AT Protocol sign-in attempts; try again shortly"}}
+             (nth @responses 3)))
+      (is (= {:redirect "https://pds.example/authorize"} (last @responses))
+          "another client is unaffected"))))
+
+(deftest start-is-rate-limited-per-client
+  (async done (-> (start-is-rate-limited-per-client*)
+                  (.catch (fn [e] (is false (str "start-is-rate-limited-per-client rejected: " (pr-str e)))))
+                  (.finally done))))
