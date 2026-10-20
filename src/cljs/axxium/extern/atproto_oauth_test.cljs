@@ -145,3 +145,13 @@
 
 (deftest failed-session-operation-releases-only-its-own-position
   (async done (-> (failed-session-operation-releases-only-its-own-position*) (.catch (fn [e] (is false (str "failed-session-operation-releases-only-its-own-position rejected: " (pr-str e))))) (.finally done))))
+
+(deftest oauth-state-store-validates-keys-on-every-lookup
+  ;; Codex PRRT_kwDOU4Vg086ujcP2 (riatzukiza/axxium#10): an absent malformed key
+  ;; must be a contract violation, not ordinary missing state.
+  (let [store (oauth/new-oauth-state-store {:max 2})
+        lookup (fn [k] (try (.get store k) :missing-state (catch :default e e)))]
+    (doseq [k ["" nil 42 (apply str (repeat 2049 "k"))]]
+      (is (= :axxium.law.atproto/OAuthStateStoreKey (:contract (ex-data (lookup k))))
+          (str "absent malformed key " (pr-str (if (string? k) (count k) k)) " is refused")))
+    (is (nil? (.get store "absent-but-valid")) "an absent valid key is ordinary missing state")))

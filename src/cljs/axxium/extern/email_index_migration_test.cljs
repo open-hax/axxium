@@ -102,3 +102,20 @@
   (async done (-> (absent-index-creates-without-drop*)
                   (.catch (fn [e] (is false (str "absent-index-creates-without-drop rejected: " (pr-str e)))))
                   (.finally done))))
+
+(defn- ^:async keyset-actor-index-is-created*
+  []
+  ;; Codex PRRT_kwDOU4Vg086ujcP3 (riatzukiza/axxium#10): the keyset actor scan
+  ;; (status = 'active' ORDER BY created_at DESC, id DESC, row-value cursor)
+  ;; needs a matching composite index or every page re-scans and sorts.
+  (let [fixture (schema-db {:index-rows [{:is_unique true :qualified_name "public.idx_actors_email"}]})]
+    (with-redefs [db/pool (delay (:pool fixture))]
+      (await (db/init-schema!)))
+    (is (some #(= "CREATE INDEX IF NOT EXISTS idx_actors_status_created_id ON actors(status, created_at DESC, id DESC)" %)
+              @(:direct fixture))
+        "init-schema! creates the composite index matching the keyset actor query")))
+
+(deftest keyset-actor-index-is-created
+  (async done (-> (keyset-actor-index-is-created*)
+                  (.catch (fn [e] (is false (str "keyset-actor-index-is-created rejected: " (pr-str e)))))
+                  (.finally done))))

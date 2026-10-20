@@ -100,3 +100,13 @@
                {:iss "https://bsky.social" :verifier "abc"
                 :auth-method {:method "none"}}))))
 
+
+(deftest actor-page-cursor-admission-lives-in-law
+  ;; Codex PRRT_kwDOU4Vg086ujcPy (riatzukiza/axxium#10): the untrusted `after`
+  ;; cursor contract belongs to axxium.law.actor, not the route.
+  (is (true? (actor/valid-actor-page-cursor? "actor_1")))
+  (is (true? (actor/valid-actor-page-cursor? (apply str (repeat 256 "a")))))
+  (is (false? (actor/valid-actor-page-cursor? "")))
+  (is (false? (actor/valid-actor-page-cursor? nil)))
+  (is (false? (actor/valid-actor-page-cursor? 42)))
+  (is (false? (actor/valid-actor-page-cursor? (apply str (repeat 257 "a"))))))
