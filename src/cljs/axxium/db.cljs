@@ -117,6 +117,7 @@
   (await (exec-ddl! (q/create-table-provider-bindings)))
   (await (pg/query! @pool (q/create-index-provider-subject) []))
   (await (ensure-unique-actors-email-index!))
+  (await (pg/query! @pool (q/create-index-actors-status-created-id) []))
   (await (pg/query! @pool (q/create-index-sessions-actor) []))
   (await (pg/query! @pool (q/create-index-sessions-expires) [])))
 

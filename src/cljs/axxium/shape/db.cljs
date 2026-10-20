@@ -242,6 +242,12 @@
          [:actor_id :text :not-null :references [:actors :id]]
          [:created_at :timestamptz :default [:raw "NOW()"]]])))
 
+(defn create-index-actors-status-created-id
+  "Composite index matching select-actors-active's keyset scan
+   (status filter, ORDER BY created_at DESC, id DESC, row-value cursor)."
+  []
+  "CREATE INDEX IF NOT EXISTS idx_actors_status_created_id ON actors(status, created_at DESC, id DESC)")
+
 (defn create-index-provider-subject []
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_bindings_subject ON provider_bindings(provider, subject)")
 

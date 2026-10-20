@@ -116,13 +116,14 @@
                                         (when-not (< t (:expires entry))
                                           (.delete entries k))))))]
      #js {:get (fn [k]
+                 ;; Check the key before lookup so an absent malformed key is a
+                 ;; contract violation, not ordinary missing state.
+                 (when-not (atproto-law/valid-oauth-state-store-key? k)
+                   (.delete entries k)
+                   (throw (ex-info "OAuth state-store key failed its contract on read"
+                                   {:contract :axxium.law.atproto/OAuthStateStoreKey})))
                  (when-let [entry (live k)]
-                   (let [value (:value entry)]
-                     (when-not (atproto-law/valid-oauth-state-store-key? k)
-                       (.delete entries k)
-                       (throw (ex-info "OAuth state-store key failed its contract on read"
-                                       {:contract :axxium.law.atproto/OAuthStateStoreKey})))
-                     (admit-oauth-saved-state! value))))
+                   (admit-oauth-saved-state! (:value entry))))
           :set (fn [k value]
                  (when-not (atproto-law/valid-oauth-state-store-key? k)
                    (throw (ex-info "OAuth state-store key is outside its contract"

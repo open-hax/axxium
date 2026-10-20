@@ -2,6 +2,7 @@
   "Authenticated actor registry and administrator account controls."
   (:require [axxium.db :as db]
             [axxium.extern.http :as http]
+            [axxium.law.actor :as actor-law]
             [axxium.routes.auth-context :as auth]))
 
 (defn- sanitize-actor [actor]
@@ -13,9 +14,6 @@
         after (http/query-param req "after")]
     (cond-> {:limit (min 100 (max 1 limit)) :offset (max 0 offset)}
       (some? after) (assoc :after after))))
-
-(defn- valid-cursor? [after]
-  (and (string? after) (<= 1 (count after) 256)))
 
 (defn- send-actor-page! [reply page]
   (-> (db/query-all-sql (db/q-select-actors-active page))
@@ -32,7 +30,7 @@
                 (let [{:keys [after] :as page} (pagination req)]
                   (cond
                     (nil? after) (send-actor-page! reply page)
-                    (not (valid-cursor? after))
+                    (not (actor-law/valid-actor-page-cursor? after))
                     (http/send! reply 400 {:error "Invalid actor cursor"})
                     :else
                     ;; An unknown cursor would silently yield an empty page.
