@@ -64,6 +64,24 @@
     (.set store "k" ok)
     (is (identical? ok (.get store "k")))))
 
+(deftest oauth-state-store-requires-complete-rsa-private-jwk
+  ;; Codex PRRT_kwDOU4Vg086s2hg3: the RSA projection must keep and require the
+  ;; CRT members (p q dp dq qi) that JoseKey.fromJWK needs at callback time.
+  (let [store (oauth/new-oauth-state-store {:max 4})
+        rsa (fn [jwk] #js {:iss "https://bsky.social"
+                           :verifier "v"
+                           :authMethod #js {:method "none"}
+                           :dpopJwk (clj->js jwk)})
+        full {:kty "RSA" :n "n" :e "AQAB" :d "d"
+              :p "p" :q "q" :dp "dp" :dq "dq" :qi "qi"}
+        refuse (fn [k v] (try (.set store k v) :admitted (catch :default e e)))]
+    (is (= :admitted (refuse "rsa-full" (rsa full))) "a complete RSA private JWK is admitted")
+    (is (ex-data (refuse "rsa-ned" (rsa (select-keys full [:kty :n :e :d]))))
+        "n/e/d without CRT members is refused at write time")
+    (doseq [k [:p :q :dp :dq :qi]]
+      (is (ex-data (refuse (str "rsa-no-" (name k)) (rsa (dissoc full k))))
+          (str "RSA private JWK without " (name k) " is refused")))))
+
 (deftest configured-client-metadata-is-accepted-by-the-sdk
   (let [metadata (oauth/client-metadata)]
     (is (contains? #{"native" "web"} (:application_type metadata)))

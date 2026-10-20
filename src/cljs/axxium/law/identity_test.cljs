@@ -67,7 +67,23 @@
               {:iss "https://bsky.social"
                :verifier "abc"
                :auth-method {:method "none"}
-               :dpop-jwk {:kty "RSA" :n "modulus" :e "AQAB" :d "dpriv"}})))
+               :dpop-jwk {:kty "RSA" :n "modulus" :e "AQAB" :d "dpriv"
+                          :p "p1" :q "q1" :dp "dp1" :dq "dq1" :qi "qi1"}})))
+  ;; Codex PRRT_kwDOU4Vg086s2hg3: Jose/Node RSA private import also needs the
+  ;; CRT members, so n/e/d alone must be refused.
+  (is (false? (atproto/valid-oauth-saved-state?
+               {:iss "https://bsky.social"
+                :verifier "abc"
+                :auth-method {:method "none"}
+                :dpop-jwk {:kty "RSA" :n "modulus" :e "AQAB" :d "dpriv"}})))
+  (doseq [k [:p :q :dp :dq :qi]]
+    (is (false? (atproto/valid-oauth-saved-state?
+                 {:iss "https://bsky.social"
+                  :verifier "abc"
+                  :auth-method {:method "none"}
+                  :dpop-jwk (dissoc {:kty "RSA" :n "modulus" :e "AQAB" :d "dpriv"
+                                     :p "p1" :q "q1" :dp "dp1" :dq "dq1" :qi "qi1"} k)}))
+        (str "RSA private JWK without " (name k) " is refused")))
   ;; kty alone is insufficient — private members required for SDK import
   (is (false? (atproto/valid-oauth-saved-state?
                {:iss "https://bsky.social"

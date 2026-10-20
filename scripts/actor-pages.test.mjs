@@ -161,3 +161,59 @@ test('a non-empty probe past the page bound still rejects', async () => {
   const { request } = pagedApi(100_001);
   await assert.rejects(fetchAllActors(request), (e) => /pagination bound/.test(e.message) && e.status === 502);
 });
+
+// Codex PRRT_kwDOU4Vg086s2hgv (riatzukiza/axxium#10): offset pages cannot prove
+// completeness while actors are revoked, because each revocation shifts later
+// rows ahead of the requested offset. A keyset cursor (`after=<last id>`) is
+// anchored on a row, so revocations elsewhere cannot hide an active actor.
+function revokingKeysetApi(total, revokePerRequest) {
+  // Newest first, matching ORDER BY created_at DESC, id DESC.
+  const all = Array.from({ length: total }, (_, i) => ({ id: `actor_${i}` }));
+  const revoked = new Set();
+  const calls = [];
+  let nextRevoke = 0;
+  const request = async (path) => {
+    calls.push(path);
+    if (calls.length > 1) {
+      // Concurrent administrators keep revoking the newest remaining actors.
+      for (let k = 0; k < revokePerRequest && nextRevoke < total - 1; k += 1) {
+        revoked.add(all[nextRevoke].id);
+        nextRevoke += 1;
+      }
+    }
+    const url = new URL(path, 'http://portal.test');
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
+    let start = 0;
+    if (url.searchParams.has('after')) {
+      // Cursor rows stay in the table after revocation (status changes only).
+      const idx = all.findIndex((a) => a.id === url.searchParams.get('after'));
+      if (idx < 0) throw Object.assign(new Error('Unknown cursor'), { status: 400 });
+      start = idx + 1;
+    } else {
+      const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
+      // Offset applies to the *active* rows at request time.
+      const active = all.filter((a) => !revoked.has(a.id));
+      return { actors: active.slice(offset, offset + limit) };
+    }
+    return { actors: all.slice(start).filter((a) => !revoked.has(a.id)).slice(0, limit) };
+  };
+  return { request, calls, all, revoked };
+}
+
+test('continuous revocations during pagination never hide a never-revoked actor', async () => {
+  const { request, revoked, all } = revokingKeysetApi(450, 40);
+  const ids = new Set((await fetchAllActors(request)).map((a) => a.id));
+  const neverRevoked = all.filter((a) => !revoked.has(a.id)).map((a) => a.id);
+  const missing = neverRevoked.filter((id) => !ids.has(id));
+  assert.deepEqual(missing, [], 'every actor active throughout the read must be listed');
+});
+
+test('pages after the first are requested by keyset cursor, not offset', async () => {
+  const { request, calls } = revokingKeysetApi(237, 0);
+  assert.equal((await fetchAllActors(request)).length, 237);
+  assert.deepEqual(calls, [
+    '/api/actors?limit=100',
+    '/api/actors?limit=100&after=actor_99',
+    '/api/actors?limit=100&after=actor_199',
+  ]);
+});

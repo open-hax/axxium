@@ -9,8 +9,10 @@
             [axxium.extern.jose :as jose]
             [axxium.routes.agents :as agents]
             [axxium.routes.auth :as auth]
+            [axxium.shape.db :as shape]
             [cljs.test :refer [async deftest is]]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [honey.sql :as sql]))
 
 (defn- routes [register!]
   (let [handlers (atom {})
@@ -198,3 +200,19 @@
   (async done (-> (signup-email-unique-conflict-returns-409*)
                   (.catch (fn [e] (is false (str "signup-email-unique-conflict-returns-409 rejected: " (pr-str e)))))
                   (.finally done))))
+
+(deftest active-actor-pages-use-a-keyset-cursor
+  ;; Codex PRRT_kwDOU4Vg086s2hgv (riatzukiza/axxium#10): offset pages shift when
+  ;; actors are revoked mid-read. `after` anchors the next page on the last
+  ;; returned row (created_at, id), so revocations cannot hide later actors.
+  (let [[first-page & first-params] (sql/format (shape/select-actors-active {:limit 100}))
+        [next-page & next-params] (sql/format (shape/select-actors-active {:limit 100 :after "actor_99"}))]
+    (is (not (str/includes? first-page "OFFSET")) "the first cursor page needs no offset")
+    (is (str/includes? next-page "(a.created_at, a.id) < (SELECT"))
+    (is (not (str/includes? next-page "OFFSET")))
+    (is (str/includes? next-page "ORDER BY a.created_at DESC, a.id DESC"))
+    (is (some #{"actor_99"} next-params))
+    (is (some #{100} first-params)))
+  (let [[legacy & params] (sql/format (shape/select-actors-active {:limit 50 :offset 10}))]
+    (is (str/includes? legacy "OFFSET") "plain offset pages remain supported")
+    (is (some #{10} params))))
