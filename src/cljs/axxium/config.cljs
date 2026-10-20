@@ -17,11 +17,25 @@
   (let [v (env key)]
     (if v (= "true" (str/lower-case v)) default)))
 
+(defn trust-proxy-option
+  "Fastify trustProxy from AXXIUM_TRUST_PROXY: unset/empty keeps the default
+   (no proxy trust), \"true\" trusts every hop, a number is a hop count, and
+   anything else is passed through as trusted addresses/CIDRs."
+  [value]
+  (let [v (some-> value str/trim)]
+    (cond
+      (or (nil? v) (= "" v)) nil
+      (= "true" (str/lower-case v)) true
+      (re-matches #"\d+" v) (js/parseInt v 10)
+      :else v)))
+
 (def config
   {:axxium/env (or (env "NODE_ENV") "development")
    :axxium/port (env-int "AXXIUM_PORT" 8787)
    :axxium/host (env "AXXIUM_HOST" "0.0.0.0")
    :axxium/public-base-url (env "AXXIUM_PUBLIC_BASE_URL" "http://127.0.0.1:8787")
+   ;; Needed behind a reverse proxy so req.ip (start rate limit) is the client.
+   :http/trust-proxy (trust-proxy-option (env "AXXIUM_TRUST_PROXY"))
    
    ;; Database
    :db/host (env "DB_HOST" "localhost")

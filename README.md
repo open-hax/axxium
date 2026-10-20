@@ -106,6 +106,7 @@ All configuration is via environment variables:
 | `DB_PASSWORD` | | Database password |
 | `JWT_SECRET` | change-me | JWT signing secret |
 | `AXXIUM_PUBLIC_BASE_URL` | http://127.0.0.1:8787 | Exact public origin for callbacks and CORS; AT OAuth requires a loopback IP for local redirects |
+| `AXXIUM_TRUST_PROXY` | unset | Fastify `trustProxy` behind a reverse proxy (`true`, a hop count, or trusted addresses/CIDRs) so the per-client AT Protocol sign-in start limit (10/min) keys by the real client address |
 | `GOOGLE_OAUTH_CLIENT_FILE` | | Private Google web OAuth client JSON path |
 | `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` | | Verified Google email granted admin on first actor creation |
 | `JWT_ISSUER` | axxium | JWT issuer |
