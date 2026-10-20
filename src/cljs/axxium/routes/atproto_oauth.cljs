@@ -95,6 +95,10 @@
       (and link? (not= "human" (:kind entity)))
       (http/send! reply 403 {:error "A human Axxium session is required to link an AT identity"})
 
+      ;; Per-client share of the shared authorization-state capacity.
+      (not (oauth/admit-start? (http/client-ip req)))
+      (http/send! reply 429 {:error "Too many AT Protocol sign-in attempts; try again shortly"})
+
       :else
       (try
         (let [browser-state (str (when link? (str "link|" link-actor-id "|"))

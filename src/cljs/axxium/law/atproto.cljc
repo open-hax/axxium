@@ -38,6 +38,21 @@
     (< live-count max-entries) :admit
     :else :refuse))
 
+(def atproto-start-window-ms
+  "Sliding window for per-client AT Protocol sign-in starts."
+  60000)
+
+(def atproto-start-max-per-window
+  "Starts one client may make per window. With the 360s state TTL a single
+   client can hold at most 60 of the 1024 shared authorization-state entries."
+  10)
+
+(defn atproto-start-rate-admission
+  "Decide whether a client with `recent-count` starts in the current window may
+   start another AT Protocol authorization."
+  [recent-count max-per-window]
+  (if (< recent-count max-per-window) :admit :refuse))
+
 (def OAuthStateStoreKey
   "Contract for keys stored in the AT Protocol OAuth authorization-state store."
   [:string {:min 1 :max 2048}])

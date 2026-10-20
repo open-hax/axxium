@@ -141,6 +141,48 @@
           :del (fn [k] (.delete entries k) nil)
           :clear (fn [] (.clear entries) nil)})))
 
+;; ---------------------------------------------------------------------------
+;; Per-client start limiter
+;; ---------------------------------------------------------------------------
+
+(def ^:private start-limiter-max-clients 4096)
+
+(defn new-start-limiter
+  "Sliding-window limiter for public AT Protocol sign-in starts, keyed by
+   client. Returns `(admit? client-key)`. Tracked clients are bounded; when the
+   table is full of live clients a new client is refused (fail closed) rather
+   than evicting another client's window."
+  ([] (new-start-limiter {}))
+  ([{:keys [window-ms max max-clients now]
+     :or {window-ms atproto-law/atproto-start-window-ms
+          max atproto-law/atproto-start-max-per-window
+          max-clients start-limiter-max-clients
+          now #(js/Date.now)}}]
+   (let [clients (js/Map.)
+         recent (fn [t k]
+                  (let [kept (filterv #(< t (+ % window-ms)) (or (.get clients k) []))]
+                    (if (seq kept) (.set clients k kept) (.delete clients k))
+                    kept))
+         purge! (fn [t] (doseq [k (vec (es6-iterator-seq (.keys clients)))] (recent t k)))]
+     (fn [client-key]
+       (let [t (now)
+             k (or client-key "unknown")
+             starts (recent t k)]
+         (when (and (empty? starts) (<= max-clients (.-size clients)))
+           (purge! t))
+         (if (and (empty? starts) (<= max-clients (.-size clients)))
+           false
+           (case (atproto-law/atproto-start-rate-admission (count starts) max)
+             :admit (do (.set clients k (conj starts t)) true)
+             :refuse false)))))))
+
+(defonce start-limiter (delay (new-start-limiter)))
+
+(defn admit-start?
+  "Admit one AT Protocol sign-in start for `client-key` under the process limiter."
+  [client-key]
+  (@start-limiter client-key))
+
 (defn- metadata []
   (let [base (cfg/get-in-config [:axxium/public-base-url])
         callback (str base callback-path)

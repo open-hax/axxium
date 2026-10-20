@@ -11,6 +11,11 @@
 (defn query-param [req key]
   (aget (aget req "query") key))
 
+(defn client-ip
+  "Fastify's resolved client address (honours the app's trustProxy setting)."
+  [req]
+  (when (object? req) (aget req "ip")))
+
 (defn send! [reply status data]
   (.send (.code reply status) (clj->js data)))
 
