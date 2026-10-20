@@ -1,5 +1,6 @@
 (ns axxium.extern.atproto-oauth-test
-  (:require [axxium.extern.atproto-oauth :as oauth]
+  (:require [axxium.config :as cfg]
+            [axxium.extern.atproto-oauth :as oauth]
             [cljs.test :refer [async deftest is]]))
 
 (defn- fixture-saved-state
@@ -167,3 +168,12 @@
     (reset! now 1000)
     (is (true? (admit? "1.1.1.1")) "the window slides")
     (is (true? (admit? "3.3.3.3")) "expired clients free tracking capacity")))
+
+(deftest trust-proxy-option-keys-the-start-limiter-by-real-client
+  ;; Behind a reverse proxy, req.ip is the proxy unless Fastify trusts it, which
+  ;; would put every client in one start-limiter bucket.
+  (is (nil? (cfg/trust-proxy-option nil)) "unset keeps Fastify's default (no proxy trust)")
+  (is (nil? (cfg/trust-proxy-option "")))
+  (is (true? (cfg/trust-proxy-option "true")))
+  (is (= 1 (cfg/trust-proxy-option "1")) "a hop count")
+  (is (= "127.0.0.1,10.0.0.0/8" (cfg/trust-proxy-option "127.0.0.1,10.0.0.0/8")) "trusted addresses"))
