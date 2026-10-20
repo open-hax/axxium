@@ -6,17 +6,43 @@ import { fetchAllActors, ACTOR_PAGE_SIZE, parseActorPage } from '../resources/pu
 
 function pagedApi(total) {
   const actors = Array.from({ length: total }, (_, i) => ({ id: `actor_${i}` }));
+  const index = new Map(actors.map((a, i) => [a.id, i]));
   const calls = [];
   const request = async (path) => {
     calls.push(path);
     const url = new URL(path, 'http://portal.test');
     assert.equal(url.pathname, '/api/actors');
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)));
-    const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
-    const page = actors.slice(offset, offset + limit);
+    let start = Math.max(0, Number(url.searchParams.get('offset') ?? 0));
+    if (url.searchParams.has('after')) {
+      const idx = index.get(url.searchParams.get('after'));
+      if (idx === undefined) throw Object.assign(new Error('Unknown cursor'), { status: 400 });
+      start = idx + 1;
+    }
+    const page = actors.slice(start, start + limit);
     return { ok: true, actors: page, count: page.length };
   };
   return { request, calls, actors };
+}
+
+// Keyset server over a mutable registry: `revoke(id)` flips status only, so
+// the cursor row still anchors the next page.
+function liveKeysetApi(total, beforeRequest = () => {}) {
+  const all = Array.from({ length: total }, (_, i) => ({ id: `actor_${i}` }));
+  const revoked = new Set();
+  const calls = [];
+  const request = async (path) => {
+    calls.push(path);
+    beforeRequest(calls.length, (id) => revoked.add(id));
+    const url = new URL(path, 'http://portal.test');
+    const limit = Number(url.searchParams.get('limit'));
+    let start = 0;
+    if (url.searchParams.has('after')) {
+      start = all.findIndex((a) => a.id === url.searchParams.get('after')) + 1;
+    }
+    return { actors: all.slice(start).filter((a) => !revoked.has(a.id)).slice(0, limit) };
+  };
+  return { request, calls };
 }
 
 test('fetches every page beyond the first 50 actors', async () => {
@@ -25,23 +51,21 @@ test('fetches every page beyond the first 50 actors', async () => {
   assert.equal(actors.length, 237);
   assert.deepEqual(actors.map((a) => a.id), Array.from({ length: 237 }, (_, i) => `actor_${i}`));
   assert.equal(ACTOR_PAGE_SIZE, 100);
-  // One reconcile pass after a multi-page read (offsets can shift between pages).
-  assert.deepEqual(calls.slice(0, 3), [
-    '/api/actors?limit=100&offset=0',
-    '/api/actors?limit=100&offset=100',
-    '/api/actors?limit=100&offset=200',
+  assert.deepEqual(calls, [
+    '/api/actors?limit=100',
+    '/api/actors?limit=100&after=actor_99',
+    '/api/actors?limit=100&after=actor_199',
   ]);
-  assert.ok(calls.length >= 3);
 });
 
 test('an exact multiple of the page size stops on the empty page', async () => {
   const { request, calls } = pagedApi(200);
   assert.equal((await fetchAllActors(request)).length, 200);
-  // First pass: pages at 0, 100, 200 (empty). Reconcile pass follows.
-  assert.ok(calls.length >= 3);
+  // Pages: first, after actor_99, after actor_199 (empty).
+  assert.equal(calls.length, 3);
 });
 
-test('duplicate rows from a shifting offset are listed once', async () => {
+test('duplicate rows are listed once', async () => {
   let n = 0;
   const request = async () => {
     n += 1;
@@ -54,66 +78,35 @@ test('duplicate rows from a shifting offset are listed once', async () => {
   assert.equal((await fetchAllActors(async () => ({ actors: [] }))).length, 0);
 });
 
-test('a mid-pagination revocation that shifts offsets is recovered on reconcile', async () => {
-  // Registry starts as actor_0..actor_149. After page 0, actor_0 is revoked so
-  // former actor_100 moves to offset 99. A naive page-1 request at offset 100
-  // would skip it; the reconcile pass must recover actor_100.
-  let live = Array.from({ length: 150 }, (_, i) => ({ id: `actor_${i}` }));
-  let sawPage0 = false;
-  const request = async (path) => {
-    const url = new URL(path, 'http://portal.test');
-    const limit = Number(url.searchParams.get('limit'));
-    const offset = Number(url.searchParams.get('offset'));
-    if (offset === 0) sawPage0 = true;
-    else if (sawPage0 && live.some((a) => a.id === 'actor_0')) {
-      live = live.filter((a) => a.id !== 'actor_0');
-    }
-    return { actors: live.slice(offset, offset + limit) };
-  };
+test('a revocation after the first page does not skip the next actor', async () => {
+  // Under OFFSET, revoking actor_0 after page 0 moved actor_100 to offset 99
+  // and a request at offset 100 skipped it. The cursor anchors on actor_99.
+  const { request } = liveKeysetApi(150, (n, revoke) => { if (n === 2) revoke('actor_0'); });
   const ids = (await fetchAllActors(request)).map((a) => a.id);
-  assert.ok(ids.includes('actor_100'), 'shifted actor_100 must be recovered');
+  assert.ok(ids.includes('actor_100'));
+  assert.equal(ids.length, 150);
   assert.equal(new Set(ids).size, ids.length);
 });
 
-
-test('reconcile continues past a full page of already-known actors', async () => {
-  // 250 actors; after offsets 0 and 100, revoke actor_100 so actor_200 shifts
-  // into offset 199. Pass 1 page 0 is all known → must still reach offset 100.
-  let live = Array.from({ length: 250 }, (_, i) => ({ id: `actor_${i}` }));
-  let requests = 0;
-  const request = async (path) => {
-    requests += 1;
-    const url = new URL(path, 'http://portal.test');
-    const limit = Number(url.searchParams.get('limit'));
-    const offset = Number(url.searchParams.get('offset'));
-    if (requests === 3) {
-      // Before first offset-200 fetch: revoke actor_100.
-      live = live.filter((a) => a.id !== 'actor_100');
-    }
-    return { actors: live.slice(offset, offset + limit) };
-  };
+test('a revocation on an earlier page does not skip actors on later pages', async () => {
+  const { request } = liveKeysetApi(250, (n, revoke) => { if (n === 3) revoke('actor_100'); });
   const ids = (await fetchAllActors(request)).map((a) => a.id);
-  assert.ok(ids.includes('actor_200'), 'actor shifted across a later page must be recovered');
+  assert.ok(ids.includes('actor_200'));
   assert.equal(new Set(ids).size, ids.length);
 });
 
-test('a full first page still reconciles when the next offset is empty after a shift', async () => {
-  // 101 actors; after page 0 (100 rows), revoke actor_0 so actor_100 moves to
-  // offset 99 and offset 100 returns []. Must still reconcile.
-  let live = Array.from({ length: 101 }, (_, i) => ({ id: `actor_${i}` }));
-  let page0 = false;
-  const request = async (path) => {
-    const url = new URL(path, 'http://portal.test');
-    const limit = Number(url.searchParams.get('limit'));
-    const offset = Number(url.searchParams.get('offset'));
-    if (offset === 0) page0 = true;
-    else if (page0 && live.some((a) => a.id === 'actor_0')) {
-      live = live.filter((a) => a.id !== 'actor_0');
-    }
-    return { actors: live.slice(offset, offset + limit) };
-  };
+test('a full first page continues by cursor even when a revocation empties the tail', async () => {
+  const { request } = liveKeysetApi(101, (n, revoke) => { if (n === 2) revoke('actor_0'); });
   const ids = (await fetchAllActors(request)).map((a) => a.id);
-  assert.ok(ids.includes('actor_100'), 'actor shifted into page 0 must be recovered');
+  assert.ok(ids.includes('actor_100'));
+});
+
+test('a server that ignores the cursor is rejected instead of looping', async () => {
+  const fullPage = { actors: Array.from({ length: 100 }, (_, i) => ({ id: `a${i}` })) };
+  await assert.rejects(
+    fetchAllActors(async () => fullPage),
+    (e) => /cursor did not advance/.test(e.message) && e.status === 502,
+  );
 });
 
 
@@ -121,9 +114,10 @@ test('exceeding the page bound rejects instead of returning a truncated list', a
   const request = async (path) => {
     const url = new URL(path, 'http://portal.test');
     const limit = Number(url.searchParams.get('limit'));
-    const offset = Number(url.searchParams.get('offset'));
+    const after = url.searchParams.get('after');
+    const start = after == null ? 0 : Number(after.slice('actor_'.length)) + 1;
     // Every page is full through the bound.
-    return { actors: Array.from({ length: limit }, (_, i) => ({ id: `actor_${offset + i}` })) };
+    return { actors: Array.from({ length: limit }, (_, i) => ({ id: `actor_${start + i}` })) };
   };
   await assert.rejects(fetchAllActors(request), (e) => /pagination bound/.test(e.message) && e.status === 502);
 });
@@ -153,8 +147,8 @@ test('exactly MAX_ACTOR_PAGES full pages is accepted after an empty probe', asyn
   // is empty — must succeed (Codex PRRT_kwDOU4Vg086s1cwJ).
   const { request, calls } = pagedApi(100_000);
   assert.equal((await fetchAllActors(request)).length, 100_000);
-  assert.ok(calls.includes('/api/actors?limit=100&offset=100000'), 'must probe one past the bound');
-  assert.ok(!calls.includes('/api/actors?limit=100&offset=100100'));
+  assert.equal(calls.at(-1), '/api/actors?limit=100&after=actor_99999', 'must probe one past the bound');
+  assert.equal(calls.length, 1001);
 });
 
 test('a non-empty probe past the page bound still rejects', async () => {

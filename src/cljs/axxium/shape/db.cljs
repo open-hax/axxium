@@ -107,14 +107,25 @@
       (h/order-by [:created_at :desc])))
 
 (defn select-actors-active
-  [{:keys [limit offset]}]
-  (-> (h/select :a.* [:e.kind :kind])
-      (h/from [:actors :a])
-      (h/join [:entities :e] [:= :e.id :a.entity_id])
-      (h/where [:= :a.status "active"])
-      (h/order-by [:a.created_at :desc] [:a.id :desc])
-      (h/limit limit)
-      (h/offset offset)))
+  "Active actors, newest first. `after` is a keyset cursor (the id of the last
+   actor on the previous page): the page continues strictly after that row's
+   (created_at, id), so revocations elsewhere cannot shift rows past the
+   reader the way OFFSET pages do. The cursor row is looked up regardless of
+   status because revocation only changes `status`."
+  [{:keys [limit offset after]}]
+  (cond-> (-> (h/select :a.* [:e.kind :kind])
+              (h/from [:actors :a])
+              (h/join [:entities :e] [:= :e.id :a.entity_id])
+              (h/where [:= :a.status "active"])
+              (h/order-by [:a.created_at :desc] [:a.id :desc])
+              (h/limit limit))
+    (some? after)
+    (h/where [:< [:composite :a.created_at :a.id]
+              {:select [:c.created_at :c.id]
+               :from [[:actors :c]]
+               :where [:= :c.id after]}])
+    (and (nil? after) (some? offset) (pos? offset))
+    (h/offset offset)))
 
 (defn update-actor-capabilities
   [id capabilities-json]

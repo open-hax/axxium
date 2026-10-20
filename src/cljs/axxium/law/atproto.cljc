@@ -61,7 +61,13 @@
     [:kty [:= "RSA"]]
     [:n [:string {:min 1 :max 8192}]]
     [:e [:string {:min 1 :max 32}]]
-    [:d [:string {:min 1 :max 8192}]]]])
+    [:d [:string {:min 1 :max 8192}]]
+    ;; CRT members: Node/Jose private RSA import requires all five.
+    [:p [:string {:min 1 :max 4096}]]
+    [:q [:string {:min 1 :max 4096}]]
+    [:dp [:string {:min 1 :max 4096}]]
+    [:dq [:string {:min 1 :max 4096}]]
+    [:qi [:string {:min 1 :max 4096}]]]])
 
 (def OAuthSavedState
   "Plain representation of NodeSavedState (InternalStateData with dpopJwk).

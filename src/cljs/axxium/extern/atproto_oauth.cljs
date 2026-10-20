@@ -60,7 +60,8 @@
     (case kty
       "EC" {:kty "EC" :crv (get* :crv) :x (get* :x) :y (get* :y) :d (get* :d)}
       "OKP" {:kty "OKP" :crv (get* :crv) :x (get* :x) :d (get* :d)}
-      "RSA" {:kty "RSA" :n (get* :n) :e (get* :e) :d (get* :d)}
+      "RSA" {:kty "RSA" :n (get* :n) :e (get* :e) :d (get* :d)
+             :p (get* :p) :q (get* :q) :dp (get* :dp) :dq (get* :dq) :qi (get* :qi)}
       ;; Unknown/missing kty: leave a minimal map so the contract refuses it.
       {:kty kty})))
 
