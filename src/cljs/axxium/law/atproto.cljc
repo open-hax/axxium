@@ -64,6 +64,28 @@
     (< tracked-count max-clients) :admit
     :else :refuse))
 
+(def start-limiter-ipv6-prefix-length
+  "IPv6 clients share one start quota per /64, so rotating addresses inside
+   a delegated prefix does not buy extra start windows."
+  64)
+
+(defn start-limiter-quota-group
+  "Decide which start-limiter quota a client address belongs to. Takes the
+   adapter's plain parse: nil, {:family :ipv4 :parts [4 octets]} (IPv4-mapped
+   IPv6 already unwrapped), {:family :ipv6 :parts [8 hextets]} or
+   {:family :unparsed :text s}. IPv4 and unparsed text keep their own quota;
+   IPv6 keeps only its /64 network bits. Returns a plain group map."
+  [address]
+  (case (:family address)
+    nil {:family :unknown}
+    :ipv4 {:family :ipv4 :parts (vec (:parts address))}
+    :ipv6 (let [hextets (quot start-limiter-ipv6-prefix-length 16)
+                parts (vec (:parts address))]
+            {:family :ipv6
+             :parts (into (subvec parts 0 hextets) (repeat (- 8 hextets) 0))
+             :prefix-length start-limiter-ipv6-prefix-length})
+    {:family :unparsed :text (:text address)}))
+
 (defn trust-proxy-admission
   "Decide the Fastify trustProxy setting that keys the per-client start limiter
    from the raw AXXIUM_TRUST_PROXY text. Unset/blank is no proxy trust (nil),

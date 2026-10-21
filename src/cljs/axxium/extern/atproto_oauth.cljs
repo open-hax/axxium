@@ -3,6 +3,7 @@
    DID, PKCE, PAR, and DPoP. OAuth tokens are revoked after identity binding."
   (:require [axxium.config :as cfg]
             [axxium.law.atproto :as atproto-law]
+            [clojure.string :as str]
             ["@atproto-labs/simple-store-memory" :refer [SimpleStoreMemory]]
             ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]
             ["ipaddr.js" :as ipaddr]))
@@ -157,22 +158,31 @@
 
 (def ^:private start-limiter-max-clients 4096)
 
-(defn start-limiter-key
-  "Canonical limiter key for a client address: IPv4 (including every
-   IPv4-mapped IPv6 spelling) as dotted quad, IPv6 collapsed to its /64
-   network, so one client cannot rotate addresses inside its prefix to gain
-   extra start windows. Unparseable input is kept as-is; nil is \"unknown\"."
+(defn- parse-client-address
+  "Plain parse of a client address for the law layer: IPv4 (including every
+   IPv4-mapped IPv6 spelling) as octets, IPv6 as hextets, anything else as text."
   [client-key]
   (cond
-    (nil? client-key) "unknown"
-    (not (.isValid ipaddr client-key)) client-key
+    (nil? client-key) nil
+    (not (.isValid ipaddr client-key)) {:family :unparsed :text client-key}
     :else (let [addr (.process ipaddr client-key)]
             (if (= "ipv4" (.kind addr))
-              (.toString addr)
-              (let [parts (.-parts addr)]
-                (str (.toString (new (.-IPv6 ipaddr)
-                                     #js [(aget parts 0) (aget parts 1) (aget parts 2) (aget parts 3) 0 0 0 0]))
-                     "/64"))))))
+              {:family :ipv4 :parts (vec (.-octets addr))}
+              {:family :ipv6 :parts (vec (.-parts addr))}))))
+
+(defn start-limiter-key
+  "Canonical limiter key for a client address. The quota group is decided by
+   `axxium.law.atproto/start-limiter-quota-group` (IPv6 by /64); this adapter
+   only parses and renders: IPv4 as dotted quad, IPv6 as its network/prefix,
+   unparseable input as-is, nil as \"unknown\"."
+  [client-key]
+  (let [{:keys [family parts text prefix-length]}
+        (atproto-law/start-limiter-quota-group (parse-client-address client-key))]
+    (case family
+      :unknown "unknown"
+      :ipv4 (str/join "." parts)
+      :ipv6 (str (.toString (new (.-IPv6 ipaddr) (clj->js parts))) "/" prefix-length)
+      text)))
 
 (defn new-start-limiter
   "Sliding-window limiter for public AT Protocol sign-in starts, keyed by
