@@ -176,7 +176,11 @@
   (is (nil? (cfg/trust-proxy-option nil)) "unset keeps Fastify's default (no proxy trust)")
   (is (nil? (cfg/trust-proxy-option "")))
   (is (true? (cfg/trust-proxy-option "true")))
-  (is (= 1 (cfg/trust-proxy-option "1")) "a hop count")
+  (is (false? (cfg/trust-proxy-option "false")) "CodeRabbit u3S5A: false is boolean, not an address")
+  (is (false? (cfg/trust-proxy-option "FALSE")))
+  (is (= :axxium.config/trust-proxy-hop-count
+         (:axxium/reason (ex-data (try (cfg/trust-proxy-option "1") (catch :default e e)))))
+      "CodeRabbit u3S4y / Codex u3Hib: Fastify 5 trusts nothing for a hop count, so it is refused")
   (is (= "127.0.0.1,10.0.0.0/8" (cfg/trust-proxy-option "127.0.0.1,10.0.0.0/8")) "trusted addresses"))
 
 (defn- ^:async sdk-authorize-state*

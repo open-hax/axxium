@@ -121,3 +121,9 @@
             (/ 360000 atproto/atproto-start-window-ms))
          1024)
       "one client's live-state share stays far below the 1024-entry store"))
+
+(deftest start-limiter-capacity-admission-decides-new-clients
+  ;; Codex PRRT_kwDOU4Vg086u3HiQ (riatzukiza/axxium#10): the capacity refusal is law.
+  (is (= :admit (atproto/start-limiter-capacity-admission 4 4 true)) "a tracked client keeps its window")
+  (is (= :admit (atproto/start-limiter-capacity-admission 3 4 false)))
+  (is (= :refuse (atproto/start-limiter-capacity-admission 4 4 false)) "a new client at capacity fails closed"))
