@@ -1,6 +1,7 @@
 (ns axxium.extern.http-test
-  (:require [axxium.extern.http :as http]
-            [cljs.test :refer [deftest is]]))
+  (:require [axxium.extern.fastify :as fastify]
+            [axxium.extern.http :as http]
+            [cljs.test :refer [async deftest is]]))
 
 (deftest oauth-start-canonicalizes-cookie-host-and-preserves-query
   (let [redirected (atom nil)
@@ -50,3 +51,27 @@
            reply done)
     (is (= "http://127.0.0.1:8787/portal/index.html?tab=agents"
            @redirected))))
+
+(defn- fastify-like-request
+  "Request whose constructor is not js/Object, like Fastify's Request."
+  [ip]
+  (let [Request (fn [])]
+    (set! (.. Request -prototype -ip) ip)
+    (new Request)))
+
+(deftest client-ip-reads-non-plain-request-objects
+  ;; CodeRabbit PRRT_kwDOU4Vg086u6dXz: object? is false for Fastify's Request.
+  (is (= "203.0.113.7" (http/client-ip (fastify-like-request "203.0.113.7"))))
+  (is (= "198.51.100.9" (http/client-ip #js {:ip "198.51.100.9"})))
+  (is (nil? (http/client-ip nil)))
+  (is (nil? (http/client-ip #js {}))))
+
+(deftest client-ip-reads-real-fastify-request
+  (async done
+    (let [app (fastify/create-app)]
+      (.get app "/ip" (fn [req reply] (.send reply #js {:ip (http/client-ip req)})))
+      (-> (.inject app #js {:method "GET" :url "/ip" :remoteAddress "203.0.113.7"})
+          (.then (fn [res]
+                   (is (= "203.0.113.7" (.-ip (js/JSON.parse (.-body res)))))))
+          (.catch (fn [e] (is false (str "fastify inject rejected: " e))))
+          (.finally (fn [] (.close app) (done)))))))

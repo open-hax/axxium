@@ -357,6 +357,13 @@
                   (.catch (fn [e] (is false (str "start-at-capacity-is-503 rejected: " (pr-str e)))))
                   (.finally done))))
 
+(defn- fastify-like-request
+  "Request whose constructor is not js/Object, like Fastify's Request."
+  [ip]
+  (let [Request (fn [])]
+    (set! (.. Request -prototype -ip) ip)
+    (new Request)))
+
 (defn- ^:async start-is-rate-limited-per-client* []
   ;; CodeRabbit cr-comment:v1:807a96710a9886471dc27c5f: a public client cannot
   ;; consume the shared authorization-state capacity with repeated starts.
@@ -374,8 +381,8 @@
                   http/redirect! (fn [_ url] (swap! responses conj {:redirect url}))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
       (doseq [_ (range 4)]
-        (await ((get @routes "/api/auth/atproto/start") #js {:ip "203.0.113.7"} nil)))
-      (await ((get @routes "/api/auth/atproto/start") #js {:ip "198.51.100.9"} nil))
+        (await ((get @routes "/api/auth/atproto/start") (fastify-like-request "203.0.113.7") nil)))
+      (await ((get @routes "/api/auth/atproto/start") (fastify-like-request "198.51.100.9") nil))
       (is (= 4 @authorizations) "the refused start never reaches the SDK or the state store")
       (is (= (repeat 3 {:redirect "https://pds.example/authorize"}) (take 3 @responses)))
       (is (= {:status 429 :body {:error "Too many AT Protocol sign-in attempts; try again shortly"}}
