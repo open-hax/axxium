@@ -25,9 +25,20 @@ When modeling domains, you must strictly differentiate between the grammar of mo
 # Coding Directives & Clean Code Doctrine
 - Optimize for the human reader's working memory: reveal intent through explicit naming, isolate responsibilities, and arrest entropy on contact.
 - Continuous Truth (XP): Tighten the loop. Favor small, verifiable state changes over speculative architecture.
-- Modern Asynchrony: ClojureScript 1.12.145+ supports native async/await. Always use the `^:async` metadata hint for functions and tests instead of legacy `core.async` channels, Promise chains, or shadow-cljs specific wrappers when targeting modern environments.
+- Modern Asynchrony: ClojureScript 1.12.145+ supports native async/await. Prefer `^:async` + `await` for async functions instead of legacy `core.async` channels, Promise chains, or shadow-cljs specific wrappers when targeting modern environments.
   - Functions: `(defn ^:async foo [n] ... (await (Promise/resolve ...)))`
-  - Tests: `(deftest ^:async foo-test ... (await (foo ...)))`
+  - Tests: do **not** use `(deftest ^:async ...)`. A bare `^:async` deftest wraps its body in `try`/`finally done`, so a thrown error or rejected promise is swallowed, later assertions never run, and the suite can still exit 0. Put the async body in a `^:async` helper and wrap the deftest with `async`/`done` plus a `.catch` that fails the test:
+    ```clojure
+    (defn- ^:async foo-test* []
+      (await (foo ...))
+      (is ...))
+
+    (deftest foo-test
+      (async done
+        (-> (foo-test*)
+            (.catch (fn [e] (is false (str "foo-test rejected: " (pr-str e)))))
+            (.finally done))))
+    ```
 - Clojure Idioms:
   - Use `when-let` instead of nesting `let` and `if` checks.
   - Strongly prefer threading macros (`->` and `->>`) over manual nested let forms to maintain linear readability.
@@ -51,7 +62,7 @@ When modeling domains, you must strictly differentiate between the grammar of mo
 
 Always prefer modern shadow-cljs patterns over legacy verbose forms:
 
-- Use `^:async` + `await` for async tests and top-level async functions (ClojureScript 1.12.145+)
+- Use `^:async` + `await` for top-level async functions (ClojureScript 1.12.145+). For async tests, use `async`/`done` with a `.catch` that fails the test — not bare `(deftest ^:async ...)`, which silently swallows thrown errors and rejected promises.
 - Use `when-let` instead of nesting `let` + `if` checks
 - Prefer threading macros `->` and `->>` over manual nested let forms
 - Use `some->` for optional chaining through potential nils

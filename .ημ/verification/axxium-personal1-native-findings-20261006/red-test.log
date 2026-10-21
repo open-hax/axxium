@@ -1,0 +1,96 @@
+shadow-cljs - config: /home/err/.codex/worktrees/axxium-personal1-native-20261006/shadow-cljs.edn
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/tmp/axxium-personal1-java-20261006 -Dmaven.repo.local=/tmp/axxium-personal1-java-20261006/.m2/repository
+[:test] Compiling ...
+========= Running Tests =======================
+
+Testing axxium.extern.atproto-oauth-test
+
+Testing axxium.extern.http-test
+
+Testing axxium.extern.identity-routes-test
+
+FAIL in (session-cookie-duration-matches-expiry-in-seconds) (axxium/extern/identity_routes_test.cljs:81:11)
+expected: (= 604800 (:max-age (clojure.core/deref options)))
+  actual: (not (= 604800 604800000))
+
+FAIL in (unauthenticated-agent-operations-use-401) (axxium/extern/identity_routes_test.cljs:89:13)
+expected: (= 401 (:status (clojure.core/deref response)))
+  actual: (not (= 401 403))
+
+FAIL in (unauthenticated-agent-operations-use-401) (axxium/extern/identity_routes_test.cljs:89:13)
+expected: (= 401 (:status (clojure.core/deref response)))
+  actual: (not (= 401 403))
+
+FAIL in (unauthenticated-agent-operations-use-401) (axxium/extern/identity_routes_test.cljs:89:13)
+expected: (= 401 (:status (clojure.core/deref response)))
+  actual: (not (= 401 403))
+
+FAIL in (unauthenticated-agent-operations-use-401) (axxium/extern/identity_routes_test.cljs:89:13)
+expected: (= 401 (:status (clojure.core/deref response)))
+  actual: (not (= 401 403))
+Agent creation failed: actor insert failed
+
+FAIL in (agent-insert-failure-leaves-no-orphan-entity) (axxium/extern/identity_routes_test.cljs:110:11)
+expected: (empty? (clojure.core/deref committed))
+  actual: (not (empty? ["INSERT INTO entities (id, kind, email, display_name) VALUES ($1, $2, NULL, $3) RETURNING *"]))
+
+FAIL in (agent-insert-failure-leaves-no-orphan-entity) (axxium/extern/identity_routes_test.cljs:111:11)
+expected: (= "ROLLBACK" (last (clojure.core/deref commands)))
+  actual: (not (= "ROLLBACK" "INSERT INTO actors (id, entity_id, email, display_name, password_hash, capabilities, roles, status) VALUES ($1, $2, NULL, $3, NULL, CAST($4 AS JSONB), CAST($5 AS JSONB), $6) RETURNING *"))
+
+FAIL in (agent-insert-failure-leaves-no-orphan-entity) (axxium/extern/identity_routes_test.cljs:112:11)
+expected: (= 1 (clojure.core/deref released))
+  actual: (not (= 1 0))
+
+FAIL in (credential-database-failures-have-controlled-responses) (axxium/extern/identity_routes_test.cljs:127:13)
+expected: (= 500 (:status (clojure.core/deref response)))
+  actual: (not (= 500 nil))
+
+FAIL in (credential-database-failures-have-controlled-responses) (axxium/extern/identity_routes_test.cljs:127:13)
+expected: (= 500 (:status (clojure.core/deref response)))
+  actual: (not (= 500 nil))
+
+FAIL in (conflicting-first-login-rolls-back-and-returns-existing-actor) (axxium/extern/identity_routes_test.cljs:154:9)
+expected: (= ["winning-actor"] (:actors outcome))
+  actual: (not (= ["winning-actor"] []))
+
+FAIL in (conflicting-first-login-rolls-back-and-returns-existing-actor) (axxium/extern/identity_routes_test.cljs:155:9)
+expected: (= [{:redirect "/portal/index.html"}] (:responses outcome))
+  actual: (not (= [{:redirect "/portal/index.html"}] [{:status 502, :body {:error "AT Protocol sign-in failed"}}]))
+
+FAIL in (conflicting-first-login-rolls-back-and-returns-existing-actor) (axxium/extern/identity_routes_test.cljs:156:9)
+expected: (empty? (clojure.core/deref (:committed fixture)))
+  actual: (not (empty? ["INSERT INTO entities (id, kind, email, display_name) VALUES ($1, $2, NULL, $3) RETURNING *" "INSERT INTO actors (id, entity_id, email, display_name, password_hash, capabilities, roles, status) VALUES ($1, $2, NULL, $3, NULL, CAST($4 AS JSONB), CAST($5 AS JSONB), $6) RETURNING *"]))
+
+FAIL in (conflicting-first-login-rolls-back-and-returns-existing-actor) (axxium/extern/identity_routes_test.cljs:157:9)
+expected: (some #{"ROLLBACK"} (clojure.core/deref (:commands fixture)))
+  actual: (not (some #{"ROLLBACK"} ["SELECT a.* FROM actors AS a INNER JOIN provider_bindings AS b ON b.actor_id = a.id WHERE (b.provider = $1) AND (b.subject = $2) AND (a.status = $3)" "INSERT INTO entities (id, kind, email, display_name) VALUES ($1, $2, NULL, $3) RETURNING *" "INSERT INTO actors (id, entity_id, email, display_name, password_hash, capabilities, roles, status) VALUES ($1, $2, NULL, $3, NULL, CAST($4 AS JSONB), CAST($5 AS JSONB), $6) RETURNING *" "INSERT INTO provider_bindings (provider, subject, actor_id) VALUES ($1, $2, $3)"]))
+
+FAIL in (conflicting-first-login-rolls-back-and-returns-existing-actor) (axxium/extern/identity_routes_test.cljs:158:9)
+expected: (= 1 (clojure.core/deref (:released fixture)))
+  actual: (not (= 1 0))
+
+FAIL in (concurrent-first-logins-converge-without-orphans) (axxium/extern/identity_routes_test.cljs:163:9)
+expected: (= 2 (count (:actors outcome)))
+  actual: (not (= 2 1))
+
+FAIL in (concurrent-first-logins-converge-without-orphans) (axxium/extern/identity_routes_test.cljs:165:9)
+expected: (= 3 (count (clojure.core/deref (:committed fixture))))
+  actual: (not (= 3 5))
+
+FAIL in (concurrent-first-logins-converge-without-orphans) (axxium/extern/identity_routes_test.cljs:166:9)
+expected: (= 2 (count (filter :redirect (:responses outcome))))
+  actual: (not (= 2 1))
+
+FAIL in (concurrent-first-logins-converge-without-orphans) (axxium/extern/identity_routes_test.cljs:167:9)
+expected: (= 2 (clojure.core/deref (:released fixture)))
+  actual: (not (= 2 0))
+
+Testing axxium.extern.json-test
+
+Testing axxium.law.identity-test
+
+Ran 17 tests containing 59 assertions.
+19 failures, 0 errors.
+===============================================
+[:test] Build completed. (82 files, 2 compiled, 0 warnings, 2.20s)
