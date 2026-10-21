@@ -53,6 +53,17 @@
   [recent-count max-per-window]
   (if (< recent-count max-per-window) :admit :refuse))
 
+(defn start-limiter-capacity-admission
+  "Decide whether the start limiter may track a client after expired windows
+   are purged. A client already tracked keeps its window; a new client at
+   capacity is refused (fail closed) rather than evicting another client.
+   Returns :admit or :refuse."
+  [tracked-count max-clients client-tracked?]
+  (cond
+    client-tracked? :admit
+    (< tracked-count max-clients) :admit
+    :else :refuse))
+
 (def OAuthStateStoreKey
   "Contract for keys stored in the AT Protocol OAuth authorization-state store."
   [:string {:min 1 :max 2048}])

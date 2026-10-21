@@ -197,11 +197,12 @@
              starts (recent t k)]
          (when (and (empty? starts) (<= max-clients (.-size clients)))
            (purge! t))
-         (if (and (empty? starts) (<= max-clients (.-size clients)))
-           false
-           (case (atproto-law/atproto-start-rate-admission (count starts) max)
-             :admit (do (.set clients k (conj starts t)) true)
-             :refuse false)))))))
+         (case (atproto-law/start-limiter-capacity-admission
+                (.-size clients) max-clients (boolean (seq starts)))
+           :refuse false
+           :admit (case (atproto-law/atproto-start-rate-admission (count starts) max)
+                    :admit (do (.set clients k (conj starts t)) true)
+                    :refuse false)))))))
 
 (defonce start-limiter (delay (new-start-limiter)))
 

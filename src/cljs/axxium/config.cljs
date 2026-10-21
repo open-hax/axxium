@@ -19,14 +19,19 @@
 
 (defn trust-proxy-option
   "Fastify trustProxy from AXXIUM_TRUST_PROXY: unset/empty keeps the default
-   (no proxy trust), \"true\" trusts every hop, a number is a hop count, and
-   anything else is passed through as trusted addresses/CIDRs."
+   (no proxy trust), \"false\" is no proxy trust, \"true\" trusts every hop,
+   and anything else is passed through as trusted addresses/CIDRs. A bare hop
+   count is refused: Fastify 5 trusts no proxy for numeric trustProxy, which
+   would silently key every client by the proxy address."
   [value]
   (let [v (some-> value str/trim)]
     (cond
       (or (nil? v) (= "" v)) nil
+      (= "false" (str/lower-case v)) false
       (= "true" (str/lower-case v)) true
-      (re-matches #"\d+" v) (js/parseInt v 10)
+      (re-matches #"\d+" v)
+      (throw (ex-info "AXXIUM_TRUST_PROXY hop counts are not supported; set the trusted proxy addresses/CIDRs"
+                      {:axxium/reason :axxium.config/trust-proxy-hop-count :value v}))
       :else v)))
 
 (def config
