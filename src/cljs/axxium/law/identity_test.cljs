@@ -128,6 +128,18 @@
   (is (= :admit (atproto/start-limiter-capacity-admission 3 4 false)))
   (is (= :refuse (atproto/start-limiter-capacity-admission 4 4 false)) "a new client at capacity fails closed"))
 
+(deftest start-limiter-quota-group-decides-shared-quota
+  ;; Codex PRRT_kwDOU4Vg086u5r7S (riatzukiza/axxium#10): which clients share a
+  ;; start quota (IPv6 grouped by /64) is law; the adapter only parses addresses.
+  (is (= {:family :unknown} (atproto/start-limiter-quota-group nil)))
+  (is (= {:family :ipv4 :parts [203 0 113 7]}
+         (atproto/start-limiter-quota-group {:family :ipv4 :parts [203 0 113 7]})))
+  (is (= {:family :ipv6 :parts [0x2001 0xdb8 1 2 0 0 0 0] :prefix-length 64}
+         (atproto/start-limiter-quota-group {:family :ipv6 :parts [0x2001 0xdb8 1 2 0xaaaa 0xbbbb 0xcccc 0xdddd]}))
+      "an IPv6 client shares its /64 quota")
+  (is (= {:family :unparsed :text "not-an-ip"}
+         (atproto/start-limiter-quota-group {:family :unparsed :text "not-an-ip"}))))
+
 (deftest trust-proxy-admission-decides-proxy-settings
   ;; Codex PRRT_kwDOU4Vg086u3flp (riatzukiza/axxium#10): proxy admission is law.
   (is (= [:admit nil] (atproto/trust-proxy-admission nil)))
