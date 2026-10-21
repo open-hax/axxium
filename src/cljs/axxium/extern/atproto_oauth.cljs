@@ -4,7 +4,8 @@
   (:require [axxium.config :as cfg]
             [axxium.law.atproto :as atproto-law]
             ["@atproto-labs/simple-store-memory" :refer [SimpleStoreMemory]]
-            ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]))
+            ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]
+            ["ipaddr.js" :as ipaddr]))
 
 (def ^:private callback-path "/api/auth/atproto/callback")
 (def ^:private metadata-path "/api/auth/atproto/client-metadata.json")
@@ -65,12 +66,18 @@
       ;; Unknown/missing kty: leave a minimal map so the contract refuses it.
       {:kty kty})))
 
+(defn- auth-method-claims
+  "Accept the SDK's ClientAuthMethod object or a bare method string."
+  [auth]
+  (if (string? auth) {:method auth} auth))
+
 (defn- oauth-saved-state-claims
   "Project a NodeSavedState JS handle (or CLJ test fixture) into the law contract."
   [value]
-  (let [auth (if (map? value)
-               (:auth-method value)
-               (js->clj (aget value "authMethod") :keywordize-keys true))
+  (let [auth (auth-method-claims
+              (if (map? value)
+                (:auth-method value)
+                (js->clj (aget value "authMethod") :keywordize-keys true)))
         jwk (if (map? value)
               (:dpop-jwk value)
               (js->clj (aget value "dpopJwk") :keywordize-keys true))]
@@ -94,7 +101,10 @@
     (when-not (atproto-law/valid-oauth-saved-state? claims)
       (throw (ex-info "OAuth state-store value is outside its contract"
                       {:contract :axxium.law.atproto/OAuthSavedState})))
-    value))
+    ;; Hand the SDK its own object form: it reads `authMethod.method`.
+    (if (and (not (map? value)) (string? (aget value "authMethod")))
+      (js/Object.assign #js {} value #js {:authMethod (clj->js (:auth-method claims))})
+      value)))
 
 (defn new-oauth-state-store
   "Bounded in-memory authorization state that never evicts a live entry.
@@ -128,15 +138,15 @@
                  (when-not (atproto-law/valid-oauth-state-store-key? k)
                    (throw (ex-info "OAuth state-store key is outside its contract"
                                    {:contract :axxium.law.atproto/OAuthStateStoreKey})))
-                 (admit-oauth-saved-state! value)
-                 (let [already (some? (live k))]
+                 (let [value (admit-oauth-saved-state! value)
+                       already (some? (live k))]
                    (when-not already
                      (when (<= max (.-size entries)) (purge!)))
                    (case (atproto-law/auth-state-capacity-admission
                           (.-size entries) max already)
                      :admit nil
-                     :refuse (throw (state-store-full-error))))
-                 (.set entries k {:value value :expires (+ (now) ttl-ms)})
+                     :refuse (throw (state-store-full-error)))
+                   (.set entries k {:value value :expires (+ (now) ttl-ms)}))
                  nil)
           :del (fn [k] (.delete entries k) nil)
           :clear (fn [] (.clear entries) nil)})))
@@ -146,6 +156,23 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private start-limiter-max-clients 4096)
+
+(defn start-limiter-key
+  "Canonical limiter key for a client address: IPv4 (including every
+   IPv4-mapped IPv6 spelling) as dotted quad, IPv6 collapsed to its /64
+   network, so one client cannot rotate addresses inside its prefix to gain
+   extra start windows. Unparseable input is kept as-is; nil is \"unknown\"."
+  [client-key]
+  (cond
+    (nil? client-key) "unknown"
+    (not (.isValid ipaddr client-key)) client-key
+    :else (let [addr (.process ipaddr client-key)]
+            (if (= "ipv4" (.kind addr))
+              (.toString addr)
+              (let [parts (.-parts addr)]
+                (str (.toString (new (.-IPv6 ipaddr)
+                                     #js [(aget parts 0) (aget parts 1) (aget parts 2) (aget parts 3) 0 0 0 0]))
+                     "/64"))))))
 
 (defn new-start-limiter
   "Sliding-window limiter for public AT Protocol sign-in starts, keyed by
@@ -166,7 +193,7 @@
          purge! (fn [t] (doseq [k (vec (es6-iterator-seq (.keys clients)))] (recent t k)))]
      (fn [client-key]
        (let [t (now)
-             k (or client-key "unknown")
+             k (start-limiter-key client-key)
              starts (recent t k)]
          (when (and (empty? starts) (<= max-clients (.-size clients)))
            (purge! t))
