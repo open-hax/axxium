@@ -29,7 +29,7 @@
                  (js/Promise.resolve
                   (result (cond (index-lookup? sql) index-rows
                                 (duplicate-scan? sql) duplicates
-                                (created-at-lookup? sql) created-at-rows
+                                (created-at-lookup? sql) (or created-at-rows [])
                                 :else []))))
         client #js {:release (fn [_] nil) :query (fn [sql _] (answer tx sql))}]
     {:pool #js {:query (fn [sql _] (answer direct sql))

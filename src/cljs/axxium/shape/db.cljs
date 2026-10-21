@@ -196,7 +196,8 @@
          [:capabilities :jsonb :default [:raw "'[]'"]]
          [:roles :jsonb :default [:raw "'[]'"]]
          [:status :text :default "active"]
-         [:created_at :timestamptz :default [:raw "NOW()"]]
+         ;; NOT NULL: select-actors-active keys its cursor on (created_at, id).
+         [:created_at :timestamptz :not-null :default [:raw "NOW()"]]
          [:updated_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-table-sessions
@@ -247,6 +248,29 @@
    (status filter, ORDER BY created_at DESC, id DESC, row-value cursor)."
   []
   "CREATE INDEX IF NOT EXISTS idx_actors_status_created_id ON actors(status, created_at DESC, id DESC)")
+
+(defn select-actors-created-at-nullable
+  "Report whether the application's actors.created_at column still permits NULL
+   (tables created before the NOT NULL constraint)."
+  []
+  (str "SELECT is_nullable FROM information_schema.columns "
+       "WHERE table_schema = current_schema() AND table_name = 'actors' "
+       "AND column_name = 'created_at'"))
+
+(defn backfill-actors-created-at
+  "Give legacy NULL created_at rows a timestamp so the keyset cursor can order them."
+  []
+  "UPDATE actors SET created_at = COALESCE(updated_at, NOW()) WHERE created_at IS NULL")
+
+(defn lock-actors-for-created-at
+  "Block actor writes during the backfill and SET NOT NULL (which needs
+   ACCESS EXCLUSIVE anyway), so no NULL row lands between the two."
+  []
+  "LOCK TABLE actors IN ACCESS EXCLUSIVE MODE")
+
+(defn enforce-actors-created-at-not-null
+  []
+  "ALTER TABLE actors ALTER COLUMN created_at SET NOT NULL")
 
 (defn create-index-provider-subject []
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_bindings_subject ON provider_bindings(provider, subject)")

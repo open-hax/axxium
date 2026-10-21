@@ -21,13 +21,13 @@
 (defn trust-proxy-option
   "Fastify trustProxy from AXXIUM_TRUST_PROXY, admitted by
    `axxium.law.atproto/trust-proxy-admission`; a refusal is a configuration
-   error (hop counts are not supported by Fastify 5)."
+   error (bare true and hop counts are not supported)."
   [value]
   (let [[decision setting] (atproto-law/trust-proxy-admission value)]
     (case decision
       :admit setting
-      :refuse (throw (ex-info "AXXIUM_TRUST_PROXY hop counts are not supported; set the trusted proxy addresses/CIDRs"
-                              {:axxium/reason :axxium.config/trust-proxy-hop-count
+      :refuse (throw (ex-info "AXXIUM_TRUST_PROXY must name trusted proxy addresses/CIDRs; bare true and hop counts are not supported"
+                              {:axxium/reason (keyword "axxium.config" (name setting))
                                :law/reason setting})))))
 
 (def config

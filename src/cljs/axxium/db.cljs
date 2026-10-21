@@ -106,6 +106,22 @@
     (when-not (:is_unique index)
       (await (pg/with-transaction! @pool migrate-email-index!)))))
 
+(defn- ^:async migrate-actors-created-at!
+  "Inside one transaction: lock actor writes, backfill NULL created_at, then
+   enforce NOT NULL so the (created_at, id) keyset cursor never meets NULL."
+  [connection]
+  (await (pg/query! connection (q/lock-actors-for-created-at) []))
+  (await (pg/query! connection (q/backfill-actors-created-at) []))
+  (await (pg/query! connection (q/enforce-actors-created-at-not-null) [])))
+
+(defn- ^:async ensure-actors-created-at-not-null!
+  "Fast path: skip (no lock) when actors.created_at is already NOT NULL, so
+   rolling restarts do not lock and rescan actors."
+  []
+  (let [{:keys [rows]} (await (pg/query! @pool (q/select-actors-created-at-nullable) []))]
+    (when (= "YES" (:is_nullable (first rows)))
+      (await (pg/with-transaction! @pool migrate-actors-created-at!)))))
+
 (defn ^:async init-schema!
   "Initialize database schema. Idempotent. DDL runs sequentially in order."
   []
@@ -117,6 +133,7 @@
   (await (exec-ddl! (q/create-table-provider-bindings)))
   (await (pg/query! @pool (q/create-index-provider-subject) []))
   (await (ensure-unique-actors-email-index!))
+  (await (ensure-actors-created-at-not-null!))
   (await (pg/query! @pool (q/create-index-actors-status-created-id) []))
   (await (pg/query! @pool (q/create-index-sessions-actor) []))
   (await (pg/query! @pool (q/create-index-sessions-expires) [])))
