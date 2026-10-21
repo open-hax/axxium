@@ -127,3 +127,12 @@
   (is (= :admit (atproto/start-limiter-capacity-admission 4 4 true)) "a tracked client keeps its window")
   (is (= :admit (atproto/start-limiter-capacity-admission 3 4 false)))
   (is (= :refuse (atproto/start-limiter-capacity-admission 4 4 false)) "a new client at capacity fails closed"))
+
+(deftest trust-proxy-admission-decides-proxy-settings
+  ;; Codex PRRT_kwDOU4Vg086u3flp (riatzukiza/axxium#10): proxy admission is law.
+  (is (= [:admit nil] (atproto/trust-proxy-admission nil)))
+  (is (= [:admit nil] (atproto/trust-proxy-admission "  ")))
+  (is (= [:admit false] (atproto/trust-proxy-admission "False")))
+  (is (= [:admit true] (atproto/trust-proxy-admission "TRUE")))
+  (is (= [:admit "10.0.0.0/8"] (atproto/trust-proxy-admission " 10.0.0.0/8 ")))
+  (is (= [:refuse :trust-proxy-hop-count] (atproto/trust-proxy-admission "2"))))
