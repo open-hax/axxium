@@ -107,14 +107,25 @@
       (h/order-by [:created_at :desc])))
 
 (defn select-actors-active
-  [{:keys [limit offset]}]
-  (-> (h/select :a.* [:e.kind :kind])
-      (h/from [:actors :a])
-      (h/join [:entities :e] [:= :e.id :a.entity_id])
-      (h/where [:= :a.status "active"])
-      (h/order-by [:a.created_at :desc])
-      (h/limit limit)
-      (h/offset offset)))
+  "Active actors, newest first. `after` is a keyset cursor (the id of the last
+   actor on the previous page): the page continues strictly after that row's
+   (created_at, id), so revocations elsewhere cannot shift rows past the
+   reader the way OFFSET pages do. The cursor row is looked up regardless of
+   status because revocation only changes `status`."
+  [{:keys [limit offset after]}]
+  (cond-> (-> (h/select :a.* [:e.kind :kind])
+              (h/from [:actors :a])
+              (h/join [:entities :e] [:= :e.id :a.entity_id])
+              (h/where [:= :a.status "active"])
+              (h/order-by [:a.created_at :desc] [:a.id :desc])
+              (h/limit limit))
+    (some? after)
+    (h/where [:< [:composite :a.created_at :a.id]
+              {:select [:c.created_at :c.id]
+               :from [[:actors :c]]
+               :where [:= :c.id after]}])
+    (and (nil? after) (some? offset) (pos? offset))
+    (h/offset offset)))
 
 (defn update-actor-capabilities
   [id capabilities-json]
@@ -185,7 +196,8 @@
          [:capabilities :jsonb :default [:raw "'[]'"]]
          [:roles :jsonb :default [:raw "'[]'"]]
          [:status :text :default "active"]
-         [:created_at :timestamptz :default [:raw "NOW()"]]
+         ;; NOT NULL: select-actors-active keys its cursor on (created_at, id).
+         [:created_at :timestamptz :not-null :default [:raw "NOW()"]]
          [:updated_at :timestamptz :default [:raw "NOW()"]]])))
 
 (defn create-table-sessions
@@ -230,6 +242,35 @@
          [:subject :text :not-null]
          [:actor_id :text :not-null :references [:actors :id]]
          [:created_at :timestamptz :default [:raw "NOW()"]]])))
+
+(defn create-index-actors-status-created-id
+  "Composite index matching select-actors-active's keyset scan
+   (status filter, ORDER BY created_at DESC, id DESC, row-value cursor)."
+  []
+  "CREATE INDEX IF NOT EXISTS idx_actors_status_created_id ON actors(status, created_at DESC, id DESC)")
+
+(defn select-actors-created-at-nullable
+  "Report whether the application's actors.created_at column still permits NULL
+   (tables created before the NOT NULL constraint)."
+  []
+  (str "SELECT is_nullable FROM information_schema.columns "
+       "WHERE table_schema = current_schema() AND table_name = 'actors' "
+       "AND column_name = 'created_at'"))
+
+(defn backfill-actors-created-at
+  "Give legacy NULL created_at rows a timestamp so the keyset cursor can order them."
+  []
+  "UPDATE actors SET created_at = COALESCE(updated_at, NOW()) WHERE created_at IS NULL")
+
+(defn lock-actors-for-created-at
+  "Block actor writes during the backfill and SET NOT NULL (which needs
+   ACCESS EXCLUSIVE anyway), so no NULL row lands between the two."
+  []
+  "LOCK TABLE actors IN ACCESS EXCLUSIVE MODE")
+
+(defn enforce-actors-created-at-not-null
+  []
+  "ALTER TABLE actors ALTER COLUMN created_at SET NOT NULL")
 
 (defn create-index-provider-subject []
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_bindings_subject ON provider_bindings(provider, subject)")

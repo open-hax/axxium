@@ -237,6 +237,72 @@
     (is (empty? @(:committed fixture)))
     (is (= 1 @(:released fixture)))))
 
+(defn- ^:async run-link-callback!
+  "Drive a link callback whose DID binding loses a concurrent unique-index race
+   to `winner` (the binding row that committed first)."
+  [winner]
+  (let [responses (atom [])
+        actors (atom [])
+        lookups (atom 0)
+        callback (callback-handler)
+        state "link|actor-a|fixture-token"]
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "actor-a"}))
+                  db/q-select-entity-for-actor (fn [id] [:entity id])
+                  db/q-select-actor-by-provider-subject (fn [_ subject] [:binding subject])
+                  db/q-insert-provider-binding (fn [_ subject id] [:insert-binding subject id])
+                  db/q-select-actor-by-id (fn [{:keys [id]}] [:actor id])
+                  db/query-one-sql (fn [[tag id]]
+                                     (js/Promise.resolve
+                                      (case tag
+                                        :entity {:id "entity-a" :kind "human"}
+                                        ;; Both racers observed no binding before inserting.
+                                        :binding (when (< 1 (swap! lookups inc)) {:id winner})
+                                        :actor {:id id})))
+                  db/query-sql (fn [[tag]]
+                                 (if (= :insert-binding tag)
+                                   (js/Promise.reject
+                                    (doto (js/Error. "duplicate key value violates unique constraint")
+                                      (aset "code" "23505")
+                                      (aset "constraint" "idx_provider_bindings_subject")))
+                                   (js/Promise.resolve [])))
+                  http/cookie (fn [_ _] state)
+                  http/clear-state-cookie! (fn ([_ _] nil) ([_ _ _] nil))
+                  http/request-url (fn [_] "https://fixture.test/callback")
+                  oauth/callback! (fn [_] (js/Promise.resolve {:did "did:plc:abcdefghijklmnopqrstuvwx" :state state :session nil}))
+                  oauth/revoke! (fn [_] (js/Promise.resolve nil))
+                  session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
+                  session/set-session-cookie (fn [& _] nil)
+                  http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (await (callback {} nil))
+      {:responses @responses :actors @actors})))
+
+(defn- ^:async concurrent-link-by-same-actor-succeeds* []
+  (let [outcome (await (run-link-callback! "actor-a"))]
+    (is (= [{:redirect "/portal/index.html"}] (:responses outcome))
+        "losing the unique-index race to the same actor's own link is a success")
+    (is (= ["actor-a"] (:actors outcome)))))
+
+(defn- ^:async concurrent-link-by-other-actor-is-409* []
+  (let [outcome (await (run-link-callback! "actor-b"))]
+    (is (= [{:status 409 :body {:error "AT identity is already bound to another actor"}}] (:responses outcome))
+        "losing the unique-index race to another actor is a 409, not a raw 502")
+    (is (empty? (:actors outcome)))))
+
+(defn- ^:async start-at-capacity-is-503* []
+  (let [routes (atom {})
+        response (atom nil)]
+    (with-redefs [http/get! (fn [_ path handler] (swap! routes assoc path handler))
+                  http/with-canonical-origin (fn [_ _ handler] handler)]
+      (atproto/register-atproto-oauth-routes! nil))
+    (with-redefs [http/query-param (fn [_ k] (when (= k "identity") "alice.example.com"))
+                  oauth/authorize! (fn [_ _] (js/Promise.reject (oauth/state-store-full-error)))
+                  http/send! (fn [_ status body] (reset! response {:status status :body body}))]
+      (await ((get @routes "/api/auth/atproto/start") {} nil))
+      (is (= 503 (:status @response))
+          "a full authorization-state store refuses new starts with 503, never by evicting live state")
+      (is (= {:error "Too many AT Protocol sign-ins in progress; try again shortly"} (:body @response))))))
+
 ;; A bare `^:async` deftest drops a rejected promise: assertions after the rejection
 ;; never run and the suite still exits 0. Wrap each in `async`/`done` and report throws.
 (deftest unauthenticated-agent-operations-use-401
@@ -274,4 +340,57 @@
 (deftest mismatched-state-still-revokes-provider-tokens
   (async done (-> (mismatched-state-still-revokes-provider-tokens*)
                   (.catch (fn [e] (is false (str "mismatched-state-still-revokes-provider-tokens rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(deftest concurrent-link-by-same-actor-succeeds
+  (async done (-> (concurrent-link-by-same-actor-succeeds*)
+                  (.catch (fn [e] (is false (str "concurrent-link-by-same-actor-succeeds rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(deftest concurrent-link-by-other-actor-is-409
+  (async done (-> (concurrent-link-by-other-actor-is-409*)
+                  (.catch (fn [e] (is false (str "concurrent-link-by-other-actor-is-409 rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(deftest start-at-capacity-is-503
+  (async done (-> (start-at-capacity-is-503*)
+                  (.catch (fn [e] (is false (str "start-at-capacity-is-503 rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- fastify-like-request
+  "Request whose constructor is not js/Object, like Fastify's Request."
+  [ip]
+  (let [Request (fn [])]
+    (set! (.. Request -prototype -ip) ip)
+    (new Request)))
+
+(defn- ^:async start-is-rate-limited-per-client* []
+  ;; CodeRabbit cr-comment:v1:807a96710a9886471dc27c5f: a public client cannot
+  ;; consume the shared authorization-state capacity with repeated starts.
+  (let [routes (atom {})
+        responses (atom [])
+        authorizations (atom 0)]
+    (with-redefs [http/get! (fn [_ path handler] (swap! routes assoc path handler))
+                  http/with-canonical-origin (fn [_ _ handler] handler)]
+      (atproto/register-atproto-oauth-routes! nil))
+    (with-redefs [oauth/start-limiter (delay (oauth/new-start-limiter {:window-ms 60000 :max 3}))
+                  http/query-param (fn [_ k] (when (= k "identity") "alice.example.com"))
+                  oauth/authorize! (fn [_ _] (swap! authorizations inc) (js/Promise.resolve "https://pds.example/authorize"))
+                  cfg/get-in-config (fn [_] "https://fixture.test")
+                  http/set-state-cookie! (fn ([_ _ _ _] nil) ([_ _ _ _ _] nil))
+                  http/redirect! (fn [_ url] (swap! responses conj {:redirect url}))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (doseq [_ (range 4)]
+        (await ((get @routes "/api/auth/atproto/start") (fastify-like-request "203.0.113.7") nil)))
+      (await ((get @routes "/api/auth/atproto/start") (fastify-like-request "198.51.100.9") nil))
+      (is (= 4 @authorizations) "the refused start never reaches the SDK or the state store")
+      (is (= (repeat 3 {:redirect "https://pds.example/authorize"}) (take 3 @responses)))
+      (is (= {:status 429 :body {:error "Too many AT Protocol sign-in attempts; try again shortly"}}
+             (nth @responses 3)))
+      (is (= {:redirect "https://pds.example/authorize"} (last @responses))
+          "another client is unaffected"))))
+
+(deftest start-is-rate-limited-per-client
+  (async done (-> (start-is-rate-limited-per-client*)
+                  (.catch (fn [e] (is false (str "start-is-rate-limited-per-client rejected: " (pr-str e)))))
                   (.finally done))))

@@ -10,6 +10,16 @@
   "Contract for agent_credentials.id path values before they reach PostgreSQL uuid."
   [:re #"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"])
 
+(def ActorPageCursor
+  "Contract for the untrusted GET /api/actors `after` keyset cursor (an actor
+   id) before it reaches PostgreSQL."
+  [:string {:min 1 :max 256}])
+
+(defn valid-actor-page-cursor?
+  "Admit an actor-page cursor only when it is a bounded non-empty string."
+  [after]
+  (m/validate ActorPageCursor after {:registry (m/default-schemas)}))
+
 (defn valid-agent-creation-request?
   "Admit a normalized agent-creation request only when it satisfies the contract."
   [request]

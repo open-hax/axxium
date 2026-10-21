@@ -2,6 +2,7 @@
   "Authenticated actor registry and administrator account controls."
   (:require [axxium.db :as db]
             [axxium.extern.http :as http]
+            [axxium.law.actor :as actor-law]
             [axxium.routes.auth-context :as auth]))
 
 (defn- sanitize-actor [actor]
@@ -9,19 +10,35 @@
 
 (defn- pagination [req]
   (let [limit (or (http/parse-int (http/query-param req "limit")) 50)
-        offset (or (http/parse-int (http/query-param req "offset")) 0)]
-    {:limit (min 100 (max 1 limit)) :offset (max 0 offset)}))
+        offset (or (http/parse-int (http/query-param req "offset")) 0)
+        after (http/query-param req "after")]
+    (cond-> {:limit (min 100 (max 1 limit)) :offset (max 0 offset)}
+      (some? after) (assoc :after after))))
+
+(defn- send-actor-page! [reply page]
+  (-> (db/query-all-sql (db/q-select-actors-active page))
+      (.then (fn [actors]
+               (http/send! reply 200
+                           {:ok true
+                            :actors (mapv sanitize-actor actors)
+                            :count (count actors)})))))
 
 (defn- register-list-actors-route! [app]
   (http/get! app "/api/actors"
              (auth/with-admin
               (fn [req reply _context]
-                (-> (db/query-all-sql (db/q-select-actors-active (pagination req)))
-                    (.then (fn [actors]
-                             (http/send! reply 200
-                                         {:ok true
-                                          :actors (mapv sanitize-actor actors)
-                                          :count (count actors)}))))))))
+                (let [{:keys [after] :as page} (pagination req)]
+                  (cond
+                    (nil? after) (send-actor-page! reply page)
+                    (not (actor-law/valid-actor-page-cursor? after))
+                    (http/send! reply 400 {:error "Invalid actor cursor"})
+                    :else
+                    ;; An unknown cursor would silently yield an empty page.
+                    (-> (db/query-one-sql (db/q-select-actor-by-id {:id after}))
+                        (.then (fn [cursor]
+                                 (if cursor
+                                   (send-actor-page! reply page)
+                                   (http/send! reply 400 {:error "Unknown actor cursor"})))))))))))
 
 (defn- register-get-actor-route! [app]
   (http/get! app "/api/actors/:id"

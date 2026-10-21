@@ -9,7 +9,7 @@
     "watch": "shadow-cljs watch server",
     "start": "node dist/server.js",
     "typecheck": "shadow-cljs compile server",
-    "test": "shadow-cljs compile test && node target/test.cjs",
+    "test": "shadow-cljs compile test && node target/test.cjs && node --test scripts/actor-pages.test.mjs",
     "boundary:check": "node scripts/check-js-boundary.mjs --check"
   },
   "dependencies": {
@@ -21,6 +21,7 @@
     "@fastify/static": "^10.1.5",
     "bcryptjs": "^3.0.3",
     "fastify": "^5.12.5",
+    "ipaddr.js": "^2.5.0",
     "jose": "^5.9.3",
     "pg": "^8.16.3",
     "shadow-cljs": "^3.3.5"
