@@ -175,7 +175,9 @@
   ;; would put every client in one start-limiter bucket.
   (is (nil? (cfg/trust-proxy-option nil)) "unset keeps Fastify's default (no proxy trust)")
   (is (nil? (cfg/trust-proxy-option "")))
-  (is (true? (cfg/trust-proxy-option "true")))
+  (is (= :axxium.config/trust-proxy-true
+         (:axxium/reason (ex-data (try (cfg/trust-proxy-option "true") (catch :default e e)))))
+      "CodeRabbit u4iC7: bare true lets direct clients pick req.ip, so it is refused")
   (is (false? (cfg/trust-proxy-option "false")) "CodeRabbit u3S5A: false is boolean, not an address")
   (is (false? (cfg/trust-proxy-option "FALSE")))
   (is (= :axxium.config/trust-proxy-hop-count

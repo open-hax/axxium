@@ -14,18 +14,22 @@
 (defn- duplicate-scan? [sql] (str/starts-with? sql "SELECT email"))
 (defn- lock? [sql] (str/starts-with? sql "LOCK TABLE actors"))
 (defn- drop? [sql] (str/starts-with? sql "DROP INDEX"))
+(defn- created-at-lookup? [sql] (str/includes? sql "is_nullable"))
+(defn- backfill? [sql] (str/starts-with? sql "UPDATE actors SET created_at"))
+(defn- set-not-null? [sql] (str/starts-with? sql "ALTER TABLE actors ALTER COLUMN created_at SET NOT NULL"))
 (defn- create-unique? [sql] (str/starts-with? sql "CREATE UNIQUE INDEX IF NOT EXISTS idx_actors_email"))
 
 (defn- schema-db
   "Fake pool. index-rows answers the scoped index lookup; duplicates answers
    the duplicate scan. Pool-direct and transaction-client SQL are logged apart."
-  [{:keys [index-rows duplicates]}]
+  [{:keys [index-rows duplicates created-at-rows]}]
   (let [direct (atom []) tx (atom [])
         answer (fn [log sql]
                  (swap! log conj sql)
                  (js/Promise.resolve
                   (result (cond (index-lookup? sql) index-rows
                                 (duplicate-scan? sql) duplicates
+                                (created-at-lookup? sql) created-at-rows
                                 :else []))))
         client #js {:release (fn [_] nil) :query (fn [sql _] (answer tx sql))}]
     {:pool #js {:query (fn [sql _] (answer direct sql))
@@ -118,4 +122,46 @@
 (deftest keyset-actor-index-is-created
   (async done (-> (keyset-actor-index-is-created*)
                   (.catch (fn [e] (is false (str "keyset-actor-index-is-created rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- ^:async nullable-created-at-is-backfilled-and-enforced*
+  []
+  ;; CodeRabbit PRRT_kwDOU4Vg086u4iDE (riatzukiza/axxium#10): the keyset actor
+  ;; cursor compares (created_at, id); a NULL created_at sorts first and makes
+  ;; the row-value comparison NULL, so the next page is empty. Existing NULLs are
+  ;; backfilled and the column is enforced NOT NULL under a lock in one transaction.
+  (let [fixture (schema-db {:index-rows [{:is_unique true :qualified_name "public.idx_actors_email"}]
+                            :created-at-rows [{:is_nullable "YES"}]})]
+    (with-redefs [db/pool (delay (:pool fixture))]
+      (await (db/init-schema!)))
+    (let [tx @(:tx fixture) direct @(:direct fixture)]
+      (is (some created-at-lookup? direct) "nullability is looked up before locking")
+      (is (= "BEGIN" (first tx)))
+      (is (= "COMMIT" (last tx)))
+      (is (some? (index-of set-not-null? tx)))
+      (is (< (index-of lock? tx) (index-of backfill? tx) (index-of set-not-null? tx))
+          "lock, then backfill NULLs, then SET NOT NULL, all in one transaction")
+      (is (str/includes? (nth tx (index-of backfill? tx)) "WHERE created_at IS NULL"))
+      (is (not-any? set-not-null? direct)))))
+
+(deftest nullable-created-at-is-backfilled-and-enforced
+  (async done (-> (nullable-created-at-is-backfilled-and-enforced*)
+                  (.catch (fn [e] (is false (str "nullable-created-at-is-backfilled-and-enforced rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- ^:async non-null-created-at-skips-locking*
+  []
+  (let [fixture (schema-db {:index-rows [{:is_unique true :qualified_name "public.idx_actors_email"}]
+                            :created-at-rows [{:is_nullable "NO"}]})]
+    (with-redefs [db/pool (delay (:pool fixture))]
+      (await (db/init-schema!)))
+    (is (not-any? backfill? @(:tx fixture)))
+    (is (not-any? set-not-null? @(:tx fixture)))
+    (is (not-any? lock? @(:tx fixture)) "an enforced column needs no lock on restart")
+    (is (some #(str/includes? % "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()") @(:direct fixture))
+        "new actors tables declare created_at NOT NULL")))
+
+(deftest non-null-created-at-skips-locking
+  (async done (-> (non-null-created-at-skips-locking*)
+                  (.catch (fn [e] (is false (str "non-null-created-at-skips-locking rejected: " (pr-str e)))))
                   (.finally done))))

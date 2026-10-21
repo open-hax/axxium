@@ -133,6 +133,7 @@
   (is (= [:admit nil] (atproto/trust-proxy-admission nil)))
   (is (= [:admit nil] (atproto/trust-proxy-admission "  ")))
   (is (= [:admit false] (atproto/trust-proxy-admission "False")))
-  (is (= [:admit true] (atproto/trust-proxy-admission "TRUE")))
+  (is (= [:refuse :trust-proxy-true] (atproto/trust-proxy-admission "TRUE"))
+      "CodeRabbit u4iC7: bare true trusts every hop, so direct clients could forge X-Forwarded-For")
   (is (= [:admit "10.0.0.0/8"] (atproto/trust-proxy-admission " 10.0.0.0/8 ")))
   (is (= [:refuse :trust-proxy-hop-count] (atproto/trust-proxy-admission "2"))))
