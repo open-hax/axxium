@@ -1,7 +1,8 @@
 (ns axxium.config
   "Axxium runtime configuration from environment."
-  (:require [clojure.string :as str]
-            [axxium.extern.env :as environment]))
+  (:require [axxium.extern.env :as environment]
+            [axxium.law.atproto :as atproto-law]
+            [clojure.string :as str]))
 
 (defn- env
   ([key] (env key nil))
@@ -18,21 +19,16 @@
     (if v (= "true" (str/lower-case v)) default)))
 
 (defn trust-proxy-option
-  "Fastify trustProxy from AXXIUM_TRUST_PROXY: unset/empty keeps the default
-   (no proxy trust), \"false\" is no proxy trust, \"true\" trusts every hop,
-   and anything else is passed through as trusted addresses/CIDRs. A bare hop
-   count is refused: Fastify 5 trusts no proxy for numeric trustProxy, which
-   would silently key every client by the proxy address."
+  "Fastify trustProxy from AXXIUM_TRUST_PROXY, admitted by
+   `axxium.law.atproto/trust-proxy-admission`; a refusal is a configuration
+   error (hop counts are not supported by Fastify 5)."
   [value]
-  (let [v (some-> value str/trim)]
-    (cond
-      (or (nil? v) (= "" v)) nil
-      (= "false" (str/lower-case v)) false
-      (= "true" (str/lower-case v)) true
-      (re-matches #"\d+" v)
-      (throw (ex-info "AXXIUM_TRUST_PROXY hop counts are not supported; set the trusted proxy addresses/CIDRs"
-                      {:axxium/reason :axxium.config/trust-proxy-hop-count :value v}))
-      :else v)))
+  (let [[decision setting] (atproto-law/trust-proxy-admission value)]
+    (case decision
+      :admit setting
+      :refuse (throw (ex-info "AXXIUM_TRUST_PROXY hop counts are not supported; set the trusted proxy addresses/CIDRs"
+                              {:axxium/reason :axxium.config/trust-proxy-hop-count
+                               :law/reason setting})))))
 
 (def config
   {:axxium/env (or (env "NODE_ENV") "development")

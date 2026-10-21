@@ -64,6 +64,22 @@
     (< tracked-count max-clients) :admit
     :else :refuse))
 
+(defn trust-proxy-admission
+  "Decide the Fastify trustProxy setting that keys the per-client start limiter
+   from the raw AXXIUM_TRUST_PROXY text. Unset/blank is no proxy trust (nil),
+   \"false\"/\"true\" are booleans, other text is trusted addresses/CIDRs.
+   A bare hop count is refused: Fastify 5 trusts no proxy for numeric
+   trustProxy, which would key every client by the proxy address.
+   Returns [:admit setting] or [:refuse reason]."
+  [raw]
+  (let [v (some-> raw str/trim)]
+    (cond
+      (or (nil? v) (= "" v)) [:admit nil]
+      (= "false" (str/lower-case v)) [:admit false]
+      (= "true" (str/lower-case v)) [:admit true]
+      (re-matches #"\d+" v) [:refuse :trust-proxy-hop-count]
+      :else [:admit v])))
+
 (def OAuthStateStoreKey
   "Contract for keys stored in the AT Protocol OAuth authorization-state store."
   [:string {:min 1 :max 2048}])
