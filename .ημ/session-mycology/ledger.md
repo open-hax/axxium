@@ -16,3 +16,13 @@
   spore: none
   receipt-refs: 2026-10-06T14:34:15.127072+00:00
   note: Observed red assertions despite compiler exit0; failure/concurrency fixtures and isolated runtimes provided lawful repair evidence. Draft preserves unsafe-controller blocker; no same-session skill promotion.
+
+- ts: "2026-10-23T06:58:32.752Z"
+  session: "/home/err/.local/share/foresight-worktrees/antigravity-members-20261023/axxium"
+  task: "Prepare incoming pinned Antigravity reviewer adoption provenance"
+  p-efficiency: 0.9
+  p-friction: 0.2
+  p-skill-candidate: 0
+  spore: none
+  receipt-refs: ".ημ/receipts.edn#sha256:2efd66342f035c54cc58c65f75cd332698d4b8793fe2ee36624503646570af88"
+  note: "Use the child canonical card and receipt locations; preserve every old ledger byte and keep generated caller syntax distinct from hosted worker/model qualification. Runtime ownership stays in eta-mu; existing checks and approval policy remain authoritative. No new spore or promotion."
