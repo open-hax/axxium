@@ -45,5 +45,13 @@
     (doseq [now [nil -1 "1000" 0.5 js/NaN js/Infinity]]
       (is (= :invalid-request (:error (law/admit-poll pending "yoga-knoxx" now))))))
   (testing "a backwards clock cannot bypass polling backoff"
-    (is (= :slow-down (:error (law/admit-poll (assoc pending :last-poll-ms 5000)
-                                              "yoga-knoxx" 4000))))))
+    (let [result (law/admit-poll (assoc pending :last-poll-ms 5000)
+                                 "yoga-knoxx" 4000)]
+      (is (= :slow-down (:error result)))
+      (is (= 5000 (get-in result [:record :last-poll-ms])))))
+  (testing "backoff never proposes an out-of-contract interval"
+    (let [result (law/admit-poll (assoc pending :last-poll-ms 1000
+                                      :interval-seconds 86400)
+                                 "yoga-knoxx" 1001)]
+      (is (= :invalid-grant (:error result)))
+      (is (not (contains? result :record))))))
