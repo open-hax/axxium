@@ -128,81 +128,85 @@
 
                   (not (str/starts-with? url "/oidc/interaction/"))
                   (await (dispatch-engine! callback issuer request reply)))))))
-        (.addContentTypeParser app "application/x-www-form-urlencoded"
-          #js {:parseAs "string" :bodyLimit 8192}
-          (fn [_request body done]
-            (let [form (js/URLSearchParams. body)]
-              (if (and (= 1 (.-length (.getAll form "csrf")))
-                       (= 1 (.-length (.getAll form "decision"))))
-                (done nil #js {:csrf (.get form "csrf") :decision (.get form "decision")})
-                (done (js/Error. "Invalid interaction form"))))))
-        (.get app "/oidc/interaction/:uid"
-          (fn ^:async show-interaction [request reply]
-            (try
-              (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
-                    uid (.. request -params -uid)]
-                (if-not (= uid (.-uid details))
-                  (fail! reply 400)
-                  (if-let [root (await (current-root request session-cookie-name resolve-session!))]
-                    (if (and (= "consent" (.. details -prompt -name))
-                             (not= (get-in root [:actor :id]) (.. details -session -accountId)))
-                      (fail! reply 409)
-                      (let [seed (.toString (.randomBytes crypto 32) "base64url")]
-                        (.setCookie reply csrf-cookie seed
-                          #js {:path "/" :httpOnly true :secure secure? :sameSite "strict" :maxAge 300})
-                        (html! reply uid (.. details -params -client_id)
-                               (or (get-in root [:actor :email]) (get-in root [:actor :display_name])
-                                   (get-in root [:actor :id]))
-                               (csrf-value csrf-key seed uid))))
-                    (.redirect reply (str "/portal/index.html?oidc_return="
-                                          (js/encodeURIComponent (str "/oidc/interaction/" uid)))))))
-              (catch :default error (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503))))))
-        (.post app "/oidc/interaction/:uid"
-          (fn ^:async finish-interaction [request reply]
-            (try
-              (let [uid (.. request -params -uid)]
-                (if-not (csrf-valid? request origin csrf-cookie csrf-key uid)
-                  (fail! reply 403)
-                  (if-let [root (await (current-root request session-cookie-name resolve-session!))]
-                    (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
-                          actor-id (get-in root [:actor :id])
-                          prompt (.. details -prompt -name)
-                          scopes (str/split (or (.. details -params -scope) "") #"\s+")
-                          claims (vec (array-seq (or (some-> details (aget "prompt") (aget "details") (aget "missingOIDCClaims")) #js [])))
-                          admission (law/interaction-admission
-                                      {:expected-uid uid :actual-uid (.-uid details)
-                                       :actor-id actor-id :session-actor-id (some-> details (aget "session") (aget "accountId"))
-                                       :prompt prompt :decision (.. request -body -decision)
-                                       :scopes scopes :claims claims})]
-                      (case (:decision admission)
-                        :deny
-                        (do (.hijack reply)
-                            (await (.interactionFinished provider (.-raw request) (.-raw reply)
-                                     #js {:error "access_denied" :error_description "User declined sign-in"}
-                                     #js {:mergeWithLastSubmission false})))
-                        :login
-                        (do (.hijack reply)
-                            (await (.interactionFinished provider (.-raw request) (.-raw reply)
-                                     #js {:login #js {:accountId actor-id}}
-                                     #js {:mergeWithLastSubmission false})))
-                        :consent
-                        (let [grant (new (.-Grant provider)
-                                         #js {:accountId actor-id :clientId (.. details -params -client_id)})]
-                          (.addOIDCScope grant (str/join " " scopes))
-                          (.addOIDCClaims grant (clj->js claims))
-                          (let [grant-id (await (.save grant))]
-                            (await (store/bind-session! pool grant-id actor-id (:digest root)))
-                            (.hijack reply)
-                            (await (.interactionFinished provider (.-raw request) (.-raw reply)
-                                     #js {:consent #js {:grantId grant-id}}
-                                     #js {:mergeWithLastSubmission false}))))
-                        (fail! reply (:status admission))))
-                    (fail! reply 401))))
-              (catch :default error
-                (if (.-sent reply)
-                  (do (when-not (.. reply -raw -headersSent)
-                        (set! (.. reply -raw -statusCode) 503)
-                        (.setHeader (.-raw reply) "Cache-Control" "no-store"))
-                      (.end (.-raw reply) "Shared login could not be completed"))
-                  (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503)))))))
+        (.register app
+          (fn ^:async register-interaction-routes [routes]
+            (.addContentTypeParser routes "application/x-www-form-urlencoded"
+              #js {:parseAs "string" :bodyLimit 8192}
+              (fn [_request body done]
+                (let [form (js/URLSearchParams. body)]
+                  (if (and (= 1 (.-length (.getAll form "csrf")))
+                           (= 1 (.-length (.getAll form "decision"))))
+                    (done nil #js {:csrf (.get form "csrf") :decision (.get form "decision")})
+                    (let [error (js/Error. "Invalid interaction form")]
+                      (set! (.-statusCode error) 400)
+                      (done error))))))
+            (.get routes "/oidc/interaction/:uid"
+              (fn ^:async show-interaction [request reply]
+                (try
+                  (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
+                        uid (.. request -params -uid)]
+                    (if-not (= uid (.-uid details))
+                      (fail! reply 400)
+                      (if-let [root (await (current-root request session-cookie-name resolve-session!))]
+                        (if (and (= "consent" (.. details -prompt -name))
+                                 (not= (get-in root [:actor :id]) (.. details -session -accountId)))
+                          (fail! reply 409)
+                          (let [seed (.toString (.randomBytes crypto 32) "base64url")]
+                            (.setCookie reply csrf-cookie seed
+                              #js {:path "/" :httpOnly true :secure secure? :sameSite "strict" :maxAge 300})
+                            (html! reply uid (.. details -params -client_id)
+                                   (or (get-in root [:actor :email]) (get-in root [:actor :display_name])
+                                       (get-in root [:actor :id]))
+                                   (csrf-value csrf-key seed uid))))
+                        (.redirect reply (str "/portal/index.html?oidc_return="
+                                              (js/encodeURIComponent (str "/oidc/interaction/" uid)))))))
+                  (catch :default error (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503))))))
+            (.post routes "/oidc/interaction/:uid"
+              (fn ^:async finish-interaction [request reply]
+                (try
+                  (let [uid (.. request -params -uid)]
+                    (if-not (csrf-valid? request origin csrf-cookie csrf-key uid)
+                      (fail! reply 403)
+                      (if-let [root (await (current-root request session-cookie-name resolve-session!))]
+                        (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
+                              actor-id (get-in root [:actor :id])
+                              prompt (.. details -prompt -name)
+                              scopes (str/split (or (.. details -params -scope) "") #"\s+")
+                              claims (vec (array-seq (or (some-> details (aget "prompt") (aget "details") (aget "missingOIDCClaims")) #js [])))
+                              admission (law/interaction-admission
+                                          {:expected-uid uid :actual-uid (.-uid details)
+                                           :actor-id actor-id :session-actor-id (some-> details (aget "session") (aget "accountId"))
+                                           :prompt prompt :decision (.. request -body -decision)
+                                           :scopes scopes :claims claims})]
+                          (case (:decision admission)
+                            :deny
+                            (do (.hijack reply)
+                                (await (.interactionFinished provider (.-raw request) (.-raw reply)
+                                         #js {:error "access_denied" :error_description "User declined sign-in"}
+                                         #js {:mergeWithLastSubmission false})))
+                            :login
+                            (do (.hijack reply)
+                                (await (.interactionFinished provider (.-raw request) (.-raw reply)
+                                         #js {:login #js {:accountId actor-id}}
+                                         #js {:mergeWithLastSubmission false})))
+                            :consent
+                            (let [grant (new (.-Grant provider)
+                                             #js {:accountId actor-id :clientId (.. details -params -client_id)})]
+                              (.addOIDCScope grant (str/join " " scopes))
+                              (.addOIDCClaims grant (clj->js claims))
+                              (let [grant-id (await (.save grant))]
+                                (await (store/bind-session! pool grant-id actor-id (:digest root)))
+                                (.hijack reply)
+                                (await (.interactionFinished provider (.-raw request) (.-raw reply)
+                                         #js {:consent #js {:grantId grant-id}}
+                                         #js {:mergeWithLastSubmission false}))))
+                            (fail! reply (:status admission))))
+                        (fail! reply 401))))
+                  (catch :default error
+                    (if (.-sent reply)
+                      (do (when-not (.. reply -raw -headersSent)
+                            (set! (.. reply -raw -statusCode) 503)
+                            (.setHeader (.-raw reply) "Cache-Control" "no-store"))
+                          (.end (.-raw reply) "Shared login could not be completed"))
+                      (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503)))))))))
         true))))

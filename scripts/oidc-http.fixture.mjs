@@ -28,11 +28,18 @@ export async function runHttpFixture(pool, installHttp, root) {
   writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
   const app = Fastify({ logger: false });
   app.register(cookiePlugin);
+  app.post('/fixture/plainform', async () => ({ untouched: true }));
   try {
     await installHttp(app, pool, { 'config-file': configPath, 'public-base-url': origin, 'session-cookie-name': 'axxium_session' },
       async token => token === rootToken ? actor : null,
       async subject => subject === actor.id ? actor : null);
     await app.listen({ port, host: '127.0.0.1' });
+    const unrelated = await boundedFetch(`${origin}/fixture/plainform`, { method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'plain=value' });
+    assert.equal(unrelated.status, 415, 'Interaction parser escaped its route plugin');
+    const malformed = await boundedFetch(`${origin}/oidc/interaction/invalid`, { method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', origin }, body: 'decision=approve' });
+    assert.equal(malformed.status, 400);
     const discovery = await (await boundedFetch(`${origin}/oidc/.well-known/openid-configuration`)).json();
     assert.equal(discovery.issuer, config.issuer);
     assert.deepEqual(discovery.code_challenge_methods_supported, ['S256']);
