@@ -11,15 +11,15 @@ Updated 2026-10-23 UTC. Shared login and federation are not yet deployed.
 - OIDC authority constructor pinned to oidc-provider 9.13.0: registered server
   clients with distinct strong secrets and exact HTTPS redirects, mandatory
   S256 PKCE, persistent configured signing/cookie keys, active-actor lookup,
-  client-scoped token introspection and revocation. Device issuance is disabled
-  until its durable polling and human approval adapters are integrated.
+  client-scoped token introspection and revocation. Device issuance is optional and disabled by default; when configured it uses
+  explicit root-session approval, durable atomic polling/backoff and one-use redemption.
 - Optional Fastify protocol and consent routes are composed into server startup,
   enabled only by AXXIUM_OIDC_CONFIG_FILE naming a private operator-owned JSON
   file. Normal Axxium startup stays unchanged when absent. Root-session consent
   uses Origin/CSRF checks and resumes the existing account portal. No ephemeral
   signing keys or synthetic interactions are enabled in the product transport.
 
-Validation: 82 CLJS tests / 385 assertions and 15 JS tests pass; changed Clojure files lint with
+Validation: 85 CLJS tests / 419 assertions and 15 JS tests pass; changed Clojure files lint with
 zero warnings/errors. The optimized integration target compiles with zero
 warnings. Backend typecheck/build and JS boundary checks pass. Run
 `npm run test:oidc-store` with PostgreSQL 16 tools installed (or set
@@ -46,7 +46,7 @@ passed. No manual lifecycle transition or alternate board implementation exists.
 
 Receipt River PR https://github.com/riatzukiza/receipt-river/pull/8 is the minimal
 owner-policy successor based on current fork main 0de65e6. It retains the existing
-contextual reader and ledger prefix. Its full suite (38 tests/267 assertions),
+contextual reader and ledger prefix. Its full suite (42 tests/293 assertions),
 zero-warning lint/release and 15 existing public API cases pass locally; hosted
 CI passed. Native review/adoption remains required. Superseded PR7 and its source
 commits/native finding settlement remain inspectable without rewritten history.
@@ -72,8 +72,8 @@ composition issue https://github.com/open-hax/axxium/issues/27.
    resume and ingress trust configuration before live activation.
 3. Validate the source in the real deployment image and registered host clients;
    configure persistent private signing/cookie/client material outside Git.
-4. Wire the durable device-poll law and explicit user approval before enabling
-   device issuance. Never substitute synthetic interaction approval for a user.
+4. Qualify the mounted device flow in the live portal before enabling issuance.
+   Durable SQL and mounted approval/denial tests pass; human sign-in remains owed.
 5. Integrate Knoxx and Proxx consumers, preserving issuer/subject identity,
    product authorization, existing account/resource attribution and retirement
    obligations. Never merge identities on email alone.
@@ -88,11 +88,18 @@ composition issue https://github.com/open-hax/axxium/issues/27.
 No live identity/session, provider billing, firewall, signing key, client secret
 or deployment was changed by these preparations. No production acceptance is claimed.
 
-## Active consumer workers
+## Consumer source validation
 
-Parent-owned isolated source workers were started for the Knoxx and Proxx
-consumers using the configured GPT-6.1 Sol implementation role. They may only
-edit/test their own worktrees; no deployment, credentials, board changes, Git
-publication or other-thread messages are authorized for those workers. Parent
-retains review/integration/deployment. Worktrees:
-/home/err/.local/share/codex-work/axxium-sso/knoxx-consumer and proxx-consumer.
+The bounded Knoxx and Proxx implementation workers have finished. Parent tests
+passed: Knoxx backend 1865 tests/9211 assertions and frontend 462/2056;
+Proxx CLJS 127/405, OIDC 13/101 and proxy 183 pass/one existing skip. Both
+products build and typecheck. The production actor lookup now has a wiring
+regression using the actual database query contract. Device integration exercises
+real PostgreSQL, mounted engine forms, Origin/XSRF, explicit denial, client binding,
+poll backoff/expiry and root logout. No live account was used by these tests.
+
+Consumers retain product-local authorization and require explicit qualified
+issuer/subject links. No email merging or remote role import is enabled. Browser
+grant lifetime is presently five minutes; refresh and device-initiation product
+UX remain work before final acceptance. Machine federation grants remain separate.
+Parent retains integration, review and deployment.
