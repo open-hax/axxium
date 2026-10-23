@@ -1,73 +1,98 @@
 # Shared login and federation implementation status
 
-Prepared 2026-10-23 UTC. This is an implementation handoff, not deployment acceptance.
+Updated 2026-10-23 UTC. Shared login and federation are not yet deployed.
+
+## Implemented and tested
+
+- Pure device polling admission: clock/input validation, client binding,
+  expiry/consumption refusal, bounded interval/backoff and clock regression.
+- PostgreSQL protocol adapter: model-scoped records, expiry-aware lookup,
+  persistent consumed evidence, atomic one-use consume and grant revocation.
+- OIDC authority constructor pinned to oidc-provider 9.13.0: registered server
+  clients with distinct strong secrets and exact HTTPS redirects, mandatory
+  S256 PKCE, persistent configured signing/cookie keys, active-actor lookup,
+  client-scoped token introspection and revocation. Device issuance is disabled
+  until its durable polling and human approval adapters are integrated.
+- Optional Fastify protocol and consent routes are composed into server startup,
+  enabled only by AXXIUM_OIDC_CONFIG_FILE naming a private operator-owned JSON
+  file. Normal Axxium startup stays unchanged when absent. Root-session consent
+  uses Origin/CSRF checks and resumes the existing account portal. No ephemeral
+  signing keys or synthetic interactions are enabled in the product transport.
+
+Validation: 82 CLJS tests / 385 assertions and 15 JS tests pass; changed Clojure files lint with
+zero warnings/errors. The optimized integration target compiles with zero
+warnings. Backend typecheck/build and JS boundary checks pass. Run
+`npm run test:oidc-store` with PostgreSQL 16 tools installed (or set
+AXXIUM_TEST_PG_BIN): it creates an owned empty cluster, exercises actual SQL and
+provider HTTP exchanges, then stops/removes the cluster and fixture HTTP server.
+No existing service database or Docker container is used by the fixture.
+
+The synthetic integration proves durable restart/reconnect behavior, model
+isolation, expiry, concurrent one-use consume, shared browser login across two
+clients, code/PKCE/state/nonce/audience, token replay rejection, independent
+client introspection/revocation and live disabled-actor refusal. Actual mounted
+Fastify discovery, root-session consent, Origin/CSRF rejection, registered redirect
+refusal, code exchange and parent-session revocation also pass against isolated
+PostgreSQL. Private grant/session bindings store only the root token digest. Detected code
+reuse may revoke the whole grant, including an earlier successful response;
+clients must begin a fresh authorization flow instead of replaying the code.
+
+## Ledger and board repair
+
+Rheos 0.2.0 is installed at /home/err/.local/bin/rheos with its full dependency
+package retained. Both planning worktrees were read with explicit board config;
+comments went through Rheos and its own tracked event ledger. Both drift checks
+passed. No manual lifecycle transition or alternate board implementation exists.
+
+Receipt River PR https://github.com/riatzukiza/receipt-river/pull/8 is the minimal
+owner-policy successor based on current fork main 0de65e6. It retains the existing
+contextual reader and ledger prefix. Its full suite (38 tests/267 assertions),
+zero-warning lint/release and 15 existing public API cases pass locally; hosted
+CI passed. Native review/adoption remains required. Superseded PR7 and its source
+commits/native finding settlement remain inspectable without rewritten history.
+
+Axxium planning streams contain explicit candidate metadata completions bound to
+exact invalid historical line numbers and SHA256. Original prefixes remain
+byte-identical. Candidate validateLedger admission passes, while raw validity
+remains false. This does not resolve the independent receipt/reflection history
+composition issue https://github.com/open-hax/axxium/issues/27.
 
 ## Published plans
 
-- Personal Knoxx migration PR: https://github.com/riatzukiza/axxium/pull/3
-  Extended at 7e46fa41, including client/actor provenance, transport refusal,
-  machine device polling and a concrete corpus-memory acceptance fixture.
-- Personal Proxx migration PR: https://github.com/riatzukiza/axxium/pull/4
-  Extended at f7445761. Three native review findings settled against 5a811cd1;
-  review-body fixture finding answered in native comment 6356114581.
-- Current authority source base: open-hax/axxium main 99e6c725.
+- Knoxx: https://github.com/riatzukiza/axxium/pull/3
+- Proxx: https://github.com/riatzukiza/axxium/pull/4
+- Accepted organization actor foundation: 99e6c725; personal sync PR11 pending.
 
-## Implemented preparation
+## Required remaining integration
 
-`axxium.law.device-polling` validates a persisted polling record and an
-explicit clock, rejects wrong clients, consumed/expired grants and malformed
-input, and proposes bounded polling backoff without browser Origin requirements.
-The persistence adapter must lock, read, decide and persist atomically before
-calling the protocol engine. A continuation never supplies user approval.
+1. Qualify owner metadata-completion policy and source-qualified composition;
+   collect current-head planning review and perform lawful Rheos readiness.
+2. Obtain independent review of the implemented session-bound authority and
+   mounted protocol/consent transport; qualify actual provider sign-in/portal
+   resume and ingress trust configuration before live activation.
+3. Validate the source in the real deployment image and registered host clients;
+   configure persistent private signing/cookie/client material outside Git.
+4. Wire the durable device-poll law and explicit user approval before enabling
+   device issuance. Never substitute synthetic interaction approval for a user.
+5. Integrate Knoxx and Proxx consumers, preserving issuer/subject identity,
+   product authorization, existing account/resource attribution and retirement
+   obligations. Never merge identities on email alone.
+6. Bind revocable, relay-only federation node grants to the approved owner;
+   retain provider credentials on their source nodes and laptop outbound relays.
+7. Deploy using existing Services manifests/effective environments to droplet,
+   Stealth and Yoga. The droplet replaces Big Ussy in the target topology.
+8. Verify a real operator login, cross-product and approved cross-device reuse,
+   revocation/wrong-audience/expiry refusal, and a real creative-memory actor
+   answer routed through each approved federation source.
 
-Verified locally: 78 CLJS tests, 352 assertions, zero failures/errors; 14 JS tests
-pass. clj-kondo reports zero errors/warnings for the new files. Backend typecheck
-and production build complete with zero compiler warnings. Native deployment
-has not consumed this source.
+No live identity/session, provider billing, firewall, signing key, client secret
+or deployment was changed by these preparations. No production acceptance is claimed.
 
-A separate loopback spike uses pinned oidc-provider 9.13.0 with synthetic
-fixtures only. Discovery, code exchange with S256 PKCE, state/nonce, client
-audience, replay rejection, token introspection/revocation and reuse of one
-synthetic browser login across two clients pass. Its device fast-poll test
-remains red: the library does not implement the required backoff itself.
-The pure law is not wired into that spike or any production adapter yet.
-The spike uses development in-memory state and is not a production service.
+## Active consumer workers
 
-## Current gates
-
-Planning review is not admitted. CodeRabbit reported an included-review limit;
-Codex reported account quota unavailable. No current-head approval is claimed.
-Use the canonical pr-flow CLI to collect fresh native status before resuming.
-
-PR 3 finding 4355555629 remains valid: a newly appended historical receipt omits
-repo and pi. A new versioned owner-validated correction preserves its bytes and
-hash; whole-ledger validation still fails. The old helper script is incompatible
-with current owner-required fields and must not be used for new events.
-
-https://github.com/open-hax/axxium/issues/27 holds composition of independently
-introduced append-only receipt/reflection ledgers pending reviewed owning policy.
-An attempted integration was aborted; no side was selected, no history rewritten.
-Rheos ready transitions have not been performed. Installed eta-mu commands returned
-generic help rather than a usable receipt/board operation; no alternate board
-implementation or manual status transition was created.
-
-## Deployment work remaining
-
-1. Obtain current-head planning admission, reviewed ledger policy and lawful
-   Rheos readiness; preserve existing migration requirements and all ledger bytes.
-2. Add durable PostgreSQL OIDC storage, signing-key lifecycle, interaction routes
-   backed by existing Axxium actor sessions, registered clients, exact redirects,
-   authenticated status/revocation, and the atomic device-poll law adapter.
-3. Integrate Knoxx and Proxx browser redirects with issuer/subject identity;
-   retain product-owned authorization and prevent email-based identity merging.
-4. Bind separate, revocable federation node grants to the approved owner. Keep
-   provider credentials local to their source node; laptops connect outbound.
-5. Deploy through existing Services manifests to droplet, Stealth and Yoga;
-   preserve runtime-specific effective environment and rollback material.
-6. Exercise a real operator login and approved second-device login, cross-product
-   reuse, revocation/wrong-audience/expired rejection, and real actor-memory
-   retrieval plus a generated answer routed through each authorized source.
-
-The droplet replaces Big Ussy in the target topology. No live identity/session,
-provider billing, firewall, credential or deployment changes were made in this
-preparation. Shared login and federation are not yet operational on the three hosts.
+Parent-owned isolated source workers were started for the Knoxx and Proxx
+consumers using the configured GPT-6.1 Sol implementation role. They may only
+edit/test their own worktrees; no deployment, credentials, board changes, Git
+publication or other-thread messages are authorized for those workers. Parent
+retains review/integration/deployment. Worktrees:
+/home/err/.local/share/codex-work/axxium-sso/knoxx-consumer and proxx-consumer.

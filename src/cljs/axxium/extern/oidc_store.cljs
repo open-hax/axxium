@@ -1,0 +1,124 @@
+(ns axxium.extern.oidc-store
+  "PostgreSQL adapter for oidc-provider's opaque protocol records.
+   Does not accept a product session or infer an actor from an email."
+  (:require [axxium.extern.pg :as pg]
+            ["oidc-provider" :refer [errors]]))
+
+(def schema-sql
+  "Private protocol store with expiry and lookup indexes; additive schema only."
+  ["CREATE TABLE IF NOT EXISTS axxium_oidc_records (model text NOT NULL, id text NOT NULL, payload jsonb NOT NULL, expires_at timestamptz NOT NULL, consumed_at bigint, PRIMARY KEY (model,id))"
+   "CREATE INDEX IF NOT EXISTS axxium_oidc_grant ON axxium_oidc_records ((payload->>'grantId'))"
+   "CREATE INDEX IF NOT EXISTS axxium_oidc_user_code ON axxium_oidc_records (model,(payload->>'userCode'))"
+   "CREATE INDEX IF NOT EXISTS axxium_oidc_uid ON axxium_oidc_records (model,(payload->>'uid'))"
+   "CREATE INDEX IF NOT EXISTS axxium_oidc_expiry ON axxium_oidc_records (expires_at)"
+   "CREATE TABLE IF NOT EXISTS axxium_oidc_grant_sessions (grant_id text PRIMARY KEY, actor_id text NOT NULL, token_hash text NOT NULL, expires_at timestamptz NOT NULL)"])
+
+(defn ^:async initialize!
+  "Create the dedicated protocol table without altering actor/session tables."
+  [pool]
+  (doseq [statement schema-sql]
+    (await (pg/query! pool statement []))))
+
+(defn- decode-record
+  "Return an opaque provider payload, including durable consumption evidence."
+  [row]
+  (when row
+    (clj->js (cond-> (:payload row)
+               (:consumed_at row) (assoc :consumed (js/Number (:consumed_at row)))))))
+
+(defn- valid-key?
+  "Bound opaque provider keys before crossing the database boundary."
+  [value]
+  (and (string? value) (<= 1 (count value) 2048)))
+
+(defn- require-key!
+  "Reject malformed opaque identifiers rather than coerce them into SQL keys."
+  [value]
+  (when-not (valid-key? value)
+    (throw (ex-info "Invalid OIDC store identifier" {})))
+  value)
+
+(defn- require-lifetime!
+  "Provider lifetimes must be positive whole seconds with a bounded horizon."
+  [seconds]
+  (when-not (and (integer? seconds) (<= 1 seconds 31536000))
+    (throw (ex-info "Invalid OIDC store lifetime" {})))
+  seconds)
+
+(defn ^:async bind-session!
+  "Bind a fresh grant to a current active root session, using its digest only.
+   Never rebind an existing grant to a different session or resurrect a logout."
+  [pool grant-id actor-id token-hash]
+  (doseq [value [grant-id actor-id]] (require-key! value))
+  (when-not (and (string? token-hash) (re-matches #"[0-9a-f]{64}" token-hash))
+    (throw (ex-info "OIDC session binding requires a SHA256 digest" {})))
+  (let [result (await (pg/query! pool
+                       "INSERT INTO axxium_oidc_grant_sessions(grant_id,actor_id,token_hash,expires_at) SELECT $1,a.id,s.token_hash,LEAST(s.expires_at,clock_timestamp()+interval '1 day') FROM actors a JOIN sessions s ON s.actor_id=a.id WHERE a.id=$2 AND s.token_hash=$3 AND a.status='active' AND s.expires_at>clock_timestamp() LIMIT 1 ON CONFLICT(grant_id) DO NOTHING"
+                       [grant-id actor-id token-hash]))]
+    (when-not (= 1 (:row-count result))
+      (throw (new (.-InvalidGrant errors) "A current root session is required")))))
+
+(defn ^:async session-grant-active?
+  "Check current actor and root-session state before grant reuse/introspection."
+  [pool grant-id actor-id]
+  (require-key! grant-id)
+  (require-key! actor-id)
+  (let [row (await (pg/query-one! pool
+                    "SELECT EXISTS(SELECT 1 FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active') AS active"
+                    [grant-id actor-id]))]
+    (true? (:active row))))
+
+(defn adapter-factory
+  "Return oidc-provider's constructor with one model-scoped durable adapter.
+   An atomic consume loser throws InvalidGrant, so concurrent code redemption
+   cannot issue a second successful response. Queries never interpolate keys."
+  [pool]
+  (fn [model]
+    (require-key! model)
+    #js {:upsert
+         (fn ^:async upsert-record [id payload expires-in]
+           (require-key! id)
+           (require-lifetime! expires-in)
+           (when-not (and (object? payload)
+                          (not (.isArray js/Array payload)))
+             (throw (ex-info "Invalid OIDC store payload" {})))
+           (await (pg/query! pool
+                    "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES($1,$2,$3::jsonb,clock_timestamp()+$4*interval '1 second') ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=EXCLUDED.expires_at"
+                    [model id (js/JSON.stringify payload) expires-in])))
+         :find
+         (fn ^:async find-record [id]
+           (require-key! id)
+           (decode-record
+             (await (pg/query-one! pool
+                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND id=$2 AND expires_at>clock_timestamp()"
+                      [model id]))))
+         :findByUserCode
+         (fn ^:async find-user-code [code]
+           (require-key! code)
+           (decode-record
+             (await (pg/query-one! pool
+                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'userCode'=$2 AND expires_at>clock_timestamp()"
+                      [model code]))))
+         :findByUid
+         (fn ^:async find-uid [uid]
+           (require-key! uid)
+           (decode-record
+             (await (pg/query-one! pool
+                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'uid'=$2 AND expires_at>clock_timestamp()"
+                      [model uid]))))
+         :destroy
+         (fn ^:async destroy-record [id]
+           (require-key! id)
+           (await (pg/query! pool "DELETE FROM axxium_oidc_records WHERE model=$1 AND id=$2" [model id])))
+         :revokeByGrantId
+         (fn ^:async revoke-grant [grant-id]
+           (require-key! grant-id)
+           (await (pg/query! pool "DELETE FROM axxium_oidc_records WHERE payload->>'grantId'=$1" [grant-id])))
+         :consume
+         (fn ^:async consume-record [id]
+           (require-key! id)
+           (let [result (await (pg/query! pool
+                                "UPDATE axxium_oidc_records SET consumed_at=floor(extract(epoch from clock_timestamp())) WHERE model=$1 AND id=$2 AND consumed_at IS NULL AND expires_at>clock_timestamp()"
+                                [model id]))]
+             (when-not (= 1 (:row-count result))
+               (throw (new (.-InvalidGrant errors) "Grant expired, missing or already consumed")))))}))

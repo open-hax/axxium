@@ -5,6 +5,7 @@
             [axxium.db :as db]
             [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
+            [axxium.infra.oidc :as oidc]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
             [axxium.routes.agents :as agent-routes]
@@ -54,9 +55,10 @@
   (println "Starting Axxium identity kernel...")
   (-> (db/init-schema!)
       (.then
-        (fn [_]
+        (fn ^:async schema-ready [_]
           (println "Database schema initialized")
           (let [app (create-app)]
+            (await (oidc/enable! app))
             (http/register-portal-origin!
              app (cfg/get-in-config [:axxium/public-base-url]))
             (register-routes! app)

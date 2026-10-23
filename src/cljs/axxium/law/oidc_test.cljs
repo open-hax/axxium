@@ -1,0 +1,46 @@
+(ns axxium.law.oidc-test
+  "Authority config refuses ambiguous client registration and weak secrets."
+  (:require [axxium.law.oidc :as law]
+            [axxium.extern.oidc-provider :as provider]
+            [cljs.test :refer [deftest is]]))
+
+(def config
+  "Synthetic configuration without real key material."
+  {:issuer "https://identity.example.test"
+   :clients [{:id "knoxx-stealth" :secret (apply str (repeat 32 "x"))
+              :redirect-uris ["https://knoxx.example.test/callback"]}]
+   :cookie-keys [(apply str (repeat 32 "k"))] :jwks {}})
+
+(deftest closed-unique-client-registration
+  (is (= config (law/require-config! config)))
+  (doseq [candidate [(assoc config :clients [])
+                     (update config :clients #(conj % (first %)))
+                     (update config :clients #(conj % (assoc (first %) :id "another-client")))
+                     (assoc-in config [:clients 0 :secret] "short")
+                     (assoc config :dynamic-registration true)]]
+    (is (thrown? cljs.core/ExceptionInfo (law/require-config! candidate)))))
+
+(deftest unqualified-urls-and-absent-private-keys-refuse
+  (doseq [candidate [(assoc config :issuer "http://identity.example.test")
+                     (assoc config :issuer "https://user:pass@identity.example.test")
+                     (assoc config :issuer "https://identity.example.test#fragment")
+                     (assoc-in config [:clients 0 :redirect-uris] ["http://knoxx.example.test/callback"])
+                     config]]
+    (is (thrown? cljs.core/ExceptionInfo (provider/create-provider! nil candidate identity identity)))))
+
+(deftest interaction-consent-is-principal-and-scope-bound
+  (let [context {:expected-uid "interaction" :actual-uid "interaction" :actor-id "a"
+                 :session-actor-id "a" :prompt "consent" :decision "approve"
+                 :scopes ["openid" "profile"] :claims ["name"]}]
+    (is (= {:decision :consent} (law/interaction-admission context)))
+    (doseq [[changes status] [[{:actual-uid "other"} 400]
+                              [{:actor-id nil} 401]
+                              [{:session-actor-id "b"} 409]
+                              [{:scopes ["openid" "admin"]} 403]
+                              [{:scopes ["profile"]} 403]
+                              [{:claims ["password_hash"]} 403]
+                              [{:decision "yes"} 400]]]
+      (is (= {:decision :refuse :status status}
+             (law/interaction-admission (merge context changes)))))
+    (is (= {:decision :login} (law/interaction-admission (assoc context :prompt "login"))))
+    (is (= {:decision :deny} (law/interaction-admission (assoc context :decision "deny"))))))

@@ -1,0 +1,56 @@
+(ns axxium.law.oidc
+  "Registered browser-client and private signing configuration contracts."
+  (:require [malli.core :as m]))
+
+(def registry
+  "Named input contracts; private keys and client secrets stay in server config."
+  {::id [:string {:min 1 :max 128}]
+   ::secret [:string {:min 32 :max 512}]
+   ::uri [:string {:min 1 :max 2048}]
+   ::client [:map {:closed true}
+             [:id [:ref ::id]]
+             [:secret [:ref ::secret]]
+             [:redirect-uris [:vector {:min 1 :max 16} [:ref ::uri]]]]
+   ::config [:map {:closed true}
+             [:issuer [:ref ::uri]]
+             [:clients [:vector {:min 1 :max 64} [:ref ::client]]]
+             [:cookie-keys [:vector {:min 1 :max 3} [:ref ::secret]]]
+             [:jwks :map]
+             [:allow-loopback? {:optional true} :boolean]]})
+
+(defn require-config!
+  "Validate closed config and unique client IDs before any provider is created.
+   URL syntax and key material validation are owned by the crypto/URL adapter.
+   Error data intentionally excludes private config values."
+  [config]
+  (when-not (and (m/validate [:ref ::config] config
+                            {:registry (merge (m/default-schemas) registry)})
+                 (= (count (:clients config)) (count (set (map :id (:clients config)))))
+                 (= (count (:clients config)) (count (set (map :secret (:clients config))))))
+    (throw (ex-info "Invalid OIDC authority configuration" {})))
+  config)
+
+(defn interaction-admission
+  "Admit only a current principal's exact interaction and bounded profile scope.
+   Context contains decoded scalars, never request objects or provider handles."
+  [{:keys [expected-uid actual-uid actor-id session-actor-id prompt decision scopes claims]}]
+  (cond
+    (or (not (and (string? expected-uid) (re-matches #"[A-Za-z0-9_-]{1,128}" expected-uid)))
+        (not= expected-uid actual-uid))
+    {:decision :refuse :status 400}
+
+    (not (and (string? actor-id) (seq actor-id)))
+    {:decision :refuse :status 401}
+
+    (= "deny" decision) {:decision :deny}
+    (not= "approve" decision) {:decision :refuse :status 400}
+    (= "login" prompt) {:decision :login}
+    (or (not= "consent" prompt) (not= actor-id session-actor-id))
+    {:decision :refuse :status 409}
+
+    (not (and (vector? scopes) (some #{"openid"} scopes)
+              (every? #{"openid" "profile"} scopes)
+              (vector? claims) (every? #{"sub" "name"} claims)))
+    {:decision :refuse :status 403}
+
+    :else {:decision :consent}))
