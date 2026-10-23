@@ -1,9 +1,9 @@
 (ns axxium.extern.relay
   "TLS/JOSE adapter for machine leases signed by the persistent OIDC key."
-  (:require [axxium.law.oidc :as oidc]
-            [axxium.law.relay :as law]
-            ["jose" :as jose]
-            ["node:crypto" :as crypto]))
+  (:require ["jose" :as jose]
+            ["node:crypto" :as crypto]
+            [axxium.law.oidc :as oidc]
+            [axxium.law.relay :as law]))
 
 (defn- digest [value]
   (.digest (.update (.createHash crypto "sha256") value) "hex"))
@@ -28,8 +28,13 @@
   [app startup load-current! lookup-actor!]
   (require-audiences! startup)
   (let [jwk (first (get-in startup [:jwks :keys]))
-        key (await (jose/importJWK (clj->js jwk) "RS256"))]
-    (.post app law/endpoint #js {:bodyLimit 2048}
+        signing-key (await (jose/importJWK (clj->js jwk) "RS256"))]
+    (.post app law/endpoint #js {:bodyLimit 2048
+                                  :errorHandler (fn [_error _request reply]
+                                                  ;; Fastify parser errors occur before the handler. Do not
+                                                  ;; log or serialize the parser error or submitted input.
+                                                  (.header reply "Cache-Control" "no-store")
+                                                  (.send (.code reply 403) #js {:error "Relay authorization refused"}))}
       (fn ^:async issue [request reply]
         (.header reply "Cache-Control" "no-store")
         (try
@@ -49,7 +54,7 @@
                                     (digest (pr-str (dissoc grant :secret))))
                   jwt (await (-> (jose/SignJWT. (clj->js claims))
                                  (.setProtectedHeader #js {:alg "RS256" :typ "axxium-relay+jwt" :kid (:kid jwk)})
-                                 (.sign key)))]
+                                 (.sign signing-key)))]
               (.send reply #js {:lease jwt :expires_at (:exp claims)})))
           (catch :default _
             ;; Do not surface config/parser/DB/JOSE errors or submitted credentials.

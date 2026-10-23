@@ -19,7 +19,8 @@ these fields (the following values are synthetic examples, never live identity):
   "broker-audience": "https://broker.example",
   "expires-at": 1792800000,
   "enabled": false,
-  "allowed-models": ["example-model"]
+  "allowed-models": ["example-model"],
+  "allowed-tenants": ["synthetic-broker-local-tenant"]
 }
 ```
 
@@ -39,12 +40,21 @@ exact model names, each 1–128 ASCII characters from letters, digits, `.`, `_`,
 `/`, and `-`, starting with an alphanumeric character. Their total length must be
 at most 4096 characters. Regexes, wildcards and prefix matching are unsupported.
 
+`allowed-tenants` is required: 1–64 unique, nonempty exact broker-local tenant IDs
+(up to 256 characters each). Missing or empty tenant scope refuses configuration;
+there is no default-any-tenant interpretation. These IDs apply only within the
+exact `broker-audience`. The central issuer/subject is portable between brokers;
+local tenant IDs and memberships are not. A verified identity on another tenant
+cannot use this grant.
+
 `POST /api/federation/relay-lease` accepts only a JSON object containing `node-id`
 and `secret`. It requires HTTPS as reported by Fastify's configured trusted proxy
 boundary. The ingress must preserve that boundary; do not trust client-supplied
 forwarding headers from arbitrary Internet peers. Secrets belong in the request
 body, never URLs. Responses and refusals use `Cache-Control: no-store`; errors
-are generic and contain no credentials or configuration details.
+are generic and contain no credentials or configuration details. A route-scoped
+error handler also covers malformed and oversized JSON before issuance; it never
+logs or serializes parser errors or submitted credential text.
 
 Every issuance opens and rereads the operator's private file, validates its mode,
 size and closed schema, compares non-grant configuration to startup, compares
@@ -56,15 +66,23 @@ issuance until authority restart; grant-only edits take effect on the next call.
 
 Leases use the existing RS256 key and `typ=axxium-relay+jwt`, fixed
 `scope=proxx:relay`, exact issuer/audience, configured owner and node, unique
-`jti`, integer `iat`/`exp`, exact `allowed_models`, and a digest of the non-secret
+`jti`, integer `iat`/`exp`, exact `allowed_models` and `allowed_tenants`, and a digest of the non-secret
 grant as `grant_revision`. Lifetime is at most 25 seconds and ends no later than
 grant expiry. Public verification uses existing `/oidc/jwks`.
 
 To revoke issuance, remove or disable the entry, rotate its secret, expire it,
-or disable the actor. Write the complete replacement privately and atomically;
+or disable the actor. Mount a dedicated private configuration **directory**, not a single-file bind
+mount: a single-file bind pins its old inode and misses atomic replacements.
+The Services owner supplies and validates that mount; this source does not prove it.
+Write the complete replacement privately and atomically;
 malformed or unavailable files refuse requests. Already-issued leases remain
-usable only until their original expiry. The Proxx websocket and pending delivery
-end at that expiry, so grant removal or actor disable has a maximum residual
+usable only until their original expiry. The agent requests a fresh lease about every 10 seconds and sends an explicit
+reauthorization frame over the existing authenticated websocket. Both agent and
+broker verify the fresh signature, identity, node, audience and non-widening scope;
+the broker also atomically consumes its new `jti` before advancing the deadline.
+Healthy long streams remain on one connection. Narrowing cancels unauthorized
+pending/inflight delivery. Failed issuance or renewal never extends a deadline.
+The Proxx websocket and pending delivery end at the last accepted expiry, so grant removal or actor disable has a maximum residual
 capability window of 25 seconds under normally progressing clocks/event loops.
 Leases are bearer credentials: theft can win the first connection race before
 atomic replay consumption. They are neither hardware attestation nor proof of

@@ -16,7 +16,8 @@
    [:broker-audience [:string {:min 1 :max 2048}]]
    [:expires-at pos-int?]
    [:enabled :boolean]
-   [:allowed-models [:vector {:min 1 :max 128} model-schema]]])
+   [:allowed-models [:vector {:min 1 :max 128} model-schema]]
+   [:allowed-tenants [:vector {:min 1 :max 64} [:string {:min 1 :max 256}]]]])
 
 (defn grants-valid?
   "Require unique nodes, distinct node/browser secrets and bounded exact models."
@@ -25,7 +26,8 @@
        (= (count grants) (count (set (map :node-id grants))))
        (let [secrets (concat (map :secret grants) (map :secret clients))]
          (= (count secrets) (count (set secrets))))
-       (every? #(and (= (count (:allowed-models %)) (count (set (:allowed-models %))))
+       (every? #(and (= (count (:allowed-tenants %)) (count (set (:allowed-tenants %))))
+                      (= (count (:allowed-models %)) (count (set (:allowed-models %))))
                       (<= (reduce + (map count (:allowed-models %))) 4096)) grants)))
 
 (defn issuance-admitted?
@@ -42,4 +44,4 @@
   {:iss issuer :sub (:owner-subject grant) :aud (:broker-audience grant)
    :node_id (:node-id grant) :scope "proxx:relay" :jti jti :iat now
    :exp (min (+ now lease-seconds) (:expires-at grant))
-   :allowed_models (:allowed-models grant) :grant_revision revision})
+   :allowed_models (:allowed-models grant) :allowed_tenants (:allowed-tenants grant) :grant_revision revision})
