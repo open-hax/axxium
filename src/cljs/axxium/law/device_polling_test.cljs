@@ -55,3 +55,14 @@
                                  "yoga-knoxx" 1001)]
       (is (= :invalid-grant (:error result)))
       (is (not (contains? result :record))))))
+
+(deftest authenticated-retries-have-a-finite-budget
+  (let [last-record (assoc pending :poll-count 119)
+        admitted (law/admit-poll last-record "yoga-knoxx" 1000)]
+    (is (= 120 (get-in admitted [:record :poll-count])))
+    (is (= :invalid-grant (:error (law/admit-poll (:record admitted) "yoga-knoxx" 6000))))
+    (is (nil? (:record (law/admit-poll (:record admitted) "other-client" 1001)))))
+  (let [rapid (iterate #(-> (law/admit-poll % "yoga-knoxx" 1001) :record)
+                       (assoc pending :last-poll-ms 1000 :poll-count 0))]
+    (is (= 120 (:poll-count (nth rapid 120))))
+    (is (nil? (nth rapid 121)))))

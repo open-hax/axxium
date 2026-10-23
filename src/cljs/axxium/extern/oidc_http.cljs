@@ -120,11 +120,29 @@
         (set! (.-proxy provider) true)
         (.addHook app "onRequest"
           (fn ^:async oidc-dispatch [request reply]
-            (let [url (.. request -raw -url)]
+            (let [url (.. request -raw -url)
+                  path (first (str/split url #"\?" 2))
+                  verification? (or (= path "/oidc/device")
+                                    (and (str/starts-with? path "/oidc/device/")
+                                         (not= path "/oidc/device/auth")))]
               (when (str/starts-with? url "/oidc/")
                 (cond
                   (and secure? (not= "https" (.-protocol request)))
                   (fail! reply 503)
+
+                  verification?
+                  ;; These browser routes use the engine's session-bound XSRF
+                  ;; forms, plus Axxium root-session and exact Origin admission.
+                  ;; Device authorization and token polling are machine traffic.
+                  (cond
+                    (and (not= "GET" (.-method request))
+                         (not= origin (.. request -headers -origin)))
+                    (fail! reply 403)
+
+                    (nil? (await (current-root request session-cookie-name resolve-session!)))
+                    (fail! reply 401)
+
+                    :else (await (dispatch-engine! callback issuer request reply)))
 
                   (not (str/starts-with? url "/oidc/interaction/"))
                   (await (dispatch-engine! callback issuer request reply)))))))

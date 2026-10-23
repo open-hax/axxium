@@ -2,11 +2,15 @@
   "PostgreSQL adapter for oidc-provider's opaque protocol records.
    Does not accept a product session or infer an actor from an email."
   (:require [axxium.extern.pg :as pg]
+            [axxium.law.device-polling :as polling]
             ["oidc-provider" :refer [errors]]))
 
 (def schema-sql
   "Private protocol store with expiry and lookup indexes; additive schema only."
   ["CREATE TABLE IF NOT EXISTS axxium_oidc_records (model text NOT NULL, id text NOT NULL, payload jsonb NOT NULL, expires_at timestamptz NOT NULL, consumed_at bigint, PRIMARY KEY (model,id))"
+   "ALTER TABLE axxium_oidc_records ADD COLUMN IF NOT EXISTS poll_last_ms bigint"
+   "ALTER TABLE axxium_oidc_records ADD COLUMN IF NOT EXISTS poll_interval integer NOT NULL DEFAULT 5"
+   "ALTER TABLE axxium_oidc_records ADD COLUMN IF NOT EXISTS poll_count integer NOT NULL DEFAULT 0"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_grant ON axxium_oidc_records ((payload->>'grantId'))"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_user_code ON axxium_oidc_records (model,(payload->>'userCode'))"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_uid ON axxium_oidc_records (model,(payload->>'uid'))"
@@ -68,30 +72,76 @@
                     [grant-id actor-id]))]
     (true? (:active row))))
 
+(defn- polling-error
+  "Map portable refusal names to the engine's public OAuth error classes."
+  [error]
+  (let [error-type (case error
+                     :slow-down (.-SlowDown errors)
+                     :expired-token (.-ExpiredToken errors)
+                     :invalid-request (.-InvalidRequest errors)
+                     (.-InvalidGrant errors))]
+    (new error-type)))
+
+(defn- ^:async find-polled-device!
+  "Admit only the engine-authenticated client under one durable row lock.
+   Return refusals after COMMIT so slow_down backoff survives the error response.
+   Expired device rows are read here so RFC8628 returns expired_token; all other
+   model lookups retain the ordinary expiry filter. No opaque code is decoded."
+  [pool id authenticated-client-id]
+  (let [result
+        (await (pg/with-transaction! pool
+                 (fn ^:async locked-poll [client]
+                   (let [row (await (pg/query-one! client
+                                      "SELECT payload,consumed_at,poll_last_ms,poll_interval,poll_count,floor(extract(epoch from expires_at)*1000) AS expiry_ms,floor(extract(epoch from clock_timestamp())*1000) AS now_ms FROM axxium_oidc_records WHERE model='DeviceCode' AND id=$1 FOR UPDATE"
+                                      [id]))
+                         record (when row
+                                  {:client-id (get-in row [:payload :clientId])
+                                   :expires-at-ms (js/Number (:expiry_ms row))
+                                   :last-poll-ms (when (:poll_last_ms row) (js/Number (:poll_last_ms row)))
+                                   :interval-seconds (:poll_interval row)
+                                   :poll-count (:poll_count row)
+                                   :consumed? (some? (:consumed_at row))})
+                         admission (polling/admit-poll record authenticated-client-id
+                                     (if row (js/Number (:now_ms row)) (.now js/Date)))]
+                     (when-let [updated (:record admission)]
+                       (await (pg/query! client
+                                "UPDATE axxium_oidc_records SET poll_last_ms=$2,poll_interval=$3,poll_count=$4 WHERE model='DeviceCode' AND id=$1"
+                                [id (:last-poll-ms updated) (:interval-seconds updated) (:poll-count updated)])))
+                     {:admission admission :row row}))))]
+    (if (= :continue (get-in result [:admission :decision]))
+      (decode-record (:row result))
+      (throw (polling-error (get-in result [:admission :error]))))))
+
 (defn adapter-factory
   "Return oidc-provider's constructor with one model-scoped durable adapter.
    An atomic consume loser throws InvalidGrant, so concurrent code redemption
    cannot issue a second successful response. Queries never interpolate keys."
-  [pool]
+  ([pool] (adapter-factory pool (constantly nil)))
+  ([pool polling-context!]
   (fn [model]
     (require-key! model)
     #js {:upsert
          (fn ^:async upsert-record [id payload expires-in]
            (require-key! id)
            (require-lifetime! expires-in)
+           (when (and (= model "DeviceCode") (> expires-in 600))
+             (throw (ex-info "Device authorization lifetime exceeds ten minutes" {})))
            (when-not (and (object? payload)
                           (not (.isArray js/Array payload)))
              (throw (ex-info "Invalid OIDC store payload" {})))
            (await (pg/query! pool
-                    "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES($1,$2,$3::jsonb,clock_timestamp()+$4*interval '1 second') ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=EXCLUDED.expires_at"
+                    "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES($1,$2,$3::jsonb,clock_timestamp()+$4*interval '1 second') ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=CASE WHEN EXCLUDED.model='DeviceCode' THEN LEAST(axxium_oidc_records.expires_at,EXCLUDED.expires_at) ELSE EXCLUDED.expires_at END"
                     [model id (js/JSON.stringify payload) expires-in])))
          :find
          (fn ^:async find-record [id]
            (require-key! id)
-           (decode-record
-             (await (pg/query-one! pool
-                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND id=$2 AND expires_at>clock_timestamp()"
-                      [model id]))))
+           (let [{:keys [poll? authenticated-client-id]} (polling-context!)]
+             (if (and (= model "DeviceCode") poll?)
+               (await (find-polled-device! pool id authenticated-client-id))
+               (decode-record
+                 (await (pg/query-one! pool
+                          "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND id=$2 AND expires_at>clock_timestamp()"
+                          [model id]))))))
          :findByUserCode
          (fn ^:async find-user-code [code]
            (require-key! code)
@@ -121,4 +171,4 @@
                                 "UPDATE axxium_oidc_records SET consumed_at=floor(extract(epoch from clock_timestamp())) WHERE model=$1 AND id=$2 AND consumed_at IS NULL AND expires_at>clock_timestamp()"
                                 [model id]))]
              (when-not (= 1 (:row-count result))
-               (throw (new (.-InvalidGrant errors) "Grant expired, missing or already consumed")))))}))
+               (throw (new (.-InvalidGrant errors) "Grant expired, missing or already consumed")))))})))
