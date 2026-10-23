@@ -42,3 +42,72 @@
     (-> (persistence-boundary*)
         (.catch (fn [error] (is false (str "Persistence fixture rejected: " (.-message error)))))
         (.finally done))))
+
+(defn- ^:async durable-polling-boundary* []
+  (let [context (atom {:poll? true :authenticated-client-id "registered-a"})
+        row (atom {:payload {:clientId "registered-a" :kind "DeviceCode"}
+                   :consumed_at nil :poll_last_ms nil :poll_interval 5 :poll_count 0
+                   :expiry_ms "600000" :now_ms "1000"})
+        queries (atom [])
+        releases (atom 0)
+        query (fn [sql params]
+                (swap! queries conj sql)
+                (js/Promise.resolve
+                  (cond
+                    (.startsWith sql "SELECT")
+                    #js {:rowCount (if @row 1 0) :rows (clj->js (if @row [@row] []))}
+                    (.startsWith sql "UPDATE axxium_oidc_records SET poll_last_ms")
+                    (do (swap! row assoc :poll_last_ms (aget params 1)
+                               :poll_interval (aget params 2) :poll_count (aget params 3))
+                        #js {:rowCount 1 :rows #js []})
+                    :else #js {:rowCount 0 :rows #js []})))
+        client #js {:query query :release (fn [_discard] (swap! releases inc))}
+        pool #js {:query query :connect (fn [] (js/Promise.resolve client))}
+        adapter ((store/adapter-factory pool #(deref context)) "DeviceCode")
+        find-error (fn ^:async find-error* []
+                     (try (await (.find adapter "opaque-device")) nil
+                          (catch :default error (.-error error))))]
+    (is (= "registered-a" (.-clientId (await (.find adapter "opaque-device")))))
+    (is (= 1 (:poll_count @row)))
+    (is (some #(.includes % "FOR UPDATE") @queries))
+    (is (= "COMMIT" (last @queries)))
+    (is (= "slow_down" (await (find-error))))
+    (is (= 10 (:poll_interval @row)))
+    (is (= 2 (:poll_count @row)))
+    (is (= "COMMIT" (last @queries)) "Backoff is committed before throwing the OAuth error")
+    (is (= "slow_down" (await (find-error))))
+    (is (= 15 (:poll_interval @row)))
+    (let [before @row]
+      (reset! context {:poll? true :authenticated-client-id "wrong-client"})
+      (is (= "invalid_grant" (await (find-error))))
+      (is (= before @row))
+      (reset! context {:poll? true :authenticated-client-id nil})
+      (is (= "invalid_grant" (await (find-error))))
+      (is (= before @row)))
+    (reset! context {:poll? true :authenticated-client-id "registered-a"})
+    (swap! row assoc :now_ms "16000")
+    (is (some? (await (.find adapter "opaque-device"))))
+    (is (= 4 (:poll_count @row)))
+    (swap! row assoc :now_ms "600000")
+    (is (= "expired_token" (await (find-error))))
+    (is (= 4 (:poll_count @row)))
+    (swap! row assoc :now_ms "20000" :consumed_at 1)
+    (is (= "invalid_grant" (await (find-error))))
+    (swap! row assoc :consumed_at nil :poll_count 120)
+    (is (= "invalid_grant" (await (find-error))))
+    (reset! row nil)
+    (is (= "invalid_grant" (await (find-error))))
+    (reset! context nil)
+    (let [before @releases]
+      (is (nil? (await (.find adapter "browser-device"))))
+      (is (= before @releases) "Browser verification does not acquire the polling transaction")
+      (is (.includes (last @queries) "expires_at>clock_timestamp()")))
+    (is (= "Device authorization lifetime exceeds ten minutes"
+           (try (await (.upsert adapter "too-long" #js {} 601)) nil
+                (catch :default error (.-message error)))))))
+
+(deftest durable-polling-boundary
+  (async done
+    (-> (durable-polling-boundary*)
+        (.catch (fn [error] (is false (str "Device polling fixture rejected: " (.-message error)))))
+        (.finally done))))

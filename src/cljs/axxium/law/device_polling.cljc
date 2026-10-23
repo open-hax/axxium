@@ -12,7 +12,8 @@
              [:expires-at-ms [:ref ::timestamp]]
              [:last-poll-ms [:maybe [:ref ::timestamp]]]
              [:interval-seconds [:int {:min 5 :max 86400}]]
-             [:consumed? :boolean]]})
+             [:consumed? :boolean]
+             [:poll-count {:optional true} [:int {:min 0 :max 120}]]]})
 
 (defn- valid?
   "Validate named polling evidence without installing a mutable global registry."
@@ -33,7 +34,8 @@
     (or (not (valid? ::record record))
         (not (valid? ::client-id authenticated-client-id))
         (not= authenticated-client-id (:client-id record))
-        (:consumed? record))
+        (:consumed? record)
+        (>= (get record :poll-count 0) 120))
     {:decision :refuse :error :invalid-grant}
 
     (>= now-ms (:expires-at-ms record))
@@ -48,7 +50,9 @@
       {:decision :refuse :error :slow-down
        :record (-> record
                    (assoc :last-poll-ms (max now-ms (:last-poll-ms record)))
-                   (update :interval-seconds + 5))})
+                   (update :interval-seconds + 5)
+                   (update :poll-count (fnil inc 0)))})
 
     :else
-    {:decision :continue :record (assoc record :last-poll-ms now-ms)}))
+    {:decision :continue :record (-> record (assoc :last-poll-ms now-ms)
+                                      (update :poll-count (fnil inc 0)))}))

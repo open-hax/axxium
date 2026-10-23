@@ -16,7 +16,8 @@
              [:clients [:vector {:min 1 :max 64} [:ref ::client]]]
              [:cookie-keys [:vector {:min 1 :max 3} [:ref ::secret]]]
              [:jwks :map]
-             [:allow-loopback? {:optional true} :boolean]]})
+             [:allow-loopback? {:optional true} :boolean]
+             [:device-flow-enabled? {:optional true} :boolean]]})
 
 (defn require-config!
   "Validate closed config and unique client IDs before any provider is created.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:net';
 import Fastify from 'fastify';
 import cookiePlugin from '@fastify/cookie';
+import { runDeviceFixture } from './oidc-device.fixture.mjs';
 
 const boundedFetch = (url, options = {}) => fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
 
@@ -21,7 +22,8 @@ export async function runHttpFixture(pool, installHttp, root) {
   await pool.query("INSERT INTO sessions VALUES($1,$2,clock_timestamp()+interval '1 hour')", [actor.id, rootDigest]);
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const client = { id: 'mounted-knoxx-fixture', secret: randomBytes(32).toString('hex'), 'redirect-uris': [`${origin}/callback`] };
-  const config = { issuer: `${origin}/oidc`, clients: [client], 'allow-loopback?': true,
+  const other = { id: 'mounted-proxx-fixture', secret: randomBytes(32).toString('hex'), 'redirect-uris': [`${origin}/other-callback`] };
+  const config = { issuer: `${origin}/oidc`, clients: [client, other], 'allow-loopback?': true, 'device-flow-enabled?': true,
     'cookie-keys': [randomBytes(32).toString('hex')],
     jwks: { keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'http-fixture', alg: 'RS256', use: 'sig' }] } };
   const configPath = join(root, 'oidc-http-fixture.json');
@@ -31,7 +33,7 @@ export async function runHttpFixture(pool, installHttp, root) {
   app.post('/fixture/plainform', async () => ({ untouched: true }));
   try {
     await installHttp(app, pool, { 'config-file': configPath, 'public-base-url': origin, 'session-cookie-name': 'axxium_session' },
-      async token => token === rootToken ? actor : null,
+      async token => token === rootToken && (await pool.query('SELECT 1 FROM sessions WHERE token_hash=$1 AND expires_at>clock_timestamp()', [rootDigest])).rowCount === 1 ? actor : null,
       async subject => subject === actor.id ? actor : null);
     await app.listen({ port, host: '127.0.0.1' });
     const unrelated = await boundedFetch(`${origin}/fixture/plainform`, { method: 'POST',
@@ -97,6 +99,7 @@ export async function runHttpFixture(pool, installHttp, root) {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, token: body.access_token }) })).json()).active;
     assert.equal(await introspect(), true);
+    await runDeviceFixture({ pool, discovery, origin, clients: [client, other], actor, rootToken, jar });
     await pool.query('DELETE FROM sessions WHERE token_hash=$1', [rootDigest]);
     assert.equal(await introspect(), false);
     console.log('PASS mounted Fastify authority: discovery, root-session consent, Origin/CSRF refusal, token exchange and parent-session revocation');
