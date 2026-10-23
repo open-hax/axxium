@@ -4,7 +4,7 @@
             [axxium.law.oidc :as law]
             [clojure.string :as str]
             ["node:async_hooks" :refer [AsyncLocalStorage]]
-            ["oidc-provider" :default Provider :refer [interactionPolicy]]))
+            ["oidc-provider" :default Provider :refer [errors interactionPolicy]]))
 
 (defn- require-uri!
   "Accept exact HTTPS URLs; explicit loopback fixtures may use local HTTP."
@@ -46,6 +46,13 @@
                (nil? (some-> ctx (aget "oidc") (aget "result") (aget "consent")))))))
     policy))
 
+(defn- bounded-ttl
+  "Use the pure parent-bound issuance contract after findAccount/issueRefreshToken."
+  [maximum-seconds]
+  (fn [ctx _token _client]
+    (or (law/bounded-token-lifetime (aget ctx "axxiumRootExpiry") (.now js/Date) maximum-seconds)
+        (throw (new (.-InvalidGrant errors) "Root session expired")))))
+
 (defn create-provider!
   "Construct a code+PKCE authority with opt-in durable device approval.
    The HTTP mount owns browser root-session/Origin checks; polling requires only
@@ -75,13 +82,14 @@
                                           (= "urn:ietf:params:oauth:grant-type:device_code"
                                              (some-> ctx (aget "oidc") (aget "params") (aget "grant_type"))))
                               :authenticated-client-id (some-> ctx (aget "oidc") (aget "client") (aget "clientId"))})))
-              :clients (clj->js (mapv (fn [{:keys [id secret redirect-uris]}]
+              :clients (clj->js (mapv (fn [{:keys [id secret redirect-uris refresh-enabled? device-enabled?]}]
                                        {:client_id id :client_secret secret
                                         :redirect_uris redirect-uris
                                         :response_types ["code"]
                                         :grant_types (cond-> ["authorization_code"]
-                                                       (:device-flow-enabled? config)
-                                                       (conj "urn:ietf:params:oauth:grant-type:device_code"))
+                                                       (and (:device-flow-enabled? config) (not= false device-enabled?))
+                                                       (conj "urn:ietf:params:oauth:grant-type:device_code")
+                                                       refresh-enabled? (conj "refresh_token"))
                                         :token_endpoint_auth_method "client_secret_post"}) clients))
               :jwks (clj->js jwks)
               :cookies #js {:keys (clj->js cookie-keys)}
@@ -117,15 +125,23 @@
                              :revocation #js {:enabled true
                                               :allowedPolicy (fn [_ctx client token]
                                                                (= (.-clientId token) (.-clientId client)))}}
+              :issueRefreshToken
+              (fn ^:async bounded-refresh [ctx client source]
+                (if (.grantTypeAllowed client "refresh_token")
+                  (do (aset ctx "axxiumRootExpiry"
+                        (await (store/session-grant-expiry! pool (.-grantId source) (.-accountId source))))
+                      true)
+                  false))
+              :rotateRefreshToken true
               :scopes #js ["openid" "profile"]
               :claims #js {:openid #js ["sub"] :profile #js ["name"]}
               :renderError (fn [ctx _out _error]
                              (set! (.-type ctx) "text/plain")
                              (set! (.-body ctx) "Shared login request could not be completed"))
               :pkce #js {:required (fn [_ctx _client] true)}
-              :ttl #js {:AccessToken 300 :AuthorizationCode 60 :Grant 86400
-                        :IdToken 300 :Interaction 300 :Session 86400
-                        :RefreshToken 300 :DeviceCode 600 :ClientCredentials 300
+              :ttl #js {:AccessToken (bounded-ttl 300) :AuthorizationCode 60 :Grant 86400
+                        :IdToken (bounded-ttl 300) :Interaction 300 :Session 86400
+                        :RefreshToken (bounded-ttl 86400) :DeviceCode 600 :ClientCredentials 300
                         :BackchannelAuthenticationRequest 300}
               :interactions #js {:policy (approval-policy)
                                  :url (fn [_ctx interaction]
@@ -139,14 +155,17 @@
                   (when (and grant-id (await (verify-grant! grant-id (.-accountId session))))
                     (await (.find (.. oidc -provider -Grant) grant-id)))))
               :findAccount
-              (fn ^:async find-account [_ctx subject token]
-                ;; oidc-provider's findAccount contract requires undefined for
-                ;; refusal; CLJS nil is JavaScript null and becomes server_error.
+              (fn ^:async find-account [ctx subject token]
+                ;; This documented seam runs before refresh rotation or issuance.
+                ;; Refusal must be undefined, rather than CLJS null.
                 (or (when-let [actor (await (lookup-actor! subject))]
                       (when (and (= subject (:id actor)) (= "active" (:status actor))
                                  (or (nil? token)
                                      (when-let [grant-id (.-grantId token)]
                                        (await (verify-grant! grant-id subject)))))
+                        (when token
+                          (aset ctx "axxiumRootExpiry"
+                            (await (store/session-grant-expiry! pool (.-grantId token) subject))))
                         #js {:accountId subject
                              :claims (fn ^:async account-claims [_use _scope _claims _rejected]
                                        #js {:sub subject :name (:display_name actor)})}))
@@ -157,7 +176,18 @@
         (fn [ctx next]
           (.run context ctx
             (fn ^:async protocol-context []
-              (await (next))
+              (try
+                (await (next))
+                (finally
+                  (when-let [rotated (some-> ctx (aget "oidc") (aget "entities") (aget "RotatedRefreshToken"))]
+                    (when (>= (.-status ctx) 400)
+                      (await (store/revoke-family! pool (.-grantId rotated)))))))
+              (when (and (= "introspection" (.. ctx -oidc -route))
+                         (true? (some-> ctx (aget "body") (aget "active"))))
+                (let [token (some-> ctx (aget "oidc") (aget "entities") (aget "AccessToken"))]
+                  (when token
+                    (aset (.-body ctx) "root_session_expires_at"
+                      (js/Math.floor (/ (await (store/session-grant-expiry! pool (.-grantId token) (.-accountId token))) 1000))))))
               (when (and (= "device_authorization" (.. ctx -oidc -route))
                          (= 200 (.-status ctx))
                          (some? (some-> ctx (aget "body") (aget "device_code"))))

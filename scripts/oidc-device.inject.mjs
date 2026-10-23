@@ -23,6 +23,7 @@ const pool = {
       rowCount = 0;
     if (/^(CREATE|ALTER|BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows, rowCount };
     if (sql.startsWith('INSERT INTO axxium_oidc_records')) {
+      if (sql.includes('JOIN axxium_oidc_grant_sessions') && (!rootActive || bindings.get(p[4]) !== p[5] || !records.has(key('Grant', p[4])))) return {rows, rowCount};
       const k = key(p[0], p[1]),
         prior = records.get(k);
       records.set(k, {
@@ -42,6 +43,8 @@ const pool = {
         bindings.set(p[0], p[1]);
         rowCount = 1;
       }
+    } else if (sql.startsWith('SELECT floor(extract(epoch from LEAST')) {
+      if (rootActive && bindings.get(p[0]) === p[1]) { rows = [{expires_ms: Date.now() + 3600000}]; rowCount = 1; }
     } else if (sql.startsWith('SELECT EXISTS')) {
       rows = [{ active: rootActive && bindings.get(p[0]) === p[1] }];
       rowCount = 1;
@@ -72,7 +75,7 @@ const pool = {
       }
     } else if (sql.startsWith('DELETE FROM axxium_oidc_records')) {
       for (const [k, r] of records) {
-        if (sql.includes("payload->>'grantId'=$1") ? r.payload.grantId === p[0] : k === key(p[0], p[1])) {
+        if (sql.includes("payload->>'grantId'=$1") ? (r.payload.grantId === p[0] || k === key('Grant', p[0])) : k === key(p[0], p[1])) {
           records.delete(k);
           rowCount++;
         }
@@ -88,6 +91,7 @@ const clients = ['device-smoke', 'other-smoke'].map((id) => ({
   id,
   secret: randomBytes(32).toString('hex'),
   'redirect-uris': [`${origin}/callback`],
+  'refresh-enabled?': true,
 }));
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const root = mkdtempSync(join(tmpdir(), 'axxium-device-inject-'));
@@ -219,6 +223,29 @@ try {
       token: tokens.json().access_token,
     });
   assert.equal((await introspect()).json().active, true);
+  assert.equal(typeof tokens.json().refresh_token, 'string');
+  assert.equal(typeof (await introspect()).json().root_session_expires_at, 'number');
+  const refresh = (token, registered = client) => request(discovery.token_endpoint, {
+    client_id: registered.id, client_secret: registered.secret,
+    grant_type: 'refresh_token', refresh_token: token,
+  });
+  assert.equal((await refresh(tokens.json().refresh_token, clients[1])).statusCode, 400);
+  const rotated = await refresh(tokens.json().refresh_token);
+  assert.equal(rotated.statusCode, 200, rotated.body);
+  assert.notEqual(rotated.json().refresh_token, tokens.json().refresh_token);
+  assert.equal(JSON.parse(Buffer.from(rotated.json().id_token.split('.')[1], 'base64url')).sub, actor.id);
+  actor.status = 'disabled';
+  assert.equal((await refresh(rotated.json().refresh_token)).statusCode, 400, 'findAccount refuses a disabled actor before rotation');
+  actor.status = 'active';
+  rootActive = false;
+  assert.equal((await refresh(rotated.json().refresh_token)).statusCode, 400, 'current parent binding is mandatory before rotation');
+  rootActive = true;
+  const races = await Promise.all([refresh(rotated.json().refresh_token), refresh(rotated.json().refresh_token)]);
+  assert(races.filter(r => r.statusCode === 200).length <= 1);
+  assert(races.some(r => r.statusCode === 400));
+  assert.equal((await refresh(rotated.json().refresh_token)).statusCode, 400, 'one-use replay refuses');
+
+
   const another = async () =>
     (
       await request(discovery.device_authorization_endpoint, {
@@ -246,13 +273,14 @@ try {
   rootActive = false;
   assert.equal((await introspect()).json().active, false);
   assert.equal((await pollAnother(waiting)).json().error, 'invalid_grant');
+  assert.equal((await refresh(tokens.json().refresh_token)).statusCode, 400, 'root logout prevents refresh');
   for (const record of records.values()) {
     const text = JSON.stringify(record.payload);
     assert(!text.includes(rootToken));
     for (const registered of clients) assert(!text.includes(registered.secret));
   }
   console.log(
-    'PASS no-bind mounted RFC8628 (mock SQL): authenticated polling, pending/backoff, root/Origin/CSRF approval, fresh consent, denial/replay, expiry and root revocation. PostgreSQL semantics require test:oidc-store.',
+    'PASS no-bind mounted RFC8628 and root-bound rotating refresh (mock SQL): wrong-client, actor/parent refusal, refresh concurrency/replay, authenticated polling, pending/backoff, root/Origin/CSRF approval, fresh consent, denial/replay, expiry and root revocation. PostgreSQL semantics require test:oidc-store.',
   );
 } finally {
   await app.close();

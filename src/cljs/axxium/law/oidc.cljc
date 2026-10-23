@@ -10,7 +10,9 @@
    ::client [:map {:closed true}
              [:id [:ref ::id]]
              [:secret [:ref ::secret]]
-             [:redirect-uris [:vector {:min 1 :max 16} [:ref ::uri]]]]
+             [:redirect-uris [:vector {:min 1 :max 16} [:ref ::uri]]]
+             [:refresh-enabled? {:optional true} :boolean]
+             [:device-enabled? {:optional true} :boolean]]
    ::config [:map {:closed true}
              [:issuer [:ref ::uri]]
              [:clients [:vector {:min 1 :max 64} [:ref ::client]]]
@@ -55,3 +57,10 @@
     {:decision :refuse :status 403}
 
     :else {:decision :consent}))
+
+(defn bounded-token-lifetime
+  "Pure issuance contract: a token cannot extend the current stored parent deadline."
+  [expires-at-ms now-ms maximum-seconds]
+  (let [seconds (when (number? expires-at-ms)
+                  (long (quot (- expires-at-ms now-ms) 1000)))]
+    (when (and seconds (pos? seconds)) (min maximum-seconds seconds))))

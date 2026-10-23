@@ -39,7 +39,7 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const issuer = `http://127.0.0.1:${server.address().port}`;
-  const clients = ['knoxx-fixture', 'proxx-fixture'].map(id => ({ id, secret: randomBytes(32).toString('hex'), 'redirect-uris': [`${issuer}/callback/${id}`] }));
+  const clients = ['knoxx-fixture', 'proxx-fixture'].map(id => ({ id, secret: randomBytes(32).toString('hex'), 'redirect-uris': [`${issuer}/callback/${id}`], 'refresh-enabled?': true }));
   const config = { issuer, clients, 'allow-loopback?': true, 'cookie-keys': [secret],
     jwks: { keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'synthetic', alg: 'RS256', use: 'sig' }] } };
 
@@ -86,6 +86,27 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
         code: callback.searchParams.get('code'), code_verifier: verifier, redirect_uri: client['redirect-uris'][0] };
       const tokens = await form('/token', request);
       assert.equal(tokens.status, 200, JSON.stringify(tokens.body));
+      assert.equal(typeof tokens.body.refresh_token, 'string');
+      const refreshRequest = {client_id: client.id, client_secret: client.secret,
+        grant_type: 'refresh_token', refresh_token: tokens.body.refresh_token};
+      const otherRefreshClient = clients.find(x => x.id !== client.id);
+      assert.equal((await form('/token', {...refreshRequest, client_id: otherRefreshClient.id,
+        client_secret: otherRefreshClient.secret})).status, 400);
+      const renewed = await form('/token', refreshRequest);
+      assert.equal(renewed.status, 200, JSON.stringify(renewed.body));
+      assert.notEqual(renewed.body.refresh_token, tokens.body.refresh_token);
+      const renewedClaims = JSON.parse(Buffer.from(renewed.body.id_token.split('.')[1], 'base64url'));
+      assert.equal(renewedClaims.sub, 'synthetic-actor');
+      assert.equal(renewedClaims.nonce, nonce);
+      actorActive = false;
+      assert.equal((await form('/token', {...refreshRequest, refresh_token: renewed.body.refresh_token})).status, 400,
+        'refresh pipeline must invoke current findAccount before consuming or issuing');
+      actorActive = true;
+
+      const savedRefresh = await pool.query("SELECT payload,expires_at FROM axxium_oidc_records WHERE model='RefreshToken' AND consumed_at IS NULL AND payload->>'clientId'=$1", [client.id]);
+      assert(savedRefresh.rows.length > 0);
+      const bound = await pool.query("SELECT LEAST(b.expires_at,s.expires_at) AS expiry FROM axxium_oidc_grant_sessions b JOIN sessions s ON s.token_hash=b.token_hash WHERE b.grant_id=$1", [savedRefresh.rows[0].payload.grantId]);
+      assert(savedRefresh.rows[0].expires_at <= bound.rows[0].expiry);
       const claims = JSON.parse(Buffer.from(tokens.body.id_token.split('.')[1], 'base64url'));
       assert.equal(claims.sub, 'synthetic-actor'); assert.equal(claims.aud, client.id); assert.equal(claims.nonce, nonce);
       const statusRequest = { client_id: client.id, client_secret: client.secret, token: tokens.body.access_token };
@@ -99,12 +120,26 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
       actorActive = true;
       await form('/token/revocation', statusRequest);
       assert.equal((await form('/token/introspection', statusRequest)).body.active, false);
+      const rotationRequest = {...refreshRequest, refresh_token: renewed.body.refresh_token};
+      const rotationRace = await Promise.all([form('/token', rotationRequest), form('/token', rotationRequest)]);
+      assert(rotationRace.filter(x => x.status === 200).length <= 1);
+      assert(rotationRace.some(x => x.status === 400));
+      assert.equal((await form('/token', rotationRequest)).status, 400);
       assert.equal((await form('/token', request)).status, 400);
+
       const raceCallback = await browser(auth);
       const raceRequest = { ...request, code: raceCallback.searchParams.get('code') };
       const exchanges = await Promise.all([form('/token', raceRequest), form('/token', raceRequest)]);
-      assert.equal(exchanges.filter(x => x.status === 200).length, 1);
-      assert.equal(exchanges.filter(x => x.status === 400).length, 1);
+      assert(exchanges.filter(x => x.status === 200).length <= 1);
+      assert(exchanges.some(x => x.status === 400));
+      const raceWinner = exchanges.find(x => x.status === 200);
+      if (raceWinner?.body.refresh_token) {
+        const req = {...refreshRequest, refresh_token: raceWinner.body.refresh_token};
+        const rotations = await Promise.all([form('/token', req), form('/token', req)]);
+        assert(rotations.filter(x => x.status === 200).length <= 1);
+        assert(rotations.some(x => x.status === 400));
+        assert.equal((await form('/token', req)).status, 400);
+      }
       // Replay detection may revoke the whole grant, including the first response.
       // It must never permit two successful redemption responses.
     }
@@ -120,14 +155,38 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
       grant_type: 'authorization_code', code: callback.searchParams.get('code'),
       code_verifier: verifier, redirect_uri: rootClient['redirect-uris'][0] });
     assert.equal(fresh.status, 200);
+    const rootRefresh = {client_id: rootClient.id, client_secret: rootClient.secret, grant_type: 'refresh_token', refresh_token: fresh.body.refresh_token};
     const rootStatus = { client_id: rootClient.id, client_secret: rootClient.secret, token: fresh.body.access_token };
+    // A separate engine Grant record must remain present as well as its parent binding.
+    // Restore the byte-identical fixture row only to continue independent refusal cases.
+    const persisted = await pool.query("SELECT id,payload,expires_at FROM axxium_oidc_records WHERE model='RefreshToken' AND id=$1", [fresh.body.refresh_token]);
+    assert.equal(persisted.rows.length, 1);
+    const grantId = persisted.rows[0].payload.grantId;
+    const savedGrant = await pool.query("DELETE FROM axxium_oidc_records WHERE model='Grant' AND id=$1 RETURNING id,payload,expires_at", [grantId]);
+    assert.equal(savedGrant.rows.length, 1);
+    assert.equal((await form('/token', rootRefresh)).status, 400, 'loss of engine grant refuses refresh');
+    await pool.query("INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES('Grant',$1,$2,$3)",
+      [savedGrant.rows[0].id, savedGrant.rows[0].payload, savedGrant.rows[0].expires_at]);
+    const parentRows = await pool.query('SELECT expires_at FROM axxium_oidc_grant_sessions WHERE grant_id=$1', [grantId]);
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET expires_at=clock_timestamp()+interval '30 seconds' WHERE grant_id=$1", [grantId]);
+    const shortened = await form('/token', rootRefresh);
+    assert.equal(shortened.status, 200, JSON.stringify(shortened.body));
+    rootRefresh.refresh_token = shortened.body.refresh_token;
+    const boundedRow = await pool.query("SELECT r.expires_at<=b.expires_at AS bounded FROM axxium_oidc_records r JOIN axxium_oidc_grant_sessions b ON b.grant_id=r.payload->>'grantId' WHERE r.model='RefreshToken' AND r.id=$1", [shortened.body.refresh_token]);
+    assert.equal(boundedRow.rows[0]?.bounded, true, 'rotation uses current shortened parent expiry');
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE grant_id=$1", [grantId]);
+    assert.equal((await form('/token', rootRefresh)).status, 400, 'current stored parent expiry refuses refresh');
+    await pool.query('UPDATE axxium_oidc_grant_sessions SET expires_at=$2 WHERE grant_id=$1', [grantId,parentRows.rows[0].expires_at]);
+
     assert.equal((await form('/token/introspection', rootStatus)).body.active, true);
     await pool.query("UPDATE actors SET status='disabled' WHERE id='synthetic-actor'");
     assert.equal((await form('/token/introspection', rootStatus)).body.active, false);
+    assert.equal((await form('/token', rootRefresh)).status, 400, 'findAccount must refuse a disabled actor during refresh');
     await pool.query("UPDATE actors SET status='active' WHERE id='synthetic-actor'");
     assert.equal((await form('/token/introspection', rootStatus)).body.active, true);
     await pool.query("DELETE FROM sessions WHERE token_hash='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'");
     assert.equal((await form('/token/introspection', rootStatus)).body.active, false);
+    assert.equal((await form('/token', rootRefresh)).status, 400, 'refresh cannot outlive root logout');
     const grants = await pool.query('SELECT grant_id FROM axxium_oidc_grant_sessions');
     for (const row of grants.rows) assert.equal(await sessionGrantActive(pool, row.grant_id, 'synthetic-actor'), false);
     console.log('PASS durable authority: shared synthetic login, PKCE, state/nonce/audience, code replay refusal, own-client introspection, disabled actor refusal and revocation');

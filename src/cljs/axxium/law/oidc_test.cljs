@@ -44,3 +44,9 @@
              (law/interaction-admission (merge context changes)))))
     (is (= {:decision :login} (law/interaction-admission (assoc context :prompt "login"))))
     (is (= {:decision :deny} (law/interaction-admission (assoc context :decision "deny"))))))
+
+(deftest root-bound-token-lifetimes
+  (is (= 300 (law/bounded-token-lifetime 1000000 100000 300)))
+  (is (= 899 (law/bounded-token-lifetime 1000000 100001 86400)))
+  (doseq [bound [nil 100000 99999 100999]]
+    (is (nil? (law/bounded-token-lifetime bound 100000 300)))))

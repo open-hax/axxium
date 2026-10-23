@@ -100,6 +100,9 @@ poll backoff/expiry and root logout. No live account was used by these tests.
 
 Consumers retain product-local authorization and require explicit qualified
 issuer/subject links. No email merging or remote role import is enabled. Browser
-grant lifetime is presently five minutes; refresh and device-initiation product
-UX remain work before final acceptance. Machine federation grants remain separate.
+access and ID tokens remain short-lived. The renewal source work adds opt-in,
+rotating confidential-client refresh bounded by the current root session, plus
+optional product device initiation. Its PostgreSQL refresh qualification is still
+blocked in the worker sandbox by `listen EPERM`; see `docs/renewal-device-source.md`.
+Machine federation grants remain separate.
 Parent retains integration, review and deployment.
