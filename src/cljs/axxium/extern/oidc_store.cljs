@@ -72,6 +72,26 @@
                     [grant-id actor-id]))]
     (true? (:active row))))
 
+(defn ^:async session-grant-expiry!
+  "Read the current stored root bound; a missing/disabled/revoked parent refuses."
+  [pool grant-id actor-id]
+  (require-key! grant-id)
+  (require-key! actor-id)
+  (let [row (await (pg/query-one! pool
+                    "SELECT floor(extract(epoch from LEAST(b.expires_at,s.expires_at))*1000) AS expires_ms FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'"
+                    [grant-id actor-id]))]
+    (when-not row
+      (throw (new (.-InvalidGrant errors) "A current root session is required")))
+    (js/Number (:expires_ms row))))
+
+(defn ^:async revoke-family!
+  "Destroy the engine grant as well as its tokens; never permit rotation after refusal."
+  [pool grant-id]
+  (require-key! grant-id)
+  (await (pg/query! pool
+           "DELETE FROM axxium_oidc_records WHERE (model='Grant' AND id=$1) OR payload->>'grantId'=$1"
+           [grant-id])))
+
 (defn- polling-error
   "Map portable refusal names to the engine's public OAuth error classes."
   [error]
@@ -129,9 +149,16 @@
            (when-not (and (object? payload)
                           (not (.isArray js/Array payload)))
              (throw (ex-info "Invalid OIDC store payload" {})))
-           (await (pg/query! pool
-                    "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES($1,$2,$3::jsonb,clock_timestamp()+$4*interval '1 second') ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=CASE WHEN EXCLUDED.model='DeviceCode' THEN LEAST(axxium_oidc_records.expires_at,EXCLUDED.expires_at) ELSE EXCLUDED.expires_at END"
-                    [model id (js/JSON.stringify payload) expires-in])))
+           (if (contains? #{"RefreshToken" "AccessToken"} model)
+             (let [result (await (pg/query! pool
+                                   "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) SELECT $1,$2,$3::jsonb,LEAST(clock_timestamp()+$4*interval '1 second',b.expires_at,s.expires_at) FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash JOIN axxium_oidc_records g ON g.model='Grant' AND g.id=b.grant_id AND g.expires_at>clock_timestamp() WHERE b.grant_id=$5 AND b.actor_id=$6 AND a.status='active' AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=LEAST(axxium_oidc_records.expires_at,EXCLUDED.expires_at)"
+                                   [model id (js/JSON.stringify payload) expires-in
+                                    (.-grantId payload) (.-accountId payload)]))]
+               (when-not (= 1 (:row-count result))
+                 (throw (new (.-InvalidGrant errors) "Root grant is no longer current"))))
+             (await (pg/query! pool
+                      "INSERT INTO axxium_oidc_records(model,id,payload,expires_at) VALUES($1,$2,$3::jsonb,clock_timestamp()+$4*interval '1 second') ON CONFLICT(model,id) DO UPDATE SET payload=EXCLUDED.payload,expires_at=CASE WHEN EXCLUDED.model='DeviceCode' THEN LEAST(axxium_oidc_records.expires_at,EXCLUDED.expires_at) ELSE EXCLUDED.expires_at END"
+                      [model id (js/JSON.stringify payload) expires-in]))))
          :find
          (fn ^:async find-record [id]
            (require-key! id)

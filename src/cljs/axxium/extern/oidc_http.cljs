@@ -77,6 +77,7 @@
   (.send reply (str "<!doctype html><html><head><meta charset=utf-8><title>Axxium shared login</title></head><body>"
                     "<h1>Continue with your Axxium identity</h1><p>Signed in as " (html-escape actor-label) ".</p>"
                     "<p>Allow sign-in to " (html-escape client-id) "?</p>"
+                    "<p>This sign-in may renew while your current Axxium root session is active, for at most 24 hours. Signing out of Axxium or disabling the actor ends reuse. This does not grant offline access or machine federation permission.</p>"
                     "<form method=post action='/oidc/interaction/" (html-escape uid) "'>"
                     "<input type=hidden name=csrf value='" (html-escape token) "'>"
                     "<button name=decision value=approve>Continue</button>"
