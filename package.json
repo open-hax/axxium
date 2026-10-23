@@ -12,7 +12,9 @@
     "test": "shadow-cljs compile test && node target/test.cjs && node --test scripts/actor-pages.test.mjs scripts/oidc-return.test.mjs",
     "boundary:check": "node scripts/check-js-boundary.mjs --check",
     "test:oidc-store": "shadow-cljs release oidc-store-fixture && node scripts/oidc-store.integration.mjs",
-    "test:oidc-protocol": "shadow-cljs release oidc-store-fixture && node scripts/oidc-device.inject.mjs"
+    "test:oidc-protocol": "shadow-cljs release oidc-store-fixture && node scripts/oidc-device.inject.mjs",
+    "test:relay": "shadow-cljs release oidc-store-fixture && node scripts/relay.integration.mjs",
+    "test:relay-postgres": "shadow-cljs release oidc-store-fixture && node scripts/relay.integration.mjs --postgres"
   },
   "dependencies": {
     "@atproto-labs/simple-store-memory": "^0.2.6",

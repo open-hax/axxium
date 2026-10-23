@@ -3,6 +3,7 @@
   (:require [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.oidc-provider :as engine]
             [axxium.extern.oidc-store :as store]
+            [axxium.extern.relay :as relay]
             [axxium.law.oidc :as law]
             [clojure.string :as str]
             ["node:crypto" :as crypto]
@@ -11,13 +12,19 @@
 (defn- private-config
   "Load only an operator-selected private regular JSON file; never echo values."
   [path]
-  (let [stat (.statSync fs path)]
-    (when-not (and (.isFile stat) (<= (.-size stat) 1048576)
-                   (zero? (bit-and (.-mode stat) 63)))
-      (throw (ex-info "OIDC configuration requires a private regular file" {})))
+  (let [fd (.openSync fs path (bit-or (.. fs -constants -O_RDONLY) (.. fs -constants -O_NOFOLLOW)))]
     (try
-      (js->clj (js/JSON.parse (.readFileSync fs path "utf8")) :keywordize-keys true)
-      (catch :default _ (throw (ex-info "Invalid OIDC configuration JSON" {}))))))
+      (let [stat (.fstatSync fs fd)]
+        (when-not (and (.isFile stat) (<= (.-size stat) 1048576)
+                       (= 384 (bit-and (.-mode stat) 511)))
+          (throw (ex-info "OIDC configuration requires a mode0600 regular file" {})))
+        (let [bytes (js/Buffer.alloc 1048577)
+              length (.readSync fs fd bytes 0 1048577 0)]
+          (when (> length 1048576)
+            (throw (ex-info "OIDC configuration exceeds size limit" {})))
+          (js->clj (js/JSON.parse (.toString (.subarray bytes 0 length) "utf8")) :keywordize-keys true)))
+      (catch :default _ (throw (ex-info "Invalid private OIDC configuration" {})))
+      (finally (.closeSync fs fd)))))
 
 (defn- cookie-value
   "Decode one host cookie; reject ambiguity and malformed escapes."
@@ -117,6 +124,7 @@
       (let [provider (engine/create-provider! pool config lookup-actor!
                        (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id)))
             callback (.callback provider)]
+        (await (relay/install! app config #(private-config config-file) lookup-actor!))
         ;; Provider receives the raw stream before Fastify can parse a token body.
         (set! (.-proxy provider) true)
         (.addHook app "onRequest"

@@ -1,6 +1,7 @@
 (ns axxium.law.oidc
   "Registered browser-client and private signing configuration contracts."
-  (:require [malli.core :as m]))
+  (:require [axxium.law.relay :as relay]
+            [malli.core :as m]))
 
 (def registry
   "Named input contracts; private keys and client secrets stay in server config."
@@ -19,7 +20,8 @@
              [:cookie-keys [:vector {:min 1 :max 3} [:ref ::secret]]]
              [:jwks :map]
              [:allow-loopback? {:optional true} :boolean]
-             [:device-flow-enabled? {:optional true} :boolean]]})
+             [:device-flow-enabled? {:optional true} :boolean]
+             [:node-grants {:optional true} [:vector {:max 64} relay/grant-schema]]]})
 
 (defn require-config!
   "Validate closed config and unique client IDs before any provider is created.
@@ -29,7 +31,8 @@
   (when-not (and (m/validate [:ref ::config] config
                             {:registry (merge (m/default-schemas) registry)})
                  (= (count (:clients config)) (count (set (map :id (:clients config)))))
-                 (= (count (:clients config)) (count (set (map :secret (:clients config))))))
+                 (= (count (:clients config)) (count (set (map :secret (:clients config)))))
+                 (relay/grants-valid? (get config :node-grants []) (:clients config)))
     (throw (ex-info "Invalid OIDC authority configuration" {})))
   config)
 
