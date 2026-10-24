@@ -2,9 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, staging]
+    branches: [main, staging, 'sync/**']
   push:
     branches: [main, staging]
+
+permissions:
+  contents: read
 
 jobs:
   deployment-boundary:
@@ -47,3 +50,14 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Install isolated PostgreSQL test tools
+        run: |
+          if ! command -v pg_config >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          echo "AXXIUM_TEST_PG_BIN=$(pg_config --bindir)" >> "$GITHUB_ENV"
+
+      - name: Verify durable shared-login authority
+        run: npm run test:oidc-store

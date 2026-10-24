@@ -16,3 +16,12 @@
   spore: none
   receipt-refs: 2026-10-06T14:34:15.127072+00:00
   note: Observed red assertions despite compiler exit0; failure/concurrency fixtures and isolated runtimes provided lawful repair evidence. Draft preserves unsafe-controller blocker; no same-session skill promotion.
+- ts: 2026-10-23T02:45:43.423653224Z
+  session: /home/err/.local/share/codex-work/axxium-sso/authority
+  task: Shared Axxium login and Proxx federation preparation
+  p-efficiency: 0.3
+  p-friction: 0.8
+  p-skill-candidate: 0.2
+  spore: none
+  receipt-refs: 80be5c29,open-hax/axxium#27
+  note: Protocol capability spike exposed missing device polling throttle. Validate receipt helper output against the current owner API before appending; preserve invalid historical bytes and report whole-ledger failure. Review quota and owner-policy holds prevent readiness; local green tests do not establish deployed SSO.

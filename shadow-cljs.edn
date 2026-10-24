@@ -60,6 +60,18 @@
     :source-map true
     :infer-externs false}}
 
+  :oidc-store-fixture
+  {:target :esm :runtime :node
+   :output-dir "target/oidc-store"
+   :js-options {:js-provider :import}
+   :modules {:store {:exports {:initialize axxium.extern.oidc-store/initialize!
+                              :adapterFactory axxium.extern.oidc-store/adapter-factory
+                              :createProvider axxium.extern.oidc-fixture/create-provider
+                              :bindSession axxium.extern.oidc-store/bind-session!
+                              :sessionGrantActive axxium.extern.oidc-store/session-grant-active?
+                              :installHttp axxium.extern.oidc-fixture/install-http}}}
+   :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
+
   :test
   {:target :node-test
    :output-to "target/test.cjs"
