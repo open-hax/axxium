@@ -22,6 +22,7 @@ const pool = {
     let rows = [],
       rowCount = 0;
     if (/^(CREATE|ALTER|BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows, rowCount };
+    if (sql.startsWith('WITH expired AS')) return { rows, rowCount }; // Retention is qualified against real PostgreSQL.
     if (sql.startsWith('INSERT INTO axxium_oidc_records')) {
       if (sql.includes('JOIN axxium_oidc_grant_sessions') && (!rootActive || bindings.get(p[4]) !== p[5] || !records.has(key('Grant', p[4])))) return {rows, rowCount};
       const k = key(p[0], p[1]),

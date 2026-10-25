@@ -107,6 +107,26 @@
            (set! (.-url raw) original-url)
            (set! (.-originalUrl raw) prior-original-url)))))
 
+(defn- install-store-sweeper!
+  "Own the bounded protocol-retention timer for this server lifecycle only."
+  [app pool]
+  (let [running? (atom false)
+        timer (js/setInterval
+                (fn ^:async sweep-protocol-records []
+                  (when-not @running?
+                    (reset! running? true)
+                    (try
+                      (await (store/cleanup-expired! pool))
+                      (catch :default _
+                        ;; Database/parser details can contain protocol payloads.
+                        (.warn (.-log app) "OIDC retention sweep failed"))
+                      (finally (reset! running? false)))))
+                60000)]
+    (.unref timer)
+    (.addHook app "onClose"
+      (fn ^:async stop-store-sweeper [_instance]
+        (js/clearInterval timer)))))
+
 (defn ^:async install!
   "Optionally mount an operator-configured authority at the fixed /oidc issuer.
    Root session and actor resolution remain owned by Axxium, not by this UI."
@@ -121,6 +141,7 @@
       (when-not (= issuer (str (str/replace public-base-url #"/$" "") "/oidc"))
         (throw (ex-info "OIDC issuer must be the configured primary origin at /oidc" {})))
       (await (store/initialize! pool))
+      (install-store-sweeper! app pool)
       (let [provider (engine/create-provider! pool config lookup-actor!
                        (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id)))
             callback (.callback provider)]

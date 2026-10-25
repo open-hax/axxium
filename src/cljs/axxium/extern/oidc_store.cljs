@@ -15,13 +15,27 @@
    "CREATE INDEX IF NOT EXISTS axxium_oidc_user_code ON axxium_oidc_records (model,(payload->>'userCode'))"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_uid ON axxium_oidc_records (model,(payload->>'uid'))"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_expiry ON axxium_oidc_records (expires_at)"
-   "CREATE TABLE IF NOT EXISTS axxium_oidc_grant_sessions (grant_id text PRIMARY KEY, actor_id text NOT NULL, token_hash text NOT NULL, expires_at timestamptz NOT NULL)"])
+   "CREATE TABLE IF NOT EXISTS axxium_oidc_grant_sessions (grant_id text PRIMARY KEY, actor_id text NOT NULL, token_hash text NOT NULL, expires_at timestamptz NOT NULL)"
+   "CREATE INDEX IF NOT EXISTS axxium_oidc_binding_expiry ON axxium_oidc_grant_sessions (expires_at)"])
+
+(defn ^:async cleanup-expired!
+  "Reclaim at most 500 rows per table per sweep. Keep consumption evidence until
+   one day AFTER protocol expiry; active/recently expired payloads remain intact.
+   Concurrent sweepers skip locked rows rather than blocking authentication."
+  [pool]
+  (await (pg/query! pool
+           "WITH expired AS (SELECT model,id FROM axxium_oidc_records WHERE expires_at<clock_timestamp()-interval '1 day' ORDER BY expires_at,model,id LIMIT 500 FOR UPDATE SKIP LOCKED) DELETE FROM axxium_oidc_records r USING expired e WHERE r.model=e.model AND r.id=e.id"
+           []))
+  (await (pg/query! pool
+           "WITH expired AS (SELECT grant_id FROM axxium_oidc_grant_sessions WHERE expires_at<clock_timestamp()-interval '1 day' ORDER BY expires_at,grant_id LIMIT 500 FOR UPDATE SKIP LOCKED) DELETE FROM axxium_oidc_grant_sessions b USING expired e WHERE b.grant_id=e.grant_id"
+           [])))
 
 (defn ^:async initialize!
   "Create the dedicated protocol table without altering actor/session tables."
   [pool]
   (doseq [statement schema-sql]
-    (await (pg/query! pool statement []))))
+    (await (pg/query! pool statement [])))
+  (await (cleanup-expired! pool)))
 
 (defn- decode-record
   "Return an opaque provider payload, including durable consumption evidence."

@@ -25,3 +25,12 @@
   spore: none
   receipt-refs: 80be5c29,open-hax/axxium#27
   note: Protocol capability spike exposed missing device polling throttle. Validate receipt helper output against the current owner API before appending; preserve invalid historical bytes and report whole-ledger failure. Review quota and owner-policy holds prevent readiness; local green tests do not establish deployed SSO.
+- ts: 2026-10-25T04:20:02.204037601Z
+  session: /home/err/.local/share/codex-work/axxium-sso/authority
+  task: Qualify authority account switching grant identity and retention
+  p-efficiency: 0.85
+  p-friction: 0.25
+  p-skill-candidate: 0.1
+  spore: none
+  receipt-refs: 4f91f35e,84ecf28e,open-hax/axxium#32
+  note: Exercise the actual maintained provider with existing cookies across root actor changes; its session-switch form auto-submits and must be modeled by the fixture. Verify cleanup bounds and replay retention on real owned PostgreSQL, not SQL mocks. Stable serialization prevents representation-only grant revocation. No spore or promotion.

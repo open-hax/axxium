@@ -107,3 +107,21 @@ rotation within the root-session bound; the earlier worker sandbox `listen EPERM
 block is retained as historical context in `docs/renewal-device-source.md`.
 Machine federation grants remain separate.
 Parent retains integration, review and deployment.
+
+### Protocol record retention
+
+The protocol store reclaims at most 500 expired records and 500 expired grant
+bindings on startup and once per minute while this authority is running.
+Consumption/replay evidence is retained through the full protocol lifetime plus
+one day after expiry; active and recently expired rows are not reclaimed. An
+expiry index covers both tables, and concurrent sweepers skip locked rows.
+Sweeps do not overlap within one server, stop with its lifecycle, and report only
+a generic failure message. The owned PostgreSQL fixture seeds 1,001 expired rows
+in each table, proves the per-sweep bound and eventual reclamation, and confirms
+that active and recently expired consumption evidence survives.
+
+Changing the browser root actor while provider cookies remain restarts provider
+login through the existing Origin/CSRF-protected interaction submission. Fresh
+consent binds to the current root actor before any product token is issued. The
+owned PostgreSQL browser fixture verifies A logout followed by B login and a
+resulting token whose subject is B.

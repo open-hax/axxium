@@ -58,9 +58,23 @@ try {
   await pool.query("UPDATE axxium_oidc_records SET expires_at=clock_timestamp()-interval '1 second'");
   assert.equal(await restored.find('same-id'), null);
   await assert.rejects(restored.consume('same-id'), e => e.error === 'invalid_grant');
+  // Startup/periodic sweeps are bounded and preserve replay evidence through
+  // its lifetime plus a one-day retention window, rather than growing forever.
+  await pool.query("INSERT INTO axxium_oidc_records(model,id,payload,expires_at,consumed_at) SELECT 'CleanupFixture','old-'||n,'{}'::jsonb,clock_timestamp()-interval '2 days',1 FROM generate_series(1,1001) n");
+  await pool.query("INSERT INTO axxium_oidc_records(model,id,payload,expires_at,consumed_at) VALUES('CleanupFixture','recent','{}',clock_timestamp()-interval '1 hour',1),('CleanupFixture','live','{}',clock_timestamp()+interval '1 hour',1)");
+  await pool.query("INSERT INTO axxium_oidc_grant_sessions(grant_id,actor_id,token_hash,expires_at) SELECT 'cleanup-'||n,'synthetic','synthetic',clock_timestamp()-interval '2 days' FROM generate_series(1,1001) n");
+  const remaining = async table => Number((await pool.query(`SELECT count(*) AS n FROM ${table} WHERE ${table === 'axxium_oidc_records' ? "model='CleanupFixture' AND id LIKE 'old-%'" : "grant_id LIKE 'cleanup-%'"}`)).rows[0].n);
+  await initialize(pool);
+  assert.equal(await remaining('axxium_oidc_records'), 501);
+  assert.equal(await remaining('axxium_oidc_grant_sessions'), 501);
+  await initialize(pool); await initialize(pool);
+  assert.equal(await remaining('axxium_oidc_records'), 0);
+  assert.equal(await remaining('axxium_oidc_grant_sessions'), 0);
+  assert.deepEqual((await pool.query("SELECT id FROM axxium_oidc_records WHERE model='CleanupFixture' ORDER BY id")).rows.map(row => row.id), ['live','recent']);
+  await pool.query("DELETE FROM axxium_oidc_records WHERE model='CleanupFixture'");
   await runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive);
   await runHttpFixture(pool, installHttp, root);
-  console.log('PASS isolated PostgreSQL: model isolation, lookup, concurrent single consumption, durable state, expiry and grant revocation');
+  console.log('PASS isolated PostgreSQL: model isolation, lookup, concurrent single consumption, durable state, bounded expired-record/binding reclamation, replay retention and grant revocation');
 } finally {
   if (pool) await pool.end();
   if (started) run('pg_ctl', ['-D', data, '-m', 'immediate', '-w', 'stop']);
