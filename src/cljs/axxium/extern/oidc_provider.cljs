@@ -182,13 +182,13 @@
                   (when-let [rotated (some-> ctx (aget "oidc") (aget "entities") (aget "RotatedRefreshToken"))]
                     (when (>= (.-status ctx) 400)
                       (await (store/revoke-family! pool (.-grantId rotated)))))))
-              (when (and (= "introspection" (.. ctx -oidc -route))
+              (when (and (= "introspection" (some-> ctx (aget "oidc") (aget "route")))
                          (true? (some-> ctx (aget "body") (aget "active"))))
                 (let [token (some-> ctx (aget "oidc") (aget "entities") (aget "AccessToken"))]
                   (when token
                     (aset (.-body ctx) "root_session_expires_at"
                       (js/Math.floor (/ (await (store/session-grant-expiry! pool (.-grantId token) (.-accountId token))) 1000))))))
-              (when (and (= "device_authorization" (.. ctx -oidc -route))
+              (when (and (= "device_authorization" (some-> ctx (aget "oidc") (aget "route")))
                          (= 200 (.-status ctx))
                          (some? (some-> ctx (aget "body") (aget "device_code"))))
                 (aset (.-body ctx) "interval" 5))))))

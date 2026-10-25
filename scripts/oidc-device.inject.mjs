@@ -144,6 +144,10 @@ try {
     async (id) => (id === actor.id ? actor : null),
   );
   await app.ready();
+  for (const path of ['/oidc/unregistered-route', '/oidc/unregistered-route/nested']) {
+    const missing = await request(path);
+    assert.equal(missing.statusCode, 404, `${path}: ${missing.body}`);
+  }
   const discovery = (await request('/oidc/.well-known/openid-configuration')).json();
   const client = clients[0],
     grant = 'urn:ietf:params:oauth:grant-type:device_code';

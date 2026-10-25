@@ -50,3 +50,11 @@
   p-skill-candidate: 0.45
   receipt-refs: shared-login-and-federation; native4370432046; native4370432062; native4370432071
   note: Malli regex admission is substring-based unless the contract explicitly enforces a whole match; trailing newlines also defeat naive JavaScript dollar anchors. Preserve exact limits with full-string predicates, and test the signed-out device entry, bounded portal return and protected POST separately. Browser and mounted-server return contracts need parity tests; a source outside the CLJS classpath cannot be imported by a relative require.
+
+- ts: 2026-10-25T11:43:46.455205+00:00
+  origin: shared-login-unknown-provider-route
+  p-efficiency: 0.88
+  p-friction: 0.3
+  p-skill-candidate: 0.25
+  receipt-refs: native4370612174; heartbeat5-authority-route-red.log; heartbeat5-authority-route-postgres.log
+  note: Exercise unknown paths through the actual mounted protocol engine. A post-next middleware callback can observe absent route context even while every known happy path passes; nil-safe reads should preserve the engine-owned404 without broad exception recovery. Existing required owned-PG fixture is the right regression home. No spore promoted.

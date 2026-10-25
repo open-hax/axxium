@@ -44,6 +44,10 @@ export async function runHttpFixture(pool, installHttp, root) {
       },
       async subject => subject === actor.id ? actor : subject === otherActor.id ? otherActor : null);
     await app.listen({ port, host: '127.0.0.1' });
+    for (const path of ['/oidc/unregistered-route', '/oidc/unregistered-route/nested']) {
+      const missing = await boundedFetch(`${origin}${path}`);
+      assert.equal(missing.status, 404, `${path}: ${await missing.text()}`);
+    }
     const unrelated = await boundedFetch(`${origin}/fixture/plainform`, { method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'plain=value' });
     assert.equal(unrelated.status, 415, 'Interaction parser escaped its route plugin');
