@@ -126,10 +126,10 @@ The initial source snapshot is retained byte-faithfully in
 `relay-initial-source-handoff.md`; its sandbox limitations are historical.
 The parent composed this relay delta with renewable browser/device login on
 accepted actor foundation `99e6c725`, preserving independent source/receipt streams
-in their original commits. The combined source passes 88 CLJS tests/446 assertions
-and 15 JavaScript tests, with zero compiler warnings. Its actual owned PostgreSQL
+in their original commits. The combined source passes 89 CLJS tests/474 assertions
+and 16 JavaScript tests, with zero compiler warnings. Its actual owned PostgreSQL
 OIDC/device fixture passes. With PROXX_RELAY_WORKTREE explicitly selecting the
-composed current-release consumer, all 22 relay adapter groups also pass against
+composed current-release consumer, all 23 relay adapter groups also pass against
 real owned PostgreSQL, including the 55-second streamed response over renewed
 leases on one socket. No synthetic fixture is a claim of human or fleet acceptance.
 

@@ -50,3 +50,12 @@
   (is (= 899 (law/bounded-token-lifetime 1000000 100001 86400)))
   (doseq [bound [nil 100000 99999 100999]]
     (is (nil? (law/bounded-token-lifetime bound 100000 300)))))
+
+(deftest device-login-return-is-exact-and-bounded
+  (doseq [path ["/oidc/device" "/oidc/device?user_code=ABCD-EFGH"]]
+    (is (= path (law/device-login-return path))))
+  (doseq [path [nil {} "https://evil.test" "/oidc/device/auth" "/oidc/device/confirm"
+                "/oidc/device?user_code=ABCD&user_code=EFGH" "/oidc/device?user_code=%2f%2fevil.test"
+                "/oidc/device?user_code=ABCD#fragment" "/oidc/device?user_code=ABCD\n"
+                (str "/oidc/device?user_code=" (apply str (repeat 65 "a")))]]
+    (is (= "/oidc/device" (law/device-login-return path)))))

@@ -6,11 +6,13 @@
 (def lease-seconds "Hard maximum signed capability lifetime." 25)
 (def endpoint "Fixed machine-only issuance endpoint." "/api/federation/relay-lease")
 (def model-schema "Exact names only; no regexes, wildcards or implicit prefixes."
-  [:re #"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}"])
+  [:fn #(and (string? %) (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}" %)))])
+(def node-schema "Exact bounded node identifier; matching must consume the whole value."
+  [:fn #(and (string? %) (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9_-]{0,63}" %)))])
 (def grant-schema
   "Closed authorization entry; expiration is an integer Unix second."
   [:map {:closed true}
-   [:node-id [:re #"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"]]
+   [:node-id node-schema]
    [:secret [:string {:min 32 :max 512}]]
    [:owner-subject [:string {:min 1 :max 128}]]
    [:broker-audience [:string {:min 1 :max 2048}]]

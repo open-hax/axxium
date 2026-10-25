@@ -16,6 +16,10 @@
     (t/is (not (relay/grants-valid? [invalid] []))))
   (t/is (not (relay/grants-valid? [grant grant] [])))
   (t/is (not (relay/grants-valid? [grant] [{:secret (:secret grant)}])))
+  (doseq [model ["*" "test-*" " model" "model " "model\n" (apply str (repeat 129 "a")) 1 nil]]
+    (t/is (not (relay/grants-valid? [(assoc grant :allowed-models [model])] [])) (pr-str model)))
+  (doseq [node ["*" "node*" " node" "node " "node\n" (apply str (repeat 65 "a")) 1 nil]]
+    (t/is (not (relay/grants-valid? [(assoc grant :node-id node)] [])) (pr-str node)))
   (t/is (thrown? js/Error (oidc/require-config! {:node-grants [grant]}))))
 
 (t/deftest actor-and-time-admission

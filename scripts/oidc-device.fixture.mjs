@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { safeInteractionReturn } from '../resources/public/oidc-return.js';
 
 // Synthetic device approval over the real mounted transport and owned fixture PG.
 // The clock is advanced in owned rows; no sleeps or service credentials are used.
@@ -163,8 +164,15 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
   }
 
   assert(discovery.grant_types_supported.includes(deviceGrant));
-  assert.equal((await boundedFetch(`${origin}/oidc/device`)).status, 401);
+  const unsignedDevice = await boundedFetch(`${origin}/oidc/device`, { redirect: 'manual' });
+  assert.equal(unsignedDevice.status, 302);
+  const returnTarget = new URL(unsignedDevice.headers.get('location'), origin).searchParams.get('oidc_return');
+  assert.equal(safeInteractionReturn(returnTarget), '/oidc/device');
   const device = await issue();
+  const unsignedComplete = await boundedFetch(device.verification_uri_complete, { redirect: 'manual' });
+  assert.equal(unsignedComplete.status, 302);
+  const completeTarget = new URL(unsignedComplete.headers.get('location'), origin).searchParams.get('oidc_return');
+  assert.equal(safeInteractionReturn(completeTarget), `/oidc/device?user_code=${device.user_code}`);
   assert.deepEqual(await evidence(device), {
     poll_last_ms: null,
     poll_interval: 5,
@@ -264,7 +272,11 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
     401,
   );
   assert.equal((await poll(waitingForLogout)).body.error, 'invalid_grant');
-  assert.equal((await boundedFetch(`${origin}/oidc/device`, { headers: { cookie: cookie() } })).status, 401);
+  const signedOutDevice = await boundedFetch(`${origin}/oidc/device`, {
+    redirect: 'manual', headers: { cookie: cookie() },
+  });
+  assert.equal(signedOutDevice.status, 302);
+  assert.equal(new URL(signedOutDevice.headers.get('location'), origin).searchParams.get('oidc_return'), '/oidc/device');
   const bindings = await pool.query('SELECT token_hash FROM axxium_oidc_grant_sessions WHERE actor_id=$1', [
     actor.id,
   ]);

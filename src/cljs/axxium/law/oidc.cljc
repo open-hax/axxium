@@ -68,3 +68,11 @@
   (let [seconds (when (number? expires-at-ms)
                   (long (quot (- expires-at-ms now-ms) 1000)))]
     (when (and seconds (pos? seconds)) (min maximum-seconds seconds))))
+
+(defn device-login-return
+  "Resume only initial verification and one bounded public code; otherwise restart it."
+  [value]
+  (if (and (string? value)
+           (re-matches #"/oidc/device(?:\?user_code=[A-Za-z0-9-]{1,64})?" value))
+    value
+    "/oidc/device"))

@@ -42,3 +42,11 @@
   p-skill-candidate: 0.4
   receipt-refs: shared-login-and-federation; native40166052141
   note: Repeating a job with a hardcoded old deadline cannot prove complete-input review. Inspect the exact immutable callee, consume an already accepted bounded implementation, preserve all evidence gates and retain fresh runtime qualification as pending.
+
+- ts: 2026-10-25T10:13:43.972464+00:00
+  origin: shared-login-exact-grants-device-return
+  p-efficiency: 0.75
+  p-friction: 0.4
+  p-skill-candidate: 0.45
+  receipt-refs: shared-login-and-federation; native4370432046; native4370432062; native4370432071
+  note: Malli regex admission is substring-based unless the contract explicitly enforces a whole match; trailing newlines also defeat naive JavaScript dollar anchors. Preserve exact limits with full-string predicates, and test the signed-out device entry, bounded portal return and protected POST separately. Browser and mounted-server return contracts need parity tests; a source outside the CLJS classpath cannot be imported by a relative require.

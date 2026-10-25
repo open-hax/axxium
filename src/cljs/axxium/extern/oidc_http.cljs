@@ -170,7 +170,11 @@
                     (fail! reply 403)
 
                     (nil? (await (current-root request session-cookie-name resolve-session!)))
-                    (fail! reply 401)
+                    (if (= "GET" (.-method request))
+                      (.redirect reply (str "/portal/index.html?oidc_return="
+                                            (js/encodeURIComponent
+                                              (law/device-login-return url))))
+                      (fail! reply 401))
 
                     :else (await (dispatch-engine! callback issuer request reply)))
 

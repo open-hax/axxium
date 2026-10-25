@@ -167,7 +167,14 @@ try {
   assert.equal((await poll(client, { client_secret: 'invalid' })).json().error, 'invalid_client');
   assert.equal((await poll()).json().error, 'authorization_pending');
   assert.equal((await poll()).json().error, 'slow_down');
-  assert.equal((await request(device.verification_uri)).statusCode, 401);
+  const unsigned = await request(device.verification_uri);
+  assert.equal(unsigned.statusCode, 302);
+  assert.equal(new URL(unsigned.headers.location, origin).searchParams.get('oidc_return'), '/oidc/device');
+  const complete = await request(device.verification_uri_complete);
+  assert.equal(complete.statusCode, 302);
+  assert.equal(new URL(complete.headers.location, origin).searchParams.get('oidc_return'),
+    `/oidc/device?user_code=${device.user_code}`);
+  assert.equal((await request(device.verification_uri, {}, false, {origin})).statusCode, 401);
   const approve = async (device, decision = 'approve') => {
     let r = await request(device.verification_uri, null, true);
     const hidden = (s, n) => s.match(new RegExp(`name="${n}" value="([^"]+)"`))?.[1];
