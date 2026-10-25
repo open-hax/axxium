@@ -175,16 +175,16 @@
                     (if-not (= uid (.-uid details))
                       (fail! reply 400)
                       (if-let [root (await (current-root request session-cookie-name resolve-session!))]
-                        (if (and (= "consent" (.. details -prompt -name))
-                                 (not= (get-in root [:actor :id]) (.. details -session -accountId)))
-                          (fail! reply 409)
-                          (let [seed (.toString (.randomBytes crypto 32) "base64url")]
+                        ;; The root actor may have changed since the provider's
+                        ;; browser session. Render current identity; the protected
+                        ;; POST restarts login before it can ever grant consent.
+                        (let [seed (.toString (.randomBytes crypto 32) "base64url")]
                             (.setCookie reply csrf-cookie seed
                               #js {:path "/" :httpOnly true :secure secure? :sameSite "strict" :maxAge 300})
                             (html! reply uid (.. details -params -client_id)
                                    (or (get-in root [:actor :email]) (get-in root [:actor :display_name])
                                        (get-in root [:actor :id]))
-                                   (csrf-value csrf-key seed uid))))
+                                   (csrf-value csrf-key seed uid)))
                         (.redirect reply (str "/portal/index.html?oidc_return="
                                               (js/encodeURIComponent (str "/oidc/interaction/" uid)))))))
                   (catch :default error (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503))))))
@@ -211,7 +211,7 @@
                                 (await (.interactionFinished provider (.-raw request) (.-raw reply)
                                          #js {:error "access_denied" :error_description "User declined sign-in"}
                                          #js {:mergeWithLastSubmission false})))
-                            :login
+                            (:login :restart-login)
                             (do (.hijack reply)
                                 (await (.interactionFinished provider (.-raw request) (.-raw reply)
                                          #js {:login #js {:accountId actor-id}}

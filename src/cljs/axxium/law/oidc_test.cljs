@@ -35,13 +35,13 @@
     (is (= {:decision :consent} (law/interaction-admission context)))
     (doseq [[changes status] [[{:actual-uid "other"} 400]
                               [{:actor-id nil} 401]
-                              [{:session-actor-id "b"} 409]
                               [{:scopes ["openid" "admin"]} 403]
                               [{:scopes ["profile"]} 403]
                               [{:claims ["password_hash"]} 403]
                               [{:decision "yes"} 400]]]
       (is (= {:decision :refuse :status status}
              (law/interaction-admission (merge context changes)))))
+    (is (= {:decision :restart-login} (law/interaction-admission (assoc context :session-actor-id "b"))))
     (is (= {:decision :login} (law/interaction-admission (assoc context :prompt "login"))))
     (is (= {:decision :deny} (law/interaction-admission (assoc context :decision "deny"))))))
 

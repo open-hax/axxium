@@ -51,7 +51,7 @@
     (= "deny" decision) {:decision :deny}
     (not= "approve" decision) {:decision :refuse :status 400}
     (= "login" prompt) {:decision :login}
-    (or (not= "consent" prompt) (not= actor-id session-actor-id))
+    (not= "consent" prompt)
     {:decision :refuse :status 409}
 
     (not (and (vector? scopes) (some #{"openid"} scopes)
@@ -59,6 +59,7 @@
               (vector? claims) (every? #{"sub" "name"} claims)))
     {:decision :refuse :status 403}
 
+    (not= actor-id session-actor-id) {:decision :restart-login}
     :else {:decision :consent}))
 
 (defn bounded-token-lifetime
