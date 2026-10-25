@@ -13,12 +13,13 @@ jobs:
   review:
     if: ${{ github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository }}
     name: Evidence-first review (eta-mu)
-    uses: open-hax/eta-mu/.github/workflows/opencode-code-review.yml@45ec644c2d15ed511e9bc1e797d1b4073b63dbfc
+    uses: open-hax/eta-mu/.github/workflows/opencode-code-review.yml@7112c36440d180ca183d6a3f89661cee161fdae5
     with:
       pr_head_sha: ${{ github.event.pull_request.head.sha }}
+      review_timeout_minutes: 120
       model: opencode/mimo-v2.6-flash-free
-      muse_revision: 0b9a91492c8355e6933dc2164d35668cb76d9e60
-      agents_revision: 4b4f48dae1b804b2581974e604cca618ecedadf1
+      muse_revision: c1369c223cf3c57e3e31934a6d746bfcdfe73f5a
+      agents_revision: 7ab2f99e048e370f5f943acc2321b8294402e786
       opencode_version: 1.18.31
       node_version: "22.20.0"
       setup_eta_mu_toolchain: true

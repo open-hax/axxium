@@ -34,3 +34,11 @@
   spore: none
   receipt-refs: 4f91f35e,84ecf28e,open-hax/axxium#32
   note: Exercise the actual maintained provider with existing cookies across root actor changes; its session-switch form auto-submits and must be modeled by the fixture. Verify cleanup bounds and replay retention on real owned PostgreSQL, not SQL mocks. Stable serialization prevents representation-only grant revocation. No spore or promotion.
+
+- ts: 2026-10-25T08:48:06.618495+00:00
+  origin: shared-login-authority-review-budget
+  p-efficiency: 0.8
+  p-friction: 0.6
+  p-skill-candidate: 0.4
+  receipt-refs: shared-login-and-federation; native40166052141
+  note: Repeating a job with a hardcoded old deadline cannot prove complete-input review. Inspect the exact immutable callee, consume an already accepted bounded implementation, preserve all evidence gates and retain fresh runtime qualification as pending.
