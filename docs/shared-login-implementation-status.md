@@ -102,7 +102,7 @@ Consumers retain product-local authorization and require explicit qualified
 issuer/subject links. No email merging or remote role import is enabled. Browser
 access and ID tokens remain short-lived. The renewal source work adds opt-in,
 rotating confidential-client refresh bounded by the current root session, plus
-optional product device initiation. The parent owned PostgreSQL fixture covers refresh
+optional product device initiation. The PostgreSQL fixture run by the parent covers refresh
 rotation within the root-session bound; the earlier worker sandbox `listen EPERM`
 block is retained as historical context in `docs/renewal-device-source.md`.
 Machine federation grants remain separate.
