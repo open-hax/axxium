@@ -140,6 +140,15 @@ try {
     const jwks = (await authority.inject({ url: '/oidc/jwks', headers: { 'x-forwarded-proto': 'https' } })).json();
     assert.equal(jwks.keys[0].kid, config.jwks.keys[0].kid); assert(!('d' in jwks.keys[0]));
   });
+  await check('grant revision survives JSON key-order rewrites', async () => {
+    const revision = async () => JSON.parse(Buffer.from((await lease()).split('.')[1], 'base64url')).grant_revision;
+    const grant = config['node-grants'][0];
+    const before = await revision();
+    try {
+      config['node-grants'] = [Object.fromEntries(Object.entries(grant).reverse())]; writeConfig();
+      assert.equal(await revision(), before);
+    } finally { config['node-grants'] = [grant]; writeConfig(); }
+  });
   await check('closed node credentials, TLS and browser refusal', async () => {
     for (const body of [{ 'node-id': 'unknown', secret: nodeSecret }, { 'node-id': 'synthetic-node', secret: 'x'.repeat(32) },
       { 'node-id': 'synthetic-node', secret: nodeSecret, owner: actor.id }, { client_id: config.clients[0].id, client_secret: config.clients[0].secret }, {}])

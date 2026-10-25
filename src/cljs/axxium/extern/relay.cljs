@@ -51,7 +51,7 @@
                            (law/issuance-admitted? grant (await (lookup-actor! (:owner-subject grant))) now))
               (throw (ex-info "Relay authorization refused" {})))
             (let [claims (law/claims (:issuer config) grant now (.randomUUID crypto)
-                                    (digest (pr-str (dissoc grant :secret))))
+                                    (digest (pr-str (into (sorted-map) (dissoc grant :secret)))))
                   jwt (await (-> (jose/SignJWT. (clj->js claims))
                                  (.setProtectedHeader #js {:alg "RS256" :typ "axxium-relay+jwt" :kid (:kid jwk)})
                                  (.sign signing-key)))]

@@ -19,7 +19,7 @@ Updated 2026-10-23 UTC. Shared login and federation are not yet deployed.
   uses Origin/CSRF checks and resumes the existing account portal. No ephemeral
   signing keys or synthetic interactions are enabled in the product transport.
 
-Validation: 85 CLJS tests / 419 assertions and 15 JS tests pass; changed Clojure files lint with
+Validation: 88 CLJS tests / 446 assertions and 15 JS tests pass; changed Clojure files lint with
 zero warnings/errors. The optimized integration target compiles with zero
 warnings. Backend typecheck/build and JS boundary checks pass. Run
 `npm run test:oidc-store` with PostgreSQL 16 tools installed (or set
@@ -102,7 +102,8 @@ Consumers retain product-local authorization and require explicit qualified
 issuer/subject links. No email merging or remote role import is enabled. Browser
 access and ID tokens remain short-lived. The renewal source work adds opt-in,
 rotating confidential-client refresh bounded by the current root session, plus
-optional product device initiation. Its PostgreSQL refresh qualification is still
-blocked in the worker sandbox by `listen EPERM`; see `docs/renewal-device-source.md`.
+optional product device initiation. The parent owned PostgreSQL fixture covers refresh
+rotation within the root-session bound; the earlier worker sandbox `listen EPERM`
+block is retained as historical context in `docs/renewal-device-source.md`.
 Machine federation grants remain separate.
 Parent retains integration, review and deployment.
