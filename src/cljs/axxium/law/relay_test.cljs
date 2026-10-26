@@ -18,6 +18,9 @@
   (t/is (not (relay/grants-valid? [grant] [{:secret (:secret grant)}])))
   (doseq [model ["*" "test-*" " model" "model " "model\n" (apply str (repeat 129 "a")) 1 nil]]
     (t/is (not (relay/grants-valid? [(assoc grant :allowed-models [model])] [])) (pr-str model)))
+  (doseq [tenant ["*" "tenant-*" "Default" " default" "default " "default\n" "" (apply str (repeat 129 "a")) 1 nil]]
+    (t/is (not (relay/grants-valid? [(assoc grant :allowed-tenants [tenant])] [])) (pr-str tenant)))
+  (t/is (relay/grants-valid? [(assoc grant :allowed-tenants ["default"])] []))
   (doseq [node ["*" "node*" " node" "node " "node\n" (apply str (repeat 65 "a")) 1 nil]]
     (t/is (not (relay/grants-valid? [(assoc grant :node-id node)] [])) (pr-str node)))
   (t/is (thrown? js/Error (oidc/require-config! {:node-grants [grant]}))))

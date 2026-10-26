@@ -9,6 +9,10 @@
   [:fn #(and (string? %) (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}" %)))])
 (def node-schema "Exact bounded node identifier; matching must consume the whole value."
   [:fn #(and (string? %) (boolean (re-matches #"[A-Za-z0-9][A-Za-z0-9_-]{0,63}" %)))])
+(def tenant-schema
+  "Exact canonical broker tenant ID: already trimmed and lowercased as Proxx
+   normalizeTenantId stores it; no wildcards, whitespace or implicit prefixes."
+  [:fn #(and (string? %) (boolean (re-matches #"[a-z0-9][a-z0-9._-]{0,127}" %)))])
 (def grant-schema
   "Closed authorization entry; expiration is an integer Unix second."
   [:map {:closed true}
@@ -19,7 +23,7 @@
    [:expires-at pos-int?]
    [:enabled :boolean]
    [:allowed-models [:vector {:min 1 :max 128} model-schema]]
-   [:allowed-tenants [:vector {:min 1 :max 64} [:string {:min 1 :max 256}]]]])
+   [:allowed-tenants [:vector {:min 1 :max 64} tenant-schema]]])
 
 (defn grants-valid?
   "Require unique nodes, distinct node/browser secrets and bounded exact models."
