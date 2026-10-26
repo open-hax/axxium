@@ -41,7 +41,7 @@ exact model names, each 1–128 ASCII characters from letters, digits, `.`, `_`,
 at most 4096 characters. Regexes, wildcards and prefix matching are unsupported.
 
 `allowed-tenants` is required: 1–64 unique, nonempty exact canonical broker-local tenant IDs (lowercase `[a-z0-9][a-z0-9._-]{0,127}`, as Proxx `normalizeTenantId` stores them; no wildcards)
-(up to 256 characters each). Missing or empty tenant scope refuses configuration;
+(up to 128 characters each). Missing or empty tenant scope refuses configuration;
 there is no default-any-tenant interpretation. These IDs apply only within the
 exact `broker-audience`. The central issuer/subject is portable between brokers;
 local tenant IDs and memberships are not. A verified identity on another tenant
