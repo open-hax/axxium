@@ -1,0 +1,30 @@
+name: Deploy Axxium staging
+
+# Application code is built without deployment credentials. The pinned Services
+# controller independently admits only the current main merge for this PR and
+# owns the image, restricted receiver, and readiness checks.
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Merged Axxium PR whose merge commit is current main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  staging:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    uses: open-hax/services/.github/workflows/deploy-service-environment.yml@a2aee9a01a51ef1481dcc6d1071104f449dcf6bd
+    with:
+      controller_sha: a2aee9a01a51ef1481dcc6d1071104f449dcf6bd
+      service: axxium
+      environment: staging
+      pull_request: ${{ format('{0}', github.event.pull_request.number || inputs.pull_request) }}
+    secrets: inherit
