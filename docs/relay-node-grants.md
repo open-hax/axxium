@@ -9,7 +9,10 @@ Keep it outside Git. Persistent RS256 private keys must remain consistent with
 `/oidc/jwks`. This change creates no keys in a request handler.
 
 An optional `node-grants` array is separate from `clients`. Every entry has exactly
-these fields (the following values are synthetic examples, never live identity):
+these fields (the following values are synthetic examples, never live identity).
+Replace the expiry placeholder with a Unix timestamp in seconds that is in the
+future and no more than 30 days from issuance; the placeholder is not a valid
+grant value:
 
 ```json
 {
@@ -17,7 +20,7 @@ these fields (the following values are synthetic examples, never live identity):
   "secret": "REPLACE_WITH_A_DISTINCT_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS",
   "owner-subject": "synthetic-example-only",
   "broker-audience": "https://broker.example",
-  "expires-at": 1792800000,
+  "expires-at": "REPLACE_WITH_FUTURE_UNIX_TIMESTAMP_WITHIN_30_DAYS",
   "enabled": false,
   "allowed-models": ["example-model"],
   "allowed-tenants": ["synthetic-broker-local-tenant"]
