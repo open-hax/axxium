@@ -1,5 +1,6 @@
 // A self-contained account control usable wherever Axxium is served at the same origin.
 import { fetchAllActors } from './actor-pages.js';
+import { safeInteractionReturn } from './oidc-return.js';
 
 class AxxiumAccountManager extends HTMLElement {
   constructor() {
@@ -16,6 +17,10 @@ class AxxiumAccountManager extends HTMLElement {
   }
 
   async connectedCallback() {
+    try {
+      const target = safeInteractionReturn(new URL(location.href).searchParams.get('oidc_return'));
+      if (target) sessionStorage.setItem('axxium.oidcReturn', target);
+    } catch { /* A restricted browser store must not prevent ordinary login. */ }
     await this.refresh();
   }
 
@@ -58,6 +63,13 @@ class AxxiumAccountManager extends HTMLElement {
     } catch (_) {
       this.actor = null;
       this.actors = [];
+    }
+    if (this.actor) {
+      try {
+        const target = safeInteractionReturn(sessionStorage.getItem('axxium.oidcReturn'));
+        sessionStorage.removeItem('axxium.oidcReturn');
+        if (target) { location.assign(target); return; }
+      } catch { /* Continue to the account manager when browser storage is unavailable. */ }
     }
     this.render();
   }
