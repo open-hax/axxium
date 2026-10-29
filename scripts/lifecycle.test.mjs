@@ -63,3 +63,31 @@ test('pool close failure yields a nonzero exit', { timeout: 8000 }, async () => 
     if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
   }
 });
+
+test('shutdown deadline survives pool close when another handle keeps Node alive', { timeout: 31000 }, async () => {
+  const fixture = startFixture({ FIXTURE_LINGER: '1' });
+  try {
+    await fixture.readUntil(/LISTEN (\d+)/);
+    const exited = once(fixture.child, 'exit');
+    const start = performance.now();
+    fixture.child.kill('SIGTERM');
+    await fixture.readUntil(/POOL_END/);
+    let guard;
+    let outcome;
+    try {
+      outcome = await Promise.race([
+        exited,
+        new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('child exceeded shutdown bound')), 28000); }),
+      ]);
+    } finally {
+      clearTimeout(guard);
+    }
+    const [code, signal] = outcome;
+    assert.equal(signal, null);
+    assert.equal(code, 1);
+    assert.match(fixture.error(), /Axxium shutdown timed out/);
+    assert.ok(performance.now() - start >= 24000, 'deadline should remain 25 seconds');
+  } finally {
+    if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+  }
+});

@@ -18,5 +18,6 @@ app.get('/hold', async () => {
 });
 
 await app.listen({ host: '127.0.0.1', port: 0 });
+if (process.env.FIXTURE_LINGER === '1') setInterval(() => {}, 1000);
 install(app, pool);
 console.log('LISTEN ' + app.server.address().port);

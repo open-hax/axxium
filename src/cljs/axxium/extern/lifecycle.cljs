@@ -18,11 +18,13 @@
                                     (js/console.error "Axxium shutdown timed out")
                                     (js/process.exit 1))
                                   25000)]
+                    ;; Keep the deadline alive until process exit without
+                    ;; making an otherwise clean shutdown wait for it.
+                    (.unref deadline)
                     (-> (.close app)
                         (.then (fn [] (.end pool)))
                         (.then (fn []
                                  (js/clearInterval idle-sweep)
-                                 (js/clearTimeout deadline)
                                  (set! (.-exitCode js/process) 0)))
                         (.catch (fn [_error]
                                   (js/clearInterval idle-sweep)
