@@ -56,6 +56,17 @@
     (is (= {:decision :login} (law/interaction-admission (assoc context :prompt "login"))))
     (is (= {:decision :deny} (law/interaction-admission (assoc context :decision "deny"))))))
 
+(deftest matching-interaction-identifiers-still-require-the-public-uid-shape
+  (let [context {:actor-id "a" :session-actor-id "a" :prompt "consent"
+                 :decision "approve" :scopes ["openid"] :claims []}]
+    (doseq [uid ["a" "interaction_1-2" (apply str (repeat 128 "a"))]]
+      (is (= {:decision :consent}
+             (law/interaction-admission (assoc context :expected-uid uid :actual-uid uid)))))
+    (doseq [uid ["" "invalid.interaction" "interaction/other" "interaction\n"
+                 (apply str (repeat 129 "a")) nil false 42 [] {}]]
+      (is (= {:decision :refuse :status 400}
+             (law/interaction-admission (assoc context :expected-uid uid :actual-uid uid)))))))
+
 (deftest root-bound-token-lifetimes
   (is (= 300 (law/bounded-token-lifetime 1000000 100000 300)))
   (is (= 899 (law/bounded-token-lifetime 1000000 100001 86400)))

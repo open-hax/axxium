@@ -17,6 +17,7 @@ import subprocess
 APPLICATION_SHA = '58234df96ca86507e6cdd87f65aaa9ab35621415'
 HARNESS_SHA = '5b0e9be2170c8b79662077c612efec7bb79f21b8'
 BOUNDARY_HARNESS_SHA = '4a7ceeb948c03b9198222c27bb8a8007db2979ea'
+PROTOCOL_HARNESS_SHA = 'ee15ffff63e4d2c0d0c46645a3444814ba93b596'
 CHANGED_TEST_PATHS = frozenset({
     'src/cljs/axxium/config_test.cljs',
     'src/cljs/axxium/extern/authorization_boundaries_test.cljs',
@@ -29,6 +30,11 @@ CHANGED_TEST_PATHS = frozenset({
 })
 DESCRIPTOR = 'external-harness.json'
 BUILD_DIRECTORIES = frozenset({'target', '.shadow-cljs', '.cpcache'})
+TEST_SUPPORT_PATHS = frozenset({
+    'scripts/oidc-protocol.fixture.mjs',
+    'scripts/oidc-http.fixture.mjs',
+    'scripts/oidc-device.fixture.mjs',
+})
 
 
 def accepted_harnesses():
@@ -36,6 +42,8 @@ def accepted_harnesses():
     return {
         HARNESS_SHA: CHANGED_TEST_PATHS,
         BOUNDARY_HARNESS_SHA: CHANGED_TEST_PATHS | {
+            'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
+        PROTOCOL_HARNESS_SHA: CHANGED_TEST_PATHS | TEST_SUPPORT_PATHS | {
             'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
     }
 
@@ -111,13 +119,16 @@ def contract(root, application_sha, harness_sha):
             and git(root, 'rev-parse', 'HEAD').decode().strip() == APPLICATION_SHA,
             'Worker must retain the exact application Git HEAD')
     application, harness = tree(root, application_sha), tree(root, harness_sha)
+    test_support = TEST_SUPPORT_PATHS if harness_sha == PROTOCOL_HARNESS_SHA else frozenset()
+    require(test_support <= application.keys() & harness.keys(),
+            'Accepted protocol test-support inputs are missing')
     changed = {path for path in application.keys() | harness.keys()
                if application.get(path) != harness.get(path)}
-    require(changed == expected_paths and all(is_test(path) for path in changed),
+    require(changed == expected_paths and all(is_test(path) or path in test_support for path in changed),
             'Regression harness differs outside its exact accepted test files')
-    original = {path: row for path, row in application.items() if not is_test(path)}
-    require(original == {path: row for path, row in harness.items() if not is_test(path)},
-            'Non-test repository bytes or modes differ')
+    original = {path: row for path, row in application.items() if not is_test(path) and path not in test_support}
+    require(original == {path: row for path, row in harness.items() if not is_test(path) and path not in test_support},
+            'Production or unchanged support repository bytes or modes differ')
     project = root / 'qualification' / 'harness' / harness_sha
     files = {}
     selected = [(path, row, 'live-source') for path, row in application.items()
@@ -127,7 +138,8 @@ def contract(root, application_sha, harness_sha):
                  if path.startswith('src/cljs/') and is_test(path)]
     selected += [(path, application[path], 'project')
                  for path in ('shadow-cljs.edn', 'package.json', 'package-lock.json')]
-    selected += [(path, row, 'support') for path, row in application.items()
+    selected += [(path, harness[path] if path in test_support else row,
+                  'test-support' if path in test_support else 'support') for path, row in application.items()
                  if not path.startswith('src/')
                  and path not in {'shadow-cljs.edn', 'package.json', 'package-lock.json'}]
     content = blobs(root, [row['git_oid'] for _, row, _ in selected])
@@ -149,6 +161,11 @@ def contract(root, application_sha, harness_sha):
                   'harness_sha': harness_sha, 'root': str(root), 'project_dir': str(project),
                   'non_test_tree_sha256': hashlib.sha256(canonical(original)).hexdigest(),
                   'changed_test_paths': sorted(changed), 'files': files}
+    if test_support:
+        # Old manifests remain byte-identical. Only the closed protocol harness
+        # substitutes these three test-only modules, excluded from the server
+        # build and production Docker copy. All other non-test inputs still match.
+        descriptor['test_support_paths'] = sorted(test_support)
     return root, project, descriptor, copies
 
 

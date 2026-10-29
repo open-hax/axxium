@@ -86,7 +86,7 @@ export async function runHttpFixture(pool, installHttp, root) {
       if (response.status === 200 && new URL(url).pathname.startsWith('/oidc/interaction/')) {
         const html = await response.text();
         const csrf = html.match(/name=csrf value='([^']+)'/)?.[1];
-        assert(csrf, html);
+        assert.ok(csrf, html);
         assert.equal(response.headers.get('cache-control'), 'no-store');
         const submit = submittedOrigin => boundedFetch(url, { method: 'POST', redirect: 'manual',
           headers: { cookie: cookie(), origin: submittedOrigin, 'content-type': 'application/x-www-form-urlencoded' },
@@ -96,10 +96,10 @@ export async function runHttpFixture(pool, installHttp, root) {
         remember(response);
       }
       const location = response.headers.get('location');
-      assert(location, `HTTP ${response.status}: ${await response.text()}`);
+      assert.ok(location, `HTTP ${response.status}: ${await response.text()}`);
       url = new URL(location, origin).href;
     }
-    assert(code, 'Mounted authority did not issue an authorization code');
+    assert.ok(code, 'Mounted authority did not issue an authorization code');
     const tokens = await boundedFetch(discovery.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, grant_type: 'authorization_code', code,
         code_verifier: verifier, redirect_uri: client['redirect-uris'][0] }) });
@@ -130,8 +130,8 @@ export async function runHttpFixture(pool, installHttp, root) {
       let response = await boundedFetch(switchedUrl, { redirect: 'manual', headers: { cookie: cookie() } }); remember(response);
       if (response.status === 200 && new URL(switchedUrl).pathname.startsWith('/oidc/interaction/')) {
         const html = await response.text();
-        assert(html.includes(otherActor.display_name), 'Consent must name the current root actor');
-        const csrf = html.match(/name=csrf value='([^']+)'/)?.[1]; assert(csrf);
+        assert.ok(html.includes(otherActor.display_name), 'Consent must name the current root actor');
+        const csrf = html.match(/name=csrf value='([^']+)'/)?.[1]; assert.ok(csrf);
         response = await boundedFetch(switchedUrl, { method: 'POST', redirect: 'manual',
           headers: { cookie: cookie(), origin, 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ csrf, decision: 'approve' }) }); remember(response);
@@ -143,15 +143,15 @@ export async function runHttpFixture(pool, installHttp, root) {
         const action = html.match(/<form method="post" action="([^"]+)"/)?.[1];
         assert.equal(action, `${origin}/oidc/session/end/confirm`, html);
         const fields = [...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)"/g)];
-        assert(fields.some(field => field[1] === 'xsrf'));
+        assert.ok(fields.some(field => field[1] === 'xsrf'));
         response = await boundedFetch(action, { method: 'POST', redirect: 'manual',
           headers: { cookie: cookie(), origin, 'content-type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams(fields.map(field => [field[1], field[2]])) }); remember(response);
       }
-      const location = response.headers.get('location'); assert(location, `Account switch HTTP ${response.status}: ${await response.text()}`);
+      const location = response.headers.get('location'); assert.ok(location, `Account switch HTTP ${response.status}: ${await response.text()}`);
       switchedUrl = new URL(location, origin).href;
     }
-    assert(switchedCode, 'Account switch must restart login and reach fresh consent');
+    assert.ok(switchedCode, 'Account switch must restart login and reach fresh consent');
     const switchedTokens = await boundedFetch(discovery.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, grant_type: 'authorization_code', code: switchedCode,
         code_verifier: verifier, redirect_uri: client['redirect-uris'][0] }) });
