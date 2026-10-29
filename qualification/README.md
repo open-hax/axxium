@@ -33,10 +33,12 @@ Capture is limited to 8 MiB and the command deadline. A timeout or capture
 overflow kills the original process group, records containment as unknown,
 restores the source, and stops the campaign; descendants can escape the group
 and may remain alive. This is not proof of process containment or cleanup.
-Use an isolated environment and inspect it before retrying. Before any child
-starts, the runner publishes a durable checkout-wide containment marker. A
-SIGINT, SIGTERM, hard interruption, timeout, overflow, or start failure leaves
-that marker and blocks new runs and recovery. After inspecting and dealing with
+Use an isolated environment and inspect it before retrying. Before each compile
+or test execution, the runner publishes a durable checkout-wide containment
+marker. Import-time Git and Volta probes and the Node version probe are outside
+this marker. A SIGINT, SIGTERM, hard interruption, timeout, overflow, or start
+failure during a protected execution leaves the marker and blocks new runs and
+recovery. After inspecting and dealing with
 any remaining processes, an operator can record a specific, non-secret note and
 clear the block:
 
