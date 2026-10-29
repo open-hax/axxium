@@ -19,6 +19,7 @@ import re
 import selectors
 import signal
 import subprocess
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -269,10 +270,67 @@ def classify_test(result, baseline):
     return "invalid_test_exit"
 
 
+def containment_marker():
+    return ROOT / "qualification/results/containment-unknown.json"
+
+
+def sync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def require_no_containment_marker():
+    if containment_marker().exists():
+        raise RuntimeError("Execution containment unknown; inspect processes and acknowledge the marker before retrying")
+
+
+def mark_execution(logfile):
+    """Fail closed before spawning: an interrupted writer leaves this marker."""
+    marker = containment_marker()
+    marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    payload = {"source_sha": SOURCE_SHA, "state": "execution_active_or_containment_unknown",
+               "operator_pid": os.getpid(), "logfile": str(logfile), "started_ns": time.time_ns()}
+    fd, temporary = tempfile.mkstemp(prefix=".containment-", dir=marker.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, marker)  # Atomic publication, never overwrite an existing block.
+        sync_directory(marker.parent)
+    finally:
+        os.unlink(temporary)
+
+
+def acknowledge_containment(note):
+    """Archive an operator attestation; this does not verify inspection itself."""
+    if not note or len(note.strip()) < 15:
+        raise ValueError("Provide a specific inspection note of at least 15 characters")
+    marker = containment_marker()
+    if not marker.is_file():
+        raise ValueError("No containment marker exists")
+    record = {"marker": json.loads(marker.read_text()), "inspection_note": note.strip(),
+              "acknowledged_ns": time.time_ns(), "attestation": "operator assertion, not independently verified"}
+    archive = marker.with_name("containment-ack-" + str(record["acknowledged_ns"]) + ".json")
+    with archive.open("x") as stream:
+        os.chmod(archive, 0o600)
+        json.dump(record, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    sync_directory(marker.parent)
+    marker.unlink()
+    sync_directory(marker.parent)
+    return archive
+
+
 def execute(command, logfile, timeout):
     """Bounded capture; on timeout or output overflow descendants are unknown."""
     started = time.monotonic()
     deadline = started + timeout
+    mark_execution(logfile)
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, start_new_session=True)
     os.set_blocking(process.stdout.fileno(), False)
@@ -318,6 +376,10 @@ def execute(command, logfile, timeout):
         process.stdout.close()
     output = b"".join(chunks).decode("utf-8", errors="replace")
     logfile.write_text(output)
+    if not timed_out and not overflow:
+        marker = containment_marker()
+        marker.unlink()
+        sync_directory(marker.parent)
     return {"exit_code": process.returncode, "timed_out": timed_out,
             "containment_unknown": timed_out or overflow, "output_overflow": overflow,
             "seconds": round(time.monotonic() - started, 3), "output": output,
@@ -480,6 +542,8 @@ def interrupted(signum, frame):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", action="store_true")
+    parser.add_argument("--acknowledge-containment", action="store_true", help="Record operator inspection and clear the containment block")
+    parser.add_argument("--inspection-note", help="Specific operator inspection performed before acknowledgement")
     parser.add_argument("--recover", type=Path, help="Restore only the exact mutation recorded in an owned inflight journal")
     parser.add_argument("--path-prefix", default="src/cljs/axxium/law/oidc.cljc")
     parser.add_argument("--limit", type=int, default=8)
@@ -493,6 +557,10 @@ def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, interrupted)
     with campaign_lock():
+        if args.acknowledge_containment:
+            print("Recorded operator attestation:", acknowledge_containment(args.inspection_note))
+            return
+        require_no_containment_marker()
         if args.recover:
             if git("rev-parse", "HEAD").decode().strip() != SOURCE_SHA:
                 raise ValueError("Recovery requires the pinned Git revision")

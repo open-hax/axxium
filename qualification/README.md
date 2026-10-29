@@ -33,8 +33,21 @@ Capture is limited to 8 MiB and the command deadline. A timeout or capture
 overflow kills the original process group, records containment as unknown,
 restores the source, and stops the campaign; descendants can escape the group
 and may remain alive. This is not proof of process containment or cleanup.
-Use an isolated environment and inspect it before retrying. Normal completion
-also does not prove a descendant did not detach after closing its output.
+Use an isolated environment and inspect it before retrying. Before any child
+starts, the runner publishes a durable checkout-wide containment marker. A
+SIGINT, SIGTERM, hard interruption, timeout, overflow, or start failure leaves
+that marker and blocks new runs and recovery. After inspecting and dealing with
+any remaining processes, an operator can record a specific, non-secret note and
+clear the block:
+
+```sh
+python3 qualification/mutation_campaign.py --acknowledge-containment --inspection-note 'Describe the actual process inspection and cleanup performed'
+```
+
+This archives the attestation; the program cannot verify its truth. Then, if
+an `inflight.json` remains, use the existing `--recover` procedure before a new
+run. Normal completion also does not prove a descendant did not detach after
+closing its output.
 The runner calls the resolved pinned Node executable directly: Volta translates
 Node exit 1 to 126 on this host, making assertion exits ambiguous. Only exit 1
 with a completed assertion-failure summary is counted as a test kill.

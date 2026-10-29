@@ -2,6 +2,8 @@
 import tempfile
 import os
 import signal
+import subprocess
+import sys
 import time
 import unittest
 from pathlib import Path
@@ -63,7 +65,8 @@ class OutcomeTests(unittest.TestCase):
             command = ['python3', '-c',
                        "import subprocess,time,sys; subprocess.Popen([sys.executable,'-c',sys.argv[1]]); time.sleep(60)",
                        "import time,pathlib; time.sleep(1); pathlib.Path(" + repr(str(marker)) + ").write_text('bad')"]
-            result = campaign.execute(command, logfile, timeout=0.2)
+            with patch.object(campaign, "ROOT", Path(directory)):
+                result = campaign.execute(command, logfile, timeout=0.2)
             self.assertTrue(result['timed_out'])
             time.sleep(1.1)
             self.assertFalse(marker.exists(), "subprocess survived timed-out process group")
@@ -76,7 +79,10 @@ class OutcomeTests(unittest.TestCase):
                        str(pidfile)]
             started = time.monotonic()
             try:
-                result = campaign.execute(command, Path(directory) / "log", timeout=0.4)
+                with patch.object(campaign, "ROOT", Path(directory)):
+                    result = campaign.execute(command, Path(directory) / "log", timeout=0.4)
+                    with self.assertRaisesRegex(RuntimeError, "containment unknown"):
+                        campaign.require_no_containment_marker()
                 self.assertLess(time.monotonic() - started, 2.5)
                 self.assertTrue(result["timed_out"])
                 self.assertTrue(result["containment_unknown"])
@@ -89,6 +95,63 @@ class OutcomeTests(unittest.TestCase):
                         os.kill(int(pidfile.read_text()), signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+
+    def test_signal_interruption_retains_block_after_restoration(self):
+        module_dir = str(Path(campaign.__file__).parent)
+        helper = r"""
+import os, pathlib, signal, sys
+sys.path.insert(0, sys.argv[1])
+import mutation_campaign as m
+m.ROOT = pathlib.Path(sys.argv[2])
+for sig in (signal.SIGINT, signal.SIGTERM): signal.signal(sig, m.interrupted)
+source = m.ROOT / 'source'
+source.write_bytes(b'original')
+with m.campaign_lock():
+    m.require_no_containment_marker()
+    source.write_bytes(b'mutated')
+    try:
+        m.execute([sys.executable, '-c', "import subprocess,time,sys; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],start_new_session=True); open(sys.argv[1],'w').write(str(p.pid)); time.sleep(60)", str(m.ROOT / 'escaped.pid')], m.ROOT / 'output', 30)
+    finally:
+        m.restore(source, b'original', b'mutated')
+"""
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                child = subprocess.Popen([sys.executable, '-c', helper, module_dir, directory],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                pidfile = root / 'escaped.pid'
+                try:
+                    deadline = time.monotonic() + 10
+                    while not pidfile.exists() and time.monotonic() < deadline:
+                        if child.poll() is not None: self.fail('helper exited before escaped child started')
+                        time.sleep(0.02)
+                    self.assertTrue(pidfile.exists())
+                    child.send_signal(sig)
+                    child.wait(timeout=3)
+                    self.assertEqual((root / 'source').read_bytes(), b'original')
+                    self.assertTrue((root / 'qualification/results/containment-unknown.json').exists())
+                    os.kill(int(pidfile.read_text()), 0)  # Escaped child really is still alive.
+                    blocked = subprocess.run([sys.executable, '-c',
+                        "import pathlib,sys; sys.path.insert(0,sys.argv[1]); import mutation_campaign as m; m.ROOT=pathlib.Path(sys.argv[2]); sys.argv=['pilot','--inventory']; m.main()",
+                        module_dir, directory], capture_output=True, text=True, timeout=5)
+                    self.assertNotEqual(blocked.returncode, 0)
+                    self.assertIn('containment unknown', blocked.stderr)
+                    with patch.object(campaign, 'ROOT', root):
+                        with campaign.campaign_lock():  # Interruption released the lock.
+                            with self.assertRaisesRegex(RuntimeError, 'containment unknown'):
+                                campaign.require_no_containment_marker()
+                            with self.assertRaises(ValueError): campaign.acknowledge_containment('short')
+                            os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                            archive = campaign.acknowledge_containment('Terminated owned escaped test child')
+                            self.assertTrue(archive.exists())
+                            campaign.require_no_containment_marker()
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=3)
+                    if pidfile.exists():
+                        try: os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                        except ProcessLookupError: pass
 
     def test_restore_refuses_to_overwrite_independent_changes(self):
         with tempfile.TemporaryDirectory() as directory:
