@@ -75,7 +75,7 @@ test('signal during asynchronous app setup closes the app and prevents listening
 });
 
 test('blocked initialization and pool cleanup are bounded despite repeated signals', { timeout: 31000 }, async () => {
-  const fixture = startFixture({ FIXTURE_INIT: 'blocked', FIXTURE_POOL_BLOCKED: '1' });
+  const fixture = startFixture({ FIXTURE_INIT: 'blocked', FIXTURE_POOL_BLOCKED: '1', FIXTURE_SCHEMA_TIMEOUT_MS: '1000' });
   try {
     await fixture.readUntil(/INIT_STARTED/);
     const exited = once(fixture.child, 'exit');

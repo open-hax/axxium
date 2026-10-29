@@ -23,12 +23,12 @@
         closing)))
 
 (defn shutdown-bound-ms [startup-closed? statement-timeout-ms]
-  (if startup-closed? 25000 (max 25000 (+ statement-timeout-ms 5000))))
+  (if startup-closed? 25000 (max 25000 (+ (* 2 statement-timeout-ms) 5000))))
 
 (defn install!
   "Install before database initialization; attach the app before async setup.
    Drain HTTP if present, then close both pools. A stuck shutdown fails after
-   max(25 seconds, the unfinished schema statement limit plus 5 seconds);
+   max(25 seconds, twice the schema statement limit plus 5 seconds);
    repeated signals cannot start a competing close."
   [pool startup-pool statement-timeout-ms]
   (let [controller {:stopping? (atom false) :app (atom nil)

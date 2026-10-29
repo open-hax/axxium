@@ -36,15 +36,21 @@
   (-> (query! conn sql-str params)
       (.then (fn [{:keys [rows]}] (first rows)))))
 
-(defn ^:async with-transaction!
-  "Reserve one client; commit success, roll back rejection, and always release it."
-  [pool operation]
+(defn- ensure-active! [stopping?]
+  (when (and stopping? (stopping?))
+    (throw (js/Error. "Axxium schema initialization interrupted"))))
+
+(defn- ^:async with-transaction-guarded!
+  [pool operation stopping?]
   (let [client (await (.connect pool))
         discard? (atom false)]
     (try
+      (ensure-active! stopping?)
       (await (.query client "BEGIN"))
       (try
+        (ensure-active! stopping?)
         (let [value (await (operation client))]
+          (ensure-active! stopping?)
           (await (.query client "COMMIT"))
           value)
         (catch :default error
@@ -55,6 +61,11 @@
               (js/console.error "ROLLBACK failed; discarding client" rollback-error)))
           (throw error)))
       (finally (.release client @discard?)))))
+
+(defn with-transaction!
+  "Reserve one client; do not commit after a shutdown has been observed."
+  ([pool operation] (with-transaction-guarded! pool operation nil))
+  ([pool operation stopping?] (with-transaction-guarded! pool operation stopping?)))
 
 (defn provider-binding-conflict?
   "Decode PostgreSQL's exact provider-binding unique-constraint failure."

@@ -114,7 +114,7 @@ All configuration is via environment variables:
 | `JWT_AUDIENCE` | promethean | JWT audience |
 | `BCRYPT_SALT_ROUNDS` | 12 | Password hashing rounds |
 
-Container stop grace must exceed `max(25000, AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS + 5000)` milliseconds. This gives PostgreSQL time to cancel a schema statement blocked at startup before the process shutdown deadline. Choose a larger schema timeout and matching stop grace when a reviewed migration needs longer than the default. A timed-out schema statement fails startup; transactional migrations roll back.
+Container stop grace must exceed `max(25000, 2 * AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS + 5000)` milliseconds (45 seconds at the default). This allows time for the current schema statement and a rollback before the startup shutdown deadline. Choose a larger schema timeout and matching stop grace when a reviewed migration needs longer than the default. A timed-out schema statement fails startup; transactional migrations roll back. A statement already issued before shutdown may still finish, and a commit already in flight cannot be undone by the signal. Connection failures can still make the outcome uncertain and require database-side inspection.
 
 ## Architecture
 

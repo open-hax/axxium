@@ -72,17 +72,24 @@
   [honey-map]
   (query-sql honey-map))
 
+(defn- schema-query!
+  "Do not issue another startup statement after shutdown was observed."
+  [connection sql params stopping?]
+  (when (and stopping? (stopping?))
+    (throw (ex-info "Axxium schema initialization interrupted" {})))
+  (pg/query! connection sql params))
+
 (defn- exec-ddl!
   "Execute a HoneySQL DDL statement."
-  [schema-pool honey-map]
+  [schema-pool honey-map stopping?]
   (let [[sql-str _params] (honey->sql honey-map)]
-    (pg/query! schema-pool sql-str [])))
+    (schema-query! schema-pool sql-str [] stopping?)))
 
 (defn- ^:async actors-email-index-on!
   "Return {:is_unique .. :qualified_name ..} for idx_actors_email on the
    application's actors table, or nil when absent."
-  [connection]
-  (let [{:keys [rows]} (await (pg/query! connection (q/select-actors-email-index) []))]
+  [connection stopping?]
+  (let [{:keys [rows]} (await (schema-query! connection (q/select-actors-email-index) [] stopping?))]
     (first rows)))
 
 (defn- ^:async migrate-email-index!
@@ -90,18 +97,18 @@
    duplicate non-NULL emails, then swap the legacy index for the unique one.
    Throwing rolls back, so the legacy index is never dropped without its
    unique replacement."
-  [connection]
-  (await (pg/query! connection (q/lock-actors-for-email-index) []))
-  (let [index (await (actors-email-index-on! connection))]
+  [connection stopping?]
+  (await (schema-query! connection (q/lock-actors-for-email-index) [] stopping?))
+  (let [index (await (actors-email-index-on! connection stopping?))]
     (when-not (:is_unique index)
-      (let [{:keys [rows]} (await (pg/query! connection (q/select-duplicate-actor-emails) []))]
+      (let [{:keys [rows]} (await (schema-query! connection (q/select-duplicate-actor-emails) [] stopping?))]
         (when (seq rows)
           (throw (ex-info
                   "Cannot enforce unique actors.email: duplicate emails present"
                   {:duplicates rows}))))
       (when-let [qualified-name (:qualified_name index)]
-        (await (pg/query! connection (q/drop-index-actors-email qualified-name) [])))
-      (await (pg/query! connection (q/create-index-actors-email) [])))))
+        (await (schema-query! connection (q/drop-index-actors-email qualified-name) [] stopping?)))
+      (await (schema-query! connection (q/create-index-actors-email) [] stopping?)))))
 
 (defn- ^:async ensure-unique-actors-email-index!
   "Replace the legacy non-unique email index when it is still present.
@@ -110,46 +117,49 @@
    Otherwise the duplicate check and swap run under a table lock in one
    transaction, so an older process cannot commit a duplicate between the
    check and CREATE UNIQUE INDEX."
-  [schema-pool]
-  (let [index (await (actors-email-index-on! schema-pool))]
+  [schema-pool stopping?]
+  (let [index (await (actors-email-index-on! schema-pool stopping?))]
     (when-not (:is_unique index)
-      (await (pg/with-transaction! schema-pool migrate-email-index!)))))
+      (await (pg/with-transaction! schema-pool
+                                   #(migrate-email-index! % stopping?) stopping?)))))
 
 (defn- ^:async migrate-actors-created-at!
   "Inside one transaction: lock actor writes, backfill NULL created_at, then
    enforce NOT NULL so the (created_at, id) keyset cursor never meets NULL."
-  [connection]
-  (await (pg/query! connection (q/lock-actors-for-created-at) []))
-  (await (pg/query! connection (q/backfill-actors-created-at) []))
-  (await (pg/query! connection (q/enforce-actors-created-at-not-null) [])))
+  [connection stopping?]
+  (await (schema-query! connection (q/lock-actors-for-created-at) [] stopping?))
+  (await (schema-query! connection (q/backfill-actors-created-at) [] stopping?))
+  (await (schema-query! connection (q/enforce-actors-created-at-not-null) [] stopping?)))
 
 (defn- ^:async ensure-actors-created-at-not-null!
   "Fast path: skip (no lock) when actors.created_at is already NOT NULL, so
    rolling restarts do not lock and rescan actors."
-  [schema-pool]
-  (let [{:keys [rows]} (await (pg/query! schema-pool (q/select-actors-created-at-nullable) []))]
+  [schema-pool stopping?]
+  (let [{:keys [rows]} (await (schema-query! schema-pool (q/select-actors-created-at-nullable) [] stopping?))]
     (when (= "YES" (:is_nullable (first rows)))
-      (await (pg/with-transaction! schema-pool migrate-actors-created-at!)))))
+      (await (pg/with-transaction! schema-pool
+                                   #(migrate-actors-created-at! % stopping?) stopping?)))))
 
 (defn- ^:async init-schema-on!
   "Initialize database schema. Idempotent. DDL runs sequentially in order."
-  [schema-pool]
-  (await (exec-ddl! schema-pool (q/create-table-entities)))
-  (await (exec-ddl! schema-pool (q/create-table-actors)))
-  (await (exec-ddl! schema-pool (q/create-table-sessions)))
-  (await (exec-ddl! schema-pool (q/create-table-oauth-clients)))
-  (await (exec-ddl! schema-pool (q/create-table-agent-credentials)))
-  (await (exec-ddl! schema-pool (q/create-table-provider-bindings)))
-  (await (pg/query! schema-pool (q/create-index-provider-subject) []))
-  (await (ensure-unique-actors-email-index! schema-pool))
-  (await (ensure-actors-created-at-not-null! schema-pool))
-  (await (pg/query! schema-pool (q/create-index-actors-status-created-id) []))
-  (await (pg/query! schema-pool (q/create-index-sessions-actor) []))
-  (await (pg/query! schema-pool (q/create-index-sessions-expires) [])))
+  [schema-pool stopping?]
+  (await (exec-ddl! schema-pool (q/create-table-entities) stopping?))
+  (await (exec-ddl! schema-pool (q/create-table-actors) stopping?))
+  (await (exec-ddl! schema-pool (q/create-table-sessions) stopping?))
+  (await (exec-ddl! schema-pool (q/create-table-oauth-clients) stopping?))
+  (await (exec-ddl! schema-pool (q/create-table-agent-credentials) stopping?))
+  (await (exec-ddl! schema-pool (q/create-table-provider-bindings) stopping?))
+  (await (schema-query! schema-pool (q/create-index-provider-subject) [] stopping?))
+  (await (ensure-unique-actors-email-index! schema-pool stopping?))
+  (await (ensure-actors-created-at-not-null! schema-pool stopping?))
+  (await (schema-query! schema-pool (q/create-index-actors-status-created-id) [] stopping?))
+  (await (schema-query! schema-pool (q/create-index-sessions-actor) [] stopping?))
+  (await (schema-query! schema-pool (q/create-index-sessions-expires) [] stopping?)))
 
 (defn init-schema!
-  ([] (init-schema-on! @pool))
-  ([schema-pool] (init-schema-on! schema-pool)))
+  ([] (init-schema-on! @pool nil))
+  ([schema-pool] (init-schema-on! schema-pool nil))
+  ([schema-pool stopping?] (init-schema-on! schema-pool stopping?)))
 
 ;; Re-export query builders for convenience
 (def q-select-actor-by-id q/select-actor-by-id)

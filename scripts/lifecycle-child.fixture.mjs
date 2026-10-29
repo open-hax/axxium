@@ -14,7 +14,7 @@ const schemaPool = {
     return process.env.FIXTURE_POOL_BLOCKED === '1' ? new Promise(() => {}) : Promise.resolve();
   },
 };
-const controller = install(pool, schemaPool, 20000);
+const controller = install(pool, schemaPool, Number(process.env.FIXTURE_SCHEMA_TIMEOUT_MS ?? 20000));
 if (process.env.FIXTURE_INIT === 'blocked') {
   setInterval(() => {}, 1000);
   console.log('INIT_STARTED');

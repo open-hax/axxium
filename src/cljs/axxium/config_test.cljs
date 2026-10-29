@@ -19,6 +19,6 @@
     (is (= 1 (:max @seen)))))
 
 (deftest shutdown-bound-tracks-schema-timeout-before-readiness
-  (is (= 25000 (lifecycle/shutdown-bound-ms false 20000)))
-  (is (= 125000 (lifecycle/shutdown-bound-ms false 120000)))
+  (is (= 45000 (lifecycle/shutdown-bound-ms false 20000)))
+  (is (= 245000 (lifecycle/shutdown-bound-ms false 120000)))
   (is (= 25000 (lifecycle/shutdown-bound-ms true 120000))))

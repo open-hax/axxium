@@ -57,7 +57,7 @@
   (let [statement-timeout-ms (cfg/schema-statement-timeout-ms)
         schema-pool (db/create-schema-pool! statement-timeout-ms)
         controller (lifecycle/install! @db/pool schema-pool statement-timeout-ms)]
-    (-> (db/init-schema! schema-pool)
+    (-> (db/init-schema! schema-pool #(lifecycle/stopping? controller))
       (.then
         (fn ^:async schema-ready [_]
           (await (lifecycle/close-startup! controller))
