@@ -5,6 +5,20 @@ import { generateKeyPairSync, randomBytes, createHash } from 'node:crypto';
 // Synthetic interaction transport. It is never mounted by the product server.
 const boundedFetch = (url, options = {}) => fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
 
+// Observe the public response contract before consuming token/discovery fields.
+// A plaintext error must fail an assertion rather than escape as a parser error.
+export async function readProtocolJSON(response, label, allowEmpty = false) {
+  const text = await response.text();
+  if (allowEmpty && text === '') return null;
+  assert.match(response.headers.get('content-type') ?? '', /^application\/json(?:\s*;|$)/i,
+    `${label} must declare a JSON response`);
+  let value;
+  assert.doesNotThrow(() => { value = JSON.parse(text); }, `${label} must contain valid JSON`);
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value),
+    `${label} must contain a JSON object`);
+  return value;
+}
+
 export async function runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive) {
   await pool.query("CREATE TABLE actors(id text PRIMARY KEY,status text NOT NULL); CREATE TABLE sessions(actor_id text,token_hash text,expires_at timestamptz); INSERT INTO actors VALUES('synthetic-actor','active'); INSERT INTO sessions VALUES('synthetic-actor','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',clock_timestamp()+interval '1 hour')");
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -63,13 +77,17 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
   async function form(path, data) {
     const response = await boundedFetch(issuer + path, { method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(data) });
-    const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : null };
+    // RFC7009 successful revocation permits an empty200 body; other protocol
+    // responses, including revocation errors, must remain JSON objects.
+    const allowEmpty = path === '/token/revocation' && response.status === 200;
+    return { status: response.status,
+      body: await readProtocolJSON(response, 'Authority form response', allowEmpty) };
   }
   try {
   provider = createProvider(pool, config, async id => id === 'synthetic-actor'
     ? { id, status: actorActive ? 'active' : 'disabled', display_name: 'Synthetic Actor' } : null);
-    const discovery = await (await boundedFetch(issuer + '/.well-known/openid-configuration')).json();
+    const discovery = await readProtocolJSON(
+      await boundedFetch(issuer + '/.well-known/openid-configuration'), 'Authority discovery');
     assert.equal(discovery.issuer, issuer);
     assert.ok(!discovery.grant_types_supported.includes('urn:ietf:params:oauth:grant-type:device_code'));
     for (const client of clients) {
