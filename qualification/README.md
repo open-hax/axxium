@@ -16,8 +16,8 @@ resolved executable so an isolated test HOME never invokes a Volta shim.
 python3 -m unittest discover -s qualification -p test_mutation_campaign.py -v
 python3 qualification/mutation_campaign.py --inventory
 python3 qualification/inspect_expanded_inventory.py
-python3 qualification/mutation_campaign.py --path-prefix src/cljs/ --sample-seed exploration-1 --limit 12 --out qualification/results/new-pilot
-python3 qualification/mutation_campaign.py --path-prefix src/cljs/ --batch-index 0 --limit 1000 --out qualification/results/batch-0
+python3 qualification/mutation_campaign.py --operator-id <declared-owner> --path-prefix src/cljs/ --sample-seed exploration-1 --limit 12 --out qualification/results/new-pilot
+python3 qualification/mutation_campaign.py --operator-id <declared-owner> --path-prefix src/cljs/ --batch-index 0 --limit 1000 --out qualification/results/batch-0
 ```
 
 Choose unused output directories under `qualification/results`; old evidence
@@ -64,6 +64,12 @@ descriptor remains valid under its original identity.
 
 The protocol harness is the pure test commit
 `ee15ffff63e4d2c0d0c46645a3444814ba93b596`.
+Its separately pinned successor
+`6e839f6e9b7a8162eaa88dd5795039a196a5dd34` adds public JSON media-type,
+syntax and object-shape assertions before parsing discovery/token/introspection
+responses. It preserves the permitted empty200 successful revocation response.
+This makes an observed plaintext500 fail a measured response assertion rather
+than escape as a bare parser error. Older errors remain unchanged observations.
 It additionally admits exactly `scripts/oidc-protocol.fixture.mjs`,
 `scripts/oidc-http.fixture.mjs`, and `scripts/oidc-device.fixture.mjs` as test
 support. These modules belong only to the existing isolated integration fixture
@@ -87,6 +93,7 @@ compare the declared scope and `test_support_paths` before interpreting a hash.
 
 ```sh
 python3 qualification/mutation_campaign.py --path-prefix src/cljs/ \
+  --operator-id <declared-owner> \
   --external-harness-sha 5b0e9be2170c8b79662077c612efec7bb79f21b8 \
   --producer-revision <accepted-full-producer-commit> \
   --batch-index 0 --sample-seed full-qualification-58234-v1 --limit 1000 \
@@ -138,7 +145,9 @@ any remaining processes, an operator can record a specific, non-secret note and
 clear the block:
 
 ```sh
-python3 qualification/mutation_campaign.py --acknowledge-containment --inspection-note 'Describe the actual process inspection and cleanup performed'
+python3 qualification/mutation_campaign.py --acknowledge-containment \
+  --inspection-author <separate-inspector> \
+  --inspection-note 'Describe the actual process inspection and cleanup performed'
 ```
 
 This archives the attestation; the program cannot verify its truth. Then, if
@@ -149,15 +158,114 @@ The runner calls the resolved pinned Node executable directly: Volta translates
 Node exit 1 to 126 on this host, making assertion exits ambiguous. Only exit 1
 with a completed assertion-failure summary is counted as a test kill.
 
-The current scanner excludes test and `_fixture` source files. It finds list-head
-and literal candidates outside strings, regular expressions, reader-discarded,
-quoted, and `(comment ...)` forms. Candidates are syntactic proposals, not a
+The scanner excludes test and `_fixture` source files. The original `legacy-v1`
+profile finds list-head and literal candidates outside strings, regular
+expressions, reader-discarded, quoted, and `(comment ...)` forms. Candidates are syntactic proposals, not a
 claim of valid, non-equivalent or covered mutations. Integer boundary and predicate substitutions are exploratory proposals;
 the inventory performs no mutations. Seeded selection orders candidate
 fingerprints deterministically; it is a bounded exploratory sample and does
 not establish representativeness, non-equivalence, or a killed count. Future work must independently review each operator,
 establish comprehensive test coverage, run real test-phase evaluations, dedupe
 source identities, and independently review the resulting evidence.
+
+## Stable standard operators and complete selection
+
+The explicit `standard-v2` profile is the CLI default. It retains every
+`legacy-v1` fingerprint and adds two standard families: nonempty lexical string
+literals become the empty string, and eligible integer literals use the complete
+PIT CRCR replacement set `1`, `0`, `-1`, `-c`, `c+1`, `c-1`. Unchanged values and
+duplicate replacements are removed. The existing integer eligibility bound is
+unchanged; arbitrary extra nearby values are not generated. These families
+follow the published [Stryker string mutator](https://stryker-mutator.io/mutators.html/)
+and [PIT constant mutator](https://pitest.org/quickstart/mutators/) definitions.
+
+String selection respects complete escaped/multiline lexical spans and excludes
+namespace/import/load forms, docstrings, metadata, regular expressions,
+characters, tagged literals, quoted/discarded data and comments. Executable SQL
+strings remain eligible: an invalid query or other runtime failure remains a
+negative outcome, never an assertion kill. This profile does not add relational,
+arithmetic, keyword, return-value or statement-deletion families.
+
+At application `58234df96ca86507e6cdd87f65aaa9ab35621415`, the original inventory
+contains 1196 proposals. The standard profile contains 2852 distinct proposals:
+all 1196 original identities, 994 new constant replacements and 662 string
+replacements. The four fingerprint partitions contain 712, 729, 703 and 708
+proposals. These are static inventory counts; they predict no killed count.
+
+Before execution, `selection` freezes the application SHA, profile, source path
+prefix, partition, ordering seed, complete sorted inventory and exact ordered
+partition, with canonical hashes. Reports retain the full candidate/test-plan
+map, the exact observed prefix interval, and every unexecuted fingerprint in
+order. All raw outcomes remain visible. A smaller limit bounds execution of
+that prefix; it does not change or silently trim the frozen selection.
+
+## Canonical restoration and continuation
+
+A timeout or overflow still aborts the invocation and preserves its unknown
+containment marker. Inspect the native controller/cgroup, descendants, owned
+fixture and source restoration before a separate agent acknowledges it. The
+acknowledgement archives the exact aborted log path and marker plus the declared
+inspector, note and timestamp. Distinct names are declarations; this program
+does not authenticate identity or independently prove the inspection. Retain
+the actual separate-agent/native inspection evidence with the campaign.
+
+After acknowledgement, `--restore-from` performs a fresh, unmutated compile and
+test of every statically selected plan under the same source, producer, harness
+and selection. Its separate restoration receipt and hashed raw logs must pass
+before `--continue-from` creates a new output directory. The continuation begins
+after the entire observed prefix, including the timeout and every other
+negative result. It runs fresh baselines again before further mutations.
+
+```sh
+# In the same isolated fixed-source worker, use the same explicit common options
+# (profile, path prefix, partition, seed, full harness SHA and producer SHA):
+python3 qualification/mutation_campaign.py <common-options> --operator-id <owner> \
+  --restore-from qualification/results/aborted/report.json \
+  --containment-ack qualification/results/containment-ack-<timestamp>.json \
+  --out qualification/results/fresh-restoration
+python3 qualification/mutation_campaign.py <common-options> --operator-id <owner> \
+  --continue-from qualification/results/aborted/report.json \
+  --containment-ack qualification/results/containment-ack-<timestamp>.json \
+  --restoration qualification/results/fresh-restoration/restoration.json \
+  --limit 1000 --out qualification/results/continued-suffix
+```
+
+Continuation recursively verifies all referenced report/restoration bytes,
+native classifications and raw-log hashes. It rejects changed source, producer
+or harness, altered order/profile/seed, dropped/reordered/duplicated candidates,
+missing negatives or tail entries, running histories, false completion and a
+failed/stale restoration. The original evidence is never rewritten. All six
+executed producer/helper files are bound to their declared Git bytes, including
+`campaign_lineage.py`. Git equality is separate from native PR adoption.
+
+The older 1196-proposal campaigns and earlier harnesses lack this full
+continuation contract and remain immutable historical observations. They are
+not prefixes of a fresh 2852-proposal JSON-harness campaign. No old negative or
+timeout is silently relabelled, and no old kill is needed for the new campaign.
+
+## Positive-evidence collection contract
+
+The Services production policy requires four disjoint indexes, each containing
+at least 250 distinct actual `phase: test`, `status: killed` outcomes. It does
+not require a 100% mutation score over the proposal inventory. The future
+collector must verify the adopted producer and pure-harness ancestry, complete
+selection and cumulative report lineage, all raw execution hashes/native
+classifications, clean baselines/restoration and absence of unresolved
+containment. It then deterministically selects the **first 250 eligible actual
+test kills in each partition's frozen cumulative order**. There must be no
+duplicate fingerprint within a collection or across the four partitions.
+
+Every collection must reference the full raw campaign reports and ancestor
+chain, ordered selection manifest, selected fingerprint/outcome/log references,
+complete raw counts for every status, and exact unexecuted tail. Survivors,
+errors, compile failures, invalid output and timeouts remain disclosed and earn
+zero credit. A partition with fewer than 250 verified test kills cannot qualify.
+Collection pass describes the selected positive-evidence requirement; it must
+never imply every proposal passed, a 100% mutation score, or convert a raw
+`qualified_batch: false` report into an admitted receipt. Integration/E2E and
+the immutable Services qualification record remain separate admission inputs.
+This slice specifies that collector law; it does not implement the collector or
+publish a qualification record before the real campaign outcomes exist.
 
 The original exploratory run on `ea44a20631c2c46ae9c5488487f24044cb2bc351`
 reported two assertion kills, four survivors and two test errors. The two
