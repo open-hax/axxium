@@ -149,3 +149,28 @@
       "CodeRabbit u4iC7: bare true trusts every hop, so direct clients could forge X-Forwarded-For")
   (is (= [:admit "10.0.0.0/8"] (atproto/trust-proxy-admission " 10.0.0.0/8 ")))
   (is (= [:refuse :trust-proxy-hop-count] (atproto/trust-proxy-admission "2"))))
+
+(deftest oauth-saved-state-key-material-and-key-id-bounds
+  (let [state {:iss "https://bsky.social" :verifier "abc"
+               :auth-method {:method "private_key_jwt" :kid (apply str (repeat 256 "k"))}
+               :dpop-jwk {:kty "EC" :crv "P-256" :x "xcoord"
+                          :y (apply str (repeat 512 "y")) :d "dpriv"}}]
+    (is (true? (atproto/valid-oauth-saved-state? state)))
+    (is (false? (atproto/valid-oauth-saved-state?
+                 (assoc-in state [:auth-method :kid] (apply str (repeat 257 "k"))))))
+    (is (false? (atproto/valid-oauth-saved-state?
+                 (assoc-in state [:dpop-jwk :y] (apply str (repeat 513 "y"))))))))
+
+(deftest did-web-and-rsa-crt-member-length-boundaries
+  (let [did (str "did:web:" (apply str (repeat 504 "a")))
+        state {:iss "https://bsky.social" :verifier "abc" :auth-method {:method "none"}
+               :dpop-jwk {:kty "RSA" :n "n" :e "AQAB" :d "d" :p "p" :q "q"
+                          :dp (apply str (repeat 4096 "p")) :dq "dq" :qi "qi"}}]
+    (is (true? (atproto/did? did)))
+    (is (false? (atproto/did? (str did "a"))))
+    (is (true? (atproto/valid-oauth-saved-state? state)))
+    (doseq [member [:p :q :dp :dq :qi]]
+      (is (true? (atproto/valid-oauth-saved-state?
+                   (assoc-in state [:dpop-jwk member] (apply str (repeat 4096 "p"))))))
+      (is (false? (atproto/valid-oauth-saved-state?
+                    (assoc-in state [:dpop-jwk member] (apply str (repeat 4097 "p")))))))))

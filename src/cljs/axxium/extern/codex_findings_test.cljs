@@ -7,6 +7,7 @@
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
             [axxium.routes.agents :as agents]
+            [axxium.routes.actor :as actor-routes]
             [axxium.routes.atproto :as atproto]
             [axxium.routes.auth :as auth]
             [axxium.routes.google :as google-routes]
@@ -25,7 +26,7 @@
 
 (defn- result [rows] #js {:rows (clj->js rows) :rowCount (count rows)})
 
-(defn- google-db [{:keys [fail-binding? conflict?]}]
+(defn- google-db [{:keys [fail-binding? conflict? existing-email?]}]
   (let [committed (atom []) commands (atom []) released (atom 0)
         lookups (atom 0)
         client (fn []
@@ -50,7 +51,7 @@
                                (js/Error. "binding failed")))
                             (str/starts-with? sql "INSERT INTO")
                             (do (swap! (if @staged staged committed) conj sql) (js/Promise.resolve (result [])))
-                            (str/includes? sql "email") (js/Promise.resolve (result []))
+                            (str/includes? sql "email") (js/Promise.resolve (result (if existing-email? [{:id "existing"}] [])))
                             :else (js/Promise.resolve (result [{:id (aget params 0)}]))))}))
         direct (client)]
     {:pool #js {:query (.-query direct) :connect #(js/Promise.resolve (client))}
@@ -285,3 +286,51 @@
 
 (deftest google-state-rejects-signed-payloads-outside-the-contract
   (async done (-> (google-state-rejects-signed-payloads-outside-the-contract*) (.catch (fn [e] (is false (str "google-state-rejects-signed-payloads-outside-the-contract threw: " (pr-str e))))) (.finally done))))
+
+(defn- ^:async google-existing-email-is-rejected-as-conflict* []
+  (let [fixture (google-db {:existing-email? true})
+        outcome (await (google-callback! fixture))]
+    (is (empty? (:actors outcome)))
+    (is (empty? @(:committed fixture)))
+    (is (= 409 (:status (first (:responses outcome)))))
+    (is (= "Email is already bound to another Axxium actor"
+           (get-in outcome [:responses 0 :body :error])))))
+
+(deftest google-existing-email-is-rejected-as-conflict
+  (async done (-> (google-existing-email-is-rejected-as-conflict*)
+                  (.catch (fn [e] (is false (str "Google conflict fixture rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- ^:async administrator-can-read-entity* []
+  (let [handler (get (routes actor-routes/register-actor-routes!) [:get "/api/entities/:id"])
+        responses (atom [])]
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id "admin" :auth/roles ["axxium/system-admin"]}))
+                  db/q-select-entity-for-actor (fn [_] [:admin])
+                  db/q-select-entity-by-id (fn [_] [:target])
+                  db/query-one-sql (fn [[kind]] (js/Promise.resolve (if (= kind :admin) {:kind "human"} {:id "entity-1" :kind "human"})))
+                  http/param (fn [_ _] "entity-1")
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (await (handler {} nil))
+      (is (= [{:status 200 :body {:ok true :entity {:id "entity-1" :kind "human"}}}] @responses)))))
+
+(deftest administrator-can-read-entity
+  (async done (-> (administrator-can-read-entity*)
+                  (.catch (fn [e] (is false (str "Entity fixture rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- ^:async signup-rejects-blank-email-before-persistence* []
+  (let [handler (get (routes auth/register-auth-routes!) [:post "/api/auth/signup"])
+        responses (atom [])
+        queries (atom 0)]
+    (with-redefs [cfg/get-in-config (fn [_] nil)
+                  http/body (fn [_] {:email "  " :password "long-enough"})
+                  db/query-one-sql (fn [_] (swap! queries inc) (js/Promise.resolve nil))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (await (handler {} nil))
+      (is (= [{:status 400 :body {:error "email is required"}}] @responses))
+      (is (zero? @queries)))))
+
+(deftest signup-rejects-blank-email-before-persistence
+  (async done (-> (signup-rejects-blank-email-before-persistence*)
+                  (.catch (fn [e] (is false (str "Blank email fixture rejected: " (pr-str e)))))
+                  (.finally done))))
