@@ -89,16 +89,35 @@ class OutcomeTests(unittest.TestCase):
 
     def test_timeout_kills_child_process_group(self):
         with tempfile.TemporaryDirectory() as directory:
-            marker = Path(directory) / "orphan"
+            pidfile = Path(directory) / "descendant.pid"
             logfile = Path(directory) / "log"
             command = ['python3', '-c',
-                       "import subprocess,time,sys; subprocess.Popen([sys.executable,'-c',sys.argv[1]]); time.sleep(60)",
-                       "import time,pathlib; time.sleep(1); pathlib.Path(" + repr(str(marker)) + ").write_text('bad')"]
-            with patch.object(campaign, "ROOT", Path(directory)):
-                result = campaign.execute(command, logfile, timeout=0.2)
-            self.assertTrue(result['timed_out'])
-            time.sleep(1.1)
-            self.assertFalse(marker.exists(), "subprocess survived timed-out process group")
+                       "import subprocess,time,sys; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); open(sys.argv[1],'w').write(str(p.pid)); time.sleep(60)",
+                       str(pidfile)]
+            try:
+                with patch.object(campaign, "ROOT", Path(directory)):
+                    result = campaign.execute(command, logfile, timeout=2)
+                self.assertTrue(result['timed_out'])
+                self.assertTrue(pidfile.exists(), "descendant never started; timeout test is vacuous")
+                pid = int(pidfile.read_text())
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+                        if state == "Z":
+                            break  # Reparented zombies may await init's reaper.
+                    except (ProcessLookupError, FileNotFoundError):
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("descendant survived timed-out process group")
+            finally:
+                if pidfile.exists():
+                    try:
+                        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_timeout_with_escaped_session_has_bounded_capture_and_unknown_containment(self):
         with tempfile.TemporaryDirectory() as directory:
