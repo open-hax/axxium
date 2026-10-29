@@ -11,8 +11,14 @@
               :redirect-uris ["https://knoxx.example.test/callback"]}]
    :cookie-keys [(apply str (repeat 32 "k"))] :jwks {}})
 
+(defn- admitted-config
+  "Observe a declared contract refusal; unrelated runtime errors still escape."
+  [candidate]
+  (try (law/require-config! candidate)
+       (catch cljs.core/ExceptionInfo _ nil)))
+
 (deftest closed-unique-client-registration
-  (is (= config (law/require-config! config)))
+  (is (= config (admitted-config config)))
   (doseq [candidate [(assoc config :clients [])
                      (update config :clients #(conj % (first %)))
                      (update config :clients #(conj % (assoc (first %) :id "another-client")))
@@ -72,3 +78,55 @@
     (is (= at-limit (try (law/require-config! at-limit)
                          (catch cljs.core/ExceptionInfo _ nil))))
     (is (thrown? cljs.core/ExceptionInfo (law/require-config! over-limit)))))
+
+(defn- uri-of-length
+  "A syntactically valid HTTPS callback whose ASCII path reaches the boundary."
+  [length]
+  (let [prefix "https://identity.example.test/"]
+    (str prefix (apply str (repeat (- length (count prefix)) "p")))))
+
+(deftest registered-issuer-and-redirect-uri-lengths
+  (doseq [length [2047 2048]]
+    (let [uri (uri-of-length length)]
+      (is (= length (count uri)))
+      (doseq [candidate [(assoc config :issuer uri)
+                         (assoc-in config [:clients 0 :redirect-uris] [uri])]]
+        (is (= candidate (admitted-config candidate))))))
+  (doseq [uri ["" (uri-of-length 2049)]]
+    (doseq [candidate [(assoc config :issuer uri)
+                       (assoc-in config [:clients 0 :redirect-uris] [uri])]]
+      (is (thrown? cljs.core/ExceptionInfo (law/require-config! candidate))))))
+
+(deftest registered-client-identifiers-and-secret-lengths
+  (doseq [id ["c" (apply str (repeat 128 "c"))]]
+    (let [candidate (assoc-in config [:clients 0 :id] id)]
+      (is (= candidate (admitted-config candidate)))))
+  (doseq [id ["" (apply str (repeat 129 "c"))]]
+    (is (thrown? cljs.core/ExceptionInfo
+          (law/require-config! (assoc-in config [:clients 0 :id] id)))))
+  (doseq [length [32 512]]
+    (let [secret (apply str (repeat length "s"))]
+      (doseq [candidate [(assoc-in config [:clients 0 :secret] secret)
+                         (assoc config :cookie-keys [secret])]]
+        (is (= candidate (admitted-config candidate))))))
+  (doseq [length [31 513]]
+    (let [secret (apply str (repeat length "s"))]
+      (doseq [candidate [(assoc-in config [:clients 0 :secret] secret)
+                         (assoc config :cookie-keys [secret])]]
+        (is (thrown? cljs.core/ExceptionInfo (law/require-config! candidate)))))))
+
+(deftest registered-client-and-cookie-key-collection-limits
+  (let [client (first (:clients config))
+        clients (mapv #(assoc client :id (str "client-" %)
+                             :secret (str (apply str (repeat 32 "s")) %)) (range 64))
+        at-limit (assoc config :clients clients)
+        extra (assoc client :id "extra-client" :secret (str (apply str (repeat 32 "s")) "extra"))]
+    (is (= at-limit (admitted-config at-limit)))
+    (is (thrown? cljs.core/ExceptionInfo
+          (law/require-config! (assoc config :clients (conj clients extra))))))
+  (let [keys (mapv #(str (apply str (repeat 32 "k")) %) (range 3))
+        at-limit (assoc config :cookie-keys keys)]
+    (is (= at-limit (admitted-config at-limit)))
+    (doseq [candidate [(assoc config :cookie-keys [])
+                       (assoc config :cookie-keys (conj keys (apply str (repeat 32 "extra"))))]]
+      (is (thrown? cljs.core/ExceptionInfo (law/require-config! candidate))))))
