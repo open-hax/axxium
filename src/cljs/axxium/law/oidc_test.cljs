@@ -63,3 +63,10 @@
                 "/oidc/device?user_code=ABCD#fragment" "/oidc/device?user_code=ABCD\n"
                 (str "/oidc/device?user_code=" (apply str (repeat 65 "a")))]]
     (is (= "/oidc/device" (law/device-login-return path)))))
+
+(deftest registered-client-redirect-count-boundary
+  (let [uris (mapv #(str "https://knoxx.example.test/callback/" %) (range 16))
+        at-limit (assoc-in config [:clients 0 :redirect-uris] uris)
+        over-limit (assoc-in config [:clients 0 :redirect-uris] (conj uris "https://knoxx.example.test/extra"))]
+    (is (= at-limit (law/require-config! at-limit)))
+    (is (thrown? cljs.core/ExceptionInfo (law/require-config! over-limit)))))
