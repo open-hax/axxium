@@ -67,9 +67,18 @@ The protocol harness is the pure test commit
 Its separately pinned successor
 `6e839f6e9b7a8162eaa88dd5795039a196a5dd34` adds public JSON media-type,
 syntax and object-shape assertions before parsing discovery/token/introspection
-responses. It preserves the permitted empty200 successful revocation response.
-This makes an observed plaintext500 fail a measured response assertion rather
+responses. It preserves the permitted empty 200 successful revocation response.
+This makes an observed plaintext 500 fail a measured response assertion rather
 than escape as a bare parser error. Older errors remain unchanged observations.
+The next pure successor, `9bfa2725a1763380d3bbb55b884bbeed060aa04c`,
+preserves an independent error observation for rejected synthetic handlers,
+provider error events and rejected queries on the fixture's owned pool. The
+pool's original query method is restored in `finally`. The measurement preload
+accepts the payload-free observation only from the declared protocol fixture;
+an underlying execution error therefore forces `test_error` even when the
+HTTP response also fails a JSON assertion. Ordinary response assertions retain
+their existing meaning when no underlying error occurred. Older manifests and
+raw outcomes are not reinterpreted under this new harness.
 It additionally admits exactly `scripts/oidc-protocol.fixture.mjs`,
 `scripts/oidc-http.fixture.mjs`, and `scripts/oidc-device.fixture.mjs` as test
 support. These modules belong only to the existing isolated integration fixture

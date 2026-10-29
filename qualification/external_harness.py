@@ -19,6 +19,7 @@ HARNESS_SHA = '5b0e9be2170c8b79662077c612efec7bb79f21b8'
 BOUNDARY_HARNESS_SHA = '4a7ceeb948c03b9198222c27bb8a8007db2979ea'
 PROTOCOL_HARNESS_SHA = 'ee15ffff63e4d2c0d0c46645a3444814ba93b596'
 JSON_PROTOCOL_HARNESS_SHA = '6e839f6e9b7a8162eaa88dd5795039a196a5dd34'
+FIXTURE_ERROR_HARNESS_SHA = '9bfa2725a1763380d3bbb55b884bbeed060aa04c'
 CHANGED_TEST_PATHS = frozenset({
     'src/cljs/axxium/config_test.cljs',
     'src/cljs/axxium/extern/authorization_boundaries_test.cljs',
@@ -47,6 +48,8 @@ def accepted_harnesses():
         PROTOCOL_HARNESS_SHA: CHANGED_TEST_PATHS | TEST_SUPPORT_PATHS | {
             'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
         JSON_PROTOCOL_HARNESS_SHA: CHANGED_TEST_PATHS | TEST_SUPPORT_PATHS | {
+            'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
+        FIXTURE_ERROR_HARNESS_SHA: CHANGED_TEST_PATHS | TEST_SUPPORT_PATHS | {
             'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
     }
 
@@ -122,7 +125,8 @@ def contract(root, application_sha, harness_sha):
             and git(root, 'rev-parse', 'HEAD').decode().strip() == APPLICATION_SHA,
             'Worker must retain the exact application Git HEAD')
     application, harness = tree(root, application_sha), tree(root, harness_sha)
-    test_support = (TEST_SUPPORT_PATHS if harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA}
+    test_support = (TEST_SUPPORT_PATHS if harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA,
+                                                       FIXTURE_ERROR_HARNESS_SHA}
                     else frozenset())
     require(test_support <= application.keys() & harness.keys(),
             'Accepted protocol test-support inputs are missing')
