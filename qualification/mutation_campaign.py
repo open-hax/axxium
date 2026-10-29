@@ -1009,6 +1009,13 @@ def main():
         parser.error("--restoration belongs only to --continue-from")
     if args.containment_ack is not None and not (args.restore_from or args.continue_from):
         parser.error("--containment-ack requires restoration or continuation")
+    # Interpret documented relative paths within the worker checkout. Do not
+    # resolve or normalize them: the evidence reader must still reject '..'
+    # components and inspect every parent for redirected symlinks/ownership.
+    for field in ("restore_from", "continue_from", "containment_ack", "restoration"):
+        value = getattr(args, field)
+        if value is not None and not value.is_absolute():
+            setattr(args, field, ROOT / value)
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, interrupted)
     signal.signal(signal.SIGUSR1, stop_after_current)

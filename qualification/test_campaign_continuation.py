@@ -99,7 +99,7 @@ raise SystemExit(failed)
                         'Fixture native timeout process group terminated; temporary source restored.', 'fixture-inspector')
                     ack = lineage.validate_ack(campaign, ack_path, history)
                     restored_path = root / 'qualification/results/restoration/restoration.json'
-                    invoke('--restore-from', initial, '--containment-ack', ack_path,
+                    invoke('--restore-from', initial.relative_to(root), '--containment-ack', ack_path.relative_to(root),
                            '--out', restored_path.parent)
                     restored_bytes = restored_path.read_bytes()
                     self.assertEqual(json.loads(restored_bytes)['status'], 'passed')
@@ -107,13 +107,22 @@ raise SystemExit(failed)
                     changed = copy.deepcopy(json.loads(restored_bytes)); changed['prior_report']['next_index'] = 0
                     campaign.save_json(restored_path, changed)
                     with self.assertRaises(ValueError):
-                        invoke('--continue-from', initial, '--containment-ack', ack_path,
-                               '--restoration', restored_path, '--out', 'qualification/results/rejected')
+                        invoke('--continue-from', initial.relative_to(root), '--containment-ack', ack_path.relative_to(root),
+                               '--restoration', restored_path.relative_to(root), '--out', 'qualification/results/rejected')
                     self.assertFalse((root/'qualification/results/rejected').exists())
                     campaign.private_write(restored_path, restored_bytes.decode())
+                    redirect = root / 'qualification/results/redirect'
+                    redirect.symlink_to(initial.parent, target_is_directory=True)
+                    for unsafe in (Path('qualification/results/initial/../initial/report.json'),
+                                   Path('qualification/results/redirect/report.json')):
+                        with self.subTest(unsafe=str(unsafe)), self.assertRaises(ValueError):
+                            invoke('--continue-from', unsafe, '--containment-ack', ack_path.relative_to(root),
+                                   '--restoration', restored_path.relative_to(root),
+                                   '--out', 'qualification/results/unsafe')
+                        self.assertFalse((root/'qualification/results/unsafe').exists())
                     suffix = root / 'qualification/results/suffix/report.json'
-                    invoke('--continue-from', initial, '--containment-ack', ack_path,
-                           '--restoration', restored_path, '--limit', 1000, '--out', suffix.parent)
+                    invoke('--continue-from', initial.relative_to(root), '--containment-ack', ack_path.relative_to(root),
+                           '--restoration', restored_path.relative_to(root), '--limit', 1000, '--out', suffix.parent)
                     complete = lineage.load_history(campaign, suffix, candidates=candidates, selection=selection,
                                                     producer=producer, harness=harness)
                     result = complete['document']
