@@ -27,6 +27,8 @@ class ExternalHarnessTests(unittest.TestCase):
         self.write('package.json', '{"name":"fixture"}\n')
         self.write('package-lock.json', '{"lockfileVersion":3}\n')
         self.write('scripts/existing.test.mjs', 'import "../target/test.cjs";\n')
+        for support in harness.TEST_SUPPORT_PATHS:
+            self.write(support, "import assert from 'node:assert/strict'; assert(true);\n")
         self.write('public/index.html', '<p>existing fixture</p>\n')
         self.write('src/cljs/axxium/core.cljs', '(ns axxium.core)\n(def enabled true)\n')
         self.write('src/cljs/axxium/other.cljc', '(ns axxium.other)\n')
@@ -194,7 +196,9 @@ class ExternalHarnessTests(unittest.TestCase):
             harness.validate(self.root, descriptor)
         extra.unlink()
         script = project / 'scripts/existing.test.mjs'
-        script.unlink();script.parent.rmdir()
+        for path in [script, *(project / support for support in harness.TEST_SUPPORT_PATHS)]:
+            path.unlink()
+        script.parent.rmdir()
         (project / 'scripts').symlink_to(self.root / 'scripts', target_is_directory=True)
         with self.assertRaises(harness.HarnessError):
             harness.validate(self.root, descriptor)
@@ -236,6 +240,54 @@ class ExternalHarnessTests(unittest.TestCase):
             altered['harness_sha'] = identity
             with self.subTest(identity=identity), self.assertRaises(harness.HarnessError):
                 harness.validate(self.root, altered)
+
+    def protocol_commit(self, extra=None):
+        self.git('checkout', '-q', '--detach', self.regressions)
+        self.write('src/cljs/axxium/extern/qualification_boundaries_test.cljs', '; accepted public contracts\n')
+        for support in harness.TEST_SUPPORT_PATHS:
+            self.write(support, "import assert from 'node:assert/strict'; assert.ok(true);\n")
+        if extra:
+            self.write(extra, '; unaccepted support input\n')
+        revision = self.commit('accepted protocol test support')
+        self.git('checkout', '-q', '--detach', self.application)
+        return revision
+
+    def test_closed_protocol_support_uses_accepted_test_bytes_and_retains_application_scripts(self):
+        revision = self.protocol_commit()
+        first = self.prepare()
+        with mock.patch.object(harness, 'PROTOCOL_HARNESS_SHA', revision):
+            descriptor = harness.prepare(self.root, self.application, revision)
+            self.assertEqual(sorted(harness.TEST_SUPPORT_PATHS), descriptor['test_support_paths'])
+            self.assertNotIn('test_support_paths', first)
+            self.assertEqual(harness.CHANGED_TEST_PATHS | harness.TEST_SUPPORT_PATHS |
+                             {'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
+                             set(descriptor['changed_test_paths']))
+            for support in harness.TEST_SUPPORT_PATHS:
+                self.assertEqual('test-support', descriptor['files'][support]['kind'])
+                self.assertIn('assert.ok(true)', (Path(descriptor['project_dir']) / support).read_text())
+                self.assertIn(' assert(true)', (self.root / support).read_text())
+            harness.validate(self.root, first)
+            harness.validate(self.root, descriptor)
+            self.assertEqual(first, self.prepare())
+            support = Path(descriptor['project_dir']) / sorted(harness.TEST_SUPPORT_PATHS)[0]
+            support.write_text('; changed generated test support\n')
+            with self.assertRaises(harness.HarnessError):
+                harness.validate(self.root, descriptor)
+
+    def test_protocol_support_exception_does_not_admit_other_repository_changes(self):
+        for extra in ('scripts/existing.test.mjs', 'README.md', 'src/cljs/axxium/unreviewed_test.cljs'):
+            revision = self.protocol_commit(extra)
+            with mock.patch.object(harness, 'PROTOCOL_HARNESS_SHA', revision), self.assertRaises(harness.HarnessError):
+                harness.prepare(self.root, self.application, revision)
+
+    def test_missing_known_protocol_support_input_refuses(self):
+        revision = self.protocol_commit()
+        self.git('checkout', '-q', '--detach', revision)
+        self.git('rm', sorted(harness.TEST_SUPPORT_PATHS)[0])
+        missing = self.commit('missing test support')
+        self.git('checkout', '-q', '--detach', self.application)
+        with mock.patch.object(harness, 'PROTOCOL_HARNESS_SHA', missing), self.assertRaises(harness.HarnessError):
+            harness.prepare(self.root, self.application, missing)
 
 
 if __name__ == '__main__':

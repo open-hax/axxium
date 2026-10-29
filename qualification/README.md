@@ -35,14 +35,15 @@ fixture; inspect the owning process and fixture before retrying.
 
 ## Fixed application source with a separate accepted test harness
 
-`--external-harness-sha` can select either fixed test-only regression revision
+`--external-harness-sha` can select one of the fixed test-only regression revisions
 `5b0e9be2170c8b79662077c612efec7bb79f21b8` (eight changed test files) or
 `4a7ceeb948c03b9198222c27bb8a8007db2979ea` (the same eight plus the public
-boundary test namespace), while the application checkout and
+boundary test namespace), or the separately pinned protocol harness described
+below, while the application checkout and
 mutation fingerprints remain bound to
 `58234df96ca86507e6cdd87f65aaa9ab35621415`. The helper refuses any other
-application/harness pair, any non-test Git difference, or a changed immutable
-harness. It proves all non-test repository files and modes are identical, then
+application/harness pair, any production Git difference, or a changed immutable
+harness. It proves production and unchanged support repository files/modes are identical, then
 materializes the harness's test files in a generated project and links each
 application source file to the actual fixed checkout. There is one source tree,
 so duplicate namespace resolution cannot select the old tracked tests.
@@ -55,10 +56,34 @@ bytes. Matching Git bytes does not prove native review or adoption; qualificatio
 collection must verify that custody separately. Neither a harness proposal nor
 an existing regression result is a mutation kill.
 
-These identities name the test-only PR heads. A subsequent main merge containing
-qualification tooling cannot replace them: its non-test repository tree differs
-from the application. Each harness keeps a separate generated project and the
-older project's descriptor remains valid under its original identity.
+These identities name pure test/test-support commits included in native adopted
+PR ancestry. A subsequent main merge containing qualification tooling cannot
+replace them: its repository tree outside the declared test inputs differs from the application.
+Each harness keeps a separate generated project and the older project's
+descriptor remains valid under its original identity.
+
+The protocol harness is the pure test commit
+`ee15ffff63e4d2c0d0c46645a3444814ba93b596`.
+It additionally admits exactly `scripts/oidc-protocol.fixture.mjs`,
+`scripts/oidc-http.fixture.mjs`, and `scripts/oidc-device.fixture.mjs` as test
+support. These modules belong only to the existing isolated integration fixture
+chain; the server build and Dockerfile exclude them. The helper copies their
+accepted harness bytes, records `test-support` roles and `test_support_paths`,
+and verifies every other non-test repository byte/mode against the fixed
+application. The application checkout's original scripts remain untouched.
+Older harnesses admit no test-support differences and keep their original
+descriptor byte shape. Renaming bare `assert(...)` calls to `assert.ok(...)`
+preserves their behavior while making actual named assertion execution and
+failures visible to the existing measured driver. Infrastructure startup
+assertions remain excluded.
+
+The historical `non_test_tree_sha256` digests have explicit scopes. The first
+two harnesses bind all 112 files outside the ClojureScript test set. The protocol
+harness binds the 109 remaining files after additionally excluding its three
+declared test-support modules. Every file in that scope remains identical to
+the application revision; each excluded fixture is independently immutable and
+hashed in the descriptor. The historical digests are not interchangeable:
+compare the declared scope and `test_support_paths` before interpreting a hash.
 
 ```sh
 python3 qualification/mutation_campaign.py --path-prefix src/cljs/ \
