@@ -17,6 +17,7 @@
                      (update config :clients #(conj % (first %)))
                      (update config :clients #(conj % (assoc (first %) :id "another-client")))
                      (assoc-in config [:clients 0 :secret] "short")
+                     (assoc-in config [:clients 0 :secret] (apply str (repeat 31 "x")))
                      (assoc-in config [:clients 0 :id] "")
                      (assoc config :issuer "")
                      (assoc-in config [:clients 0 :unexpected-privilege] true)
