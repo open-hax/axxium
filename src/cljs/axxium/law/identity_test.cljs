@@ -169,5 +169,8 @@
     (is (true? (atproto/did? did)))
     (is (false? (atproto/did? (str did "a"))))
     (is (true? (atproto/valid-oauth-saved-state? state)))
-    (is (false? (atproto/valid-oauth-saved-state?
-                 (assoc-in state [:dpop-jwk :dp] (apply str (repeat 4097 "p"))))))))
+    (doseq [member [:p :q :dp :dq :qi]]
+      (is (true? (atproto/valid-oauth-saved-state?
+                   (assoc-in state [:dpop-jwk member] (apply str (repeat 4096 "p"))))))
+      (is (false? (atproto/valid-oauth-saved-state?
+                    (assoc-in state [:dpop-jwk member] (apply str (repeat 4097 "p")))))))))

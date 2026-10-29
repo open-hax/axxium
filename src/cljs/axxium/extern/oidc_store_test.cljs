@@ -67,7 +67,9 @@
         find-error (fn ^:async find-error* []
                      (try (await (.find adapter "opaque-device")) nil
                           (catch :default error (.-error error))))]
-    (is (= "registered-a" (.-clientId (await (.find adapter "opaque-device")))))
+    (is (= [:found "registered-a"]
+           (try [:found (.-clientId (await (.find adapter "opaque-device")))]
+                (catch :default _ [:query-failed]))))
     (is (= 1 (:poll_count @row)))
     (is (some #(.includes % "FOR UPDATE") @queries))
     (is (= "COMMIT" (last @queries)))
@@ -86,7 +88,9 @@
       (is (= before @row)))
     (reset! context {:poll? true :authenticated-client-id "registered-a"})
     (swap! row assoc :now_ms "16000")
-    (is (some? (await (.find adapter "opaque-device"))))
+    (is (= :found
+           (try (if (some? (await (.find adapter "opaque-device"))) :found :missing)
+                (catch :default _ :query-failed))))
     (is (= 4 (:poll_count @row)))
     (swap! row assoc :now_ms "600000")
     (is (= "expired_token" (await (find-error))))
