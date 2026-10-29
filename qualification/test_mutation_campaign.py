@@ -86,10 +86,12 @@ class OutcomeTests(unittest.TestCase):
                 self.assertFalse(left & right)
 
     def test_only_one_cooperating_campaign_can_hold_checkout_lock(self):
-        with campaign.campaign_lock():
-            with self.assertRaisesRegex(RuntimeError, 'Another mutation pilot'):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(campaign, 'ROOT', Path(directory)):
                 with campaign.campaign_lock():
-                    self.fail('second lock must refuse')
+                    with self.assertRaisesRegex(RuntimeError, 'Another mutation pilot'):
+                        with campaign.campaign_lock():
+                            self.fail('second lock must refuse')
 
     def test_recovery_checks_revision_and_does_not_clobber_independent_changes(self):
         with tempfile.TemporaryDirectory() as directory:
