@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import signal
 import subprocess
 import time
@@ -25,9 +26,11 @@ SOURCE_SHA = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, tex
 if not re.fullmatch(r"[0-9a-f]{40}", SOURCE_SHA):
     raise ValueError("A full immutable Git revision is required")
 SOURCE = ROOT / "src/cljs"
-COMPILE = ["volta", "run", "--node", "22.23.3", "node_modules/.bin/shadow-cljs",
+NODE = subprocess.check_output(["volta", "run", "--node", "22.23.3", "node", "-p", "process.execPath"],
+                               cwd=ROOT, text=True).strip()
+COMPILE = [NODE, "node_modules/.bin/shadow-cljs",
            "--config-merge", "{:autorun false}", "compile", "test"]
-TEST = ["volta", "run", "--node", "22.23.3", "node", "target/test.cjs"]
+TEST = [NODE, "target/test.cjs"]
 REPLACEMENTS = {
     "=": ("not=",), "not=": ("=",), "<": ("<=", ">"), "<=": ("<", ">="),
     ">": (">=", "<"), ">=": (">", "<="), "and": ("or",), "or": ("and",),
@@ -239,7 +242,10 @@ def counts(output: str):
 def classify_compile(result):
     if result["timed_out"]:
         return "timeout"
-    if result["exit_code"] != 0 or not re.search(r"Build completed\..*0 warnings", result["output"]):
+    if result.get("containment_unknown"):
+        return "containment_unknown"
+    warnings = re.findall(r"Build completed\.[^\n]*?\b(\d+) warnings\b", result["output"])
+    if result["exit_code"] != 0 or len(warnings) != 1 or int(warnings[0]) != 0:
         return "compile_failure"
     return "passed"
 
@@ -247,12 +253,16 @@ def classify_compile(result):
 def classify_test(result, baseline):
     if result["timed_out"]:
         return "timeout"
+    if result.get("containment_unknown"):
+        return "containment_unknown"
     summary = counts(result["output"])
     if not summary or summary["tests"] != baseline["tests"] or summary["assertions"] < 1:
         return "invalid_test_output"
     if summary["errors"]:
         return "test_error"
-    if summary["failures"] > 0 and result["exit_code"] != 0 and "FAIL in " in result["output"]:
+    # Invoke Node directly: Volta maps a child exit of 1 to 126 and cannot
+    # distinguish that assertion exit from an execution failure.
+    if summary["failures"] > 0 and result["exit_code"] == 1 and "FAIL in " in result["output"]:
         return "killed"
     if summary["failures"] == 0 and result["exit_code"] == 0:
         return "survived"
@@ -260,31 +270,57 @@ def classify_test(result, baseline):
 
 
 def execute(command, logfile, timeout):
+    """Bounded capture; on timeout or output overflow descendants are unknown."""
     started = time.monotonic()
+    deadline = started + timeout
     process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, start_new_session=True)
+                               stderr=subprocess.STDOUT, start_new_session=True)
+    os.set_blocking(process.stdout.fileno(), False)
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    chunks, size = [], 0
+    timed_out = overflow = False
     try:
-        output, _ = process.communicate(timeout=timeout)
-        data = {"exit_code": process.returncode, "timed_out": False}
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            output, _ = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate()
-        data = {"exit_code": None, "timed_out": True}
+        while selector.get_map() or process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            for key, _ in selector.select(min(remaining, 0.1)):
+                chunk = os.read(key.fd, 65536)
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                else:
+                    size += len(chunk)
+                    if size > 8 * 1024 * 1024:
+                        overflow = True
+                        break
+                    chunks.append(chunk)
+            if overflow:
+                break
     except BaseException:
-        if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.communicate(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         raise
+    finally:
+        if timed_out or overflow:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+        selector.close()
+        process.stdout.close()
+    output = b"".join(chunks).decode("utf-8", errors="replace")
     logfile.write_text(output)
-    return {**data, "seconds": round(time.monotonic() - started, 3), "output": output,
+    return {"exit_code": process.returncode, "timed_out": timed_out,
+            "containment_unknown": timed_out or overflow, "output_overflow": overflow,
+            "seconds": round(time.monotonic() - started, 3), "output": output,
             "log_sha256": digest(output.encode())}
 
 
@@ -334,7 +370,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
     if out.exists():
         raise ValueError("Output already exists; preserve earlier evidence")
     out.mkdir(mode=0o700, parents=True)
-    node_version = subprocess.check_output(["volta", "run", "--node", "22.23.3", "node", "--version"],
+    node_version = subprocess.check_output([NODE, "--version"],
                                            cwd=ROOT, text=True).strip()
     if node_version != "v22.23.3":
         raise ValueError("The test runtime does not match the pinned Node version")
@@ -355,7 +391,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
         raise RuntimeError("Baseline compiler did not pass with zero warnings")
     test_result = execute(TEST, out / "baseline.test.log", timeout)
     baseline = counts(test_result["output"])
-    if (test_result["timed_out"] or test_result["exit_code"] != 0 or not baseline or
+    if (test_result["timed_out"] or test_result["containment_unknown"] or test_result["exit_code"] != 0 or not baseline or
             baseline["tests"] <= 0 or baseline["assertions"] <= 0 or baseline["failures"] or baseline["errors"]):
         raise RuntimeError("Baseline test did not complete cleanly")
     state["baseline"] = {**baseline, "compile_log_sha256": compile_result["log_sha256"],
@@ -398,12 +434,14 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
         require_unchanged_tree()
         state["results"].append(entry)
         save()
+        if build["containment_unknown"] or (entry["phase"] == "test" and test["containment_unknown"]):
+            raise RuntimeError("Execution containment unknown; source restored; inspect processes before retrying")
         print(index, candidate["path"], candidate["before"], "=>", candidate["after"], entry["status"], flush=True)
     restored = execute(COMPILE, out / "restored.compile.log", timeout)
     if classify_compile(restored) != "passed":
         raise RuntimeError("Restored source did not compile cleanly")
     final_test = execute(TEST, out / "restored.test.log", timeout)
-    if (final_test["timed_out"] or final_test["exit_code"] != 0 or
+    if (final_test["timed_out"] or final_test["containment_unknown"] or final_test["exit_code"] != 0 or
             counts(final_test["output"]) != baseline):
         raise RuntimeError("Restored source did not reproduce the clean baseline")
     require_unchanged_tree()

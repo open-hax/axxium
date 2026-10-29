@@ -1,5 +1,7 @@
 """Boundary tests for the candidate runner; fixture outcomes are not evidence."""
 import tempfile
+import os
+import signal
 import time
 import unittest
 from pathlib import Path
@@ -34,7 +36,10 @@ class OutcomeTests(unittest.TestCase):
         return {"output": output, "exit_code": exit_code, "timed_out": timed_out}
 
     def test_only_completed_assertion_failure_counts_as_kill(self):
-        self.assertEqual(campaign.classify_test(self.result(self.failed, 126), self.base), "killed")
+        self.assertEqual(campaign.classify_test(self.result(self.failed, 1), self.base), "killed")
+        for code in (-9, 126, 137):
+            with self.subTest(exit_code=code):
+                self.assertEqual(campaign.classify_test(self.result(self.failed, code), self.base), "invalid_test_exit")
         self.assertEqual(campaign.classify_test(self.result(self.clean), self.base), "survived")
         self.assertEqual(campaign.classify_test(self.result(self.failed, 0), self.base), "invalid_test_exit")
         self.assertEqual(campaign.classify_test(self.result(self.failed.replace('0 errors','1 errors'), 1), self.base), "test_error")
@@ -46,7 +51,9 @@ class OutcomeTests(unittest.TestCase):
         good = "Build completed. (31 files, 0 compiled, 0 warnings, 1.23s)"
         self.assertEqual(campaign.classify_compile(self.result(good)), "passed")
         self.assertEqual(campaign.classify_compile(self.result(good, 1)), "compile_failure")
-        self.assertEqual(campaign.classify_compile(self.result(good.replace('0 warnings','1 warnings'))), "compile_failure")
+        for count in (1, 10, 20, 100):
+            with self.subTest(warnings=count):
+                self.assertEqual(campaign.classify_compile(self.result(good.replace("0 warnings", f"{count} warnings"))), "compile_failure")
         self.assertEqual(campaign.classify_compile(self.result(good, timed_out=True)), "timeout")
 
     def test_timeout_kills_child_process_group(self):
@@ -60,6 +67,28 @@ class OutcomeTests(unittest.TestCase):
             self.assertTrue(result['timed_out'])
             time.sleep(1.1)
             self.assertFalse(marker.exists(), "subprocess survived timed-out process group")
+
+    def test_timeout_with_escaped_session_has_bounded_capture_and_unknown_containment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pidfile = Path(directory) / "escaped.pid"
+            command = ["python3", "-c",
+                       "import subprocess,time,sys; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],start_new_session=True); open(sys.argv[1],'w').write(str(p.pid)); time.sleep(60)",
+                       str(pidfile)]
+            started = time.monotonic()
+            try:
+                result = campaign.execute(command, Path(directory) / "log", timeout=0.4)
+                self.assertLess(time.monotonic() - started, 2.5)
+                self.assertTrue(result["timed_out"])
+                self.assertTrue(result["containment_unknown"])
+                self.assertEqual(campaign.classify_test(result, self.base), "timeout")
+                self.assertTrue(pidfile.exists())
+                os.kill(int(pidfile.read_text()), 0)  # The escaped process is not claimed cleaned up.
+            finally:
+                if pidfile.exists():
+                    try:
+                        os.kill(int(pidfile.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_restore_refuses_to_overwrite_independent_changes(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -29,6 +29,16 @@ Git source and the recorded original or mutant bytes; unrelated changes fail
 closed. A hard termination may leave a compiler child and a temporary PostgreSQL
 fixture; inspect the owning process and fixture before retrying.
 
+Capture is limited to 8 MiB and the command deadline. A timeout or capture
+overflow kills the original process group, records containment as unknown,
+restores the source, and stops the campaign; descendants can escape the group
+and may remain alive. This is not proof of process containment or cleanup.
+Use an isolated environment and inspect it before retrying. Normal completion
+also does not prove a descendant did not detach after closing its output.
+The runner calls the resolved pinned Node executable directly: Volta translates
+Node exit 1 to 126 on this host, making assertion exits ambiguous. Only exit 1
+with a completed assertion-failure summary is counted as a test kill.
+
 The current scanner excludes test and `_fixture` source files. It finds list-head
 and literal candidates outside strings, regular expressions, reader-discarded,
 quoted, and `(comment ...)` forms. Candidates are syntactic proposals, not a
@@ -39,8 +49,10 @@ establish comprehensive test coverage, run real test-phase evaluations, dedupe
 source identities, and independently review the resulting evidence.
 
 The original exploratory run on `ea44a20631c2c46ae9c5488487f24044cb2bc351`
-recorded two test-assertion kills, four survivors and two test errors, not eight
-kills. All four survivors also survived the existing isolated PostgreSQL/OIDC
+reported two assertion kills, four survivors and two test errors. The two
+claimed kills exited through Volta with code 126 and are no longer counted as
+verified kills; 126 cannot distinguish an assertion failure from an execution
+failure. The four survivors and two test errors remain distinct observations. All four survivors also survived the existing isolated PostgreSQL/OIDC
 integration fixture. Separate test-only candidate `9aedef0dc290754ba73bb13a56828373e3b1112e`
 adds four boundary assertions; its counterfactual run kills those four mutants,
 but its changed test revision cannot be retroactively attributed to the parent
