@@ -71,7 +71,7 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
     ? { id, status: actorActive ? 'active' : 'disabled', display_name: 'Synthetic Actor' } : null);
     const discovery = await (await boundedFetch(issuer + '/.well-known/openid-configuration')).json();
     assert.equal(discovery.issuer, issuer);
-    assert(!discovery.grant_types_supported.includes('urn:ietf:params:oauth:grant-type:device_code'));
+    assert.ok(!discovery.grant_types_supported.includes('urn:ietf:params:oauth:grant-type:device_code'));
     for (const client of clients) {
       const verifier = randomBytes(32).toString('base64url');
       const state = randomBytes(24).toString('hex');
@@ -80,7 +80,7 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
         response_type: 'code', scope: 'openid profile', state, nonce,
         code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256' })}`;
       const callback = await browser(auth);
-      assert(callback instanceof URL);
+      assert.ok(callback instanceof URL);
       assert.equal(callback.searchParams.get('state'), state);
       const request = { client_id: client.id, client_secret: client.secret, grant_type: 'authorization_code',
         code: callback.searchParams.get('code'), code_verifier: verifier, redirect_uri: client['redirect-uris'][0] };
@@ -104,9 +104,9 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
       actorActive = true;
 
       const savedRefresh = await pool.query("SELECT payload,expires_at FROM axxium_oidc_records WHERE model='RefreshToken' AND consumed_at IS NULL AND payload->>'clientId'=$1", [client.id]);
-      assert(savedRefresh.rows.length > 0);
+      assert.ok(savedRefresh.rows.length > 0);
       const bound = await pool.query("SELECT LEAST(b.expires_at,s.expires_at) AS expiry FROM axxium_oidc_grant_sessions b JOIN sessions s ON s.token_hash=b.token_hash WHERE b.grant_id=$1", [savedRefresh.rows[0].payload.grantId]);
-      assert(savedRefresh.rows[0].expires_at <= bound.rows[0].expiry);
+      assert.ok(savedRefresh.rows[0].expires_at <= bound.rows[0].expiry);
       const claims = JSON.parse(Buffer.from(tokens.body.id_token.split('.')[1], 'base64url'));
       assert.equal(claims.sub, 'synthetic-actor'); assert.equal(claims.aud, client.id); assert.equal(claims.nonce, nonce);
       const statusRequest = { client_id: client.id, client_secret: client.secret, token: tokens.body.access_token };
@@ -122,22 +122,22 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
       assert.equal((await form('/token/introspection', statusRequest)).body.active, false);
       const rotationRequest = {...refreshRequest, refresh_token: renewed.body.refresh_token};
       const rotationRace = await Promise.all([form('/token', rotationRequest), form('/token', rotationRequest)]);
-      assert(rotationRace.filter(x => x.status === 200).length <= 1);
-      assert(rotationRace.some(x => x.status === 400));
+      assert.ok(rotationRace.filter(x => x.status === 200).length <= 1);
+      assert.ok(rotationRace.some(x => x.status === 400));
       assert.equal((await form('/token', rotationRequest)).status, 400);
       assert.equal((await form('/token', request)).status, 400);
 
       const raceCallback = await browser(auth);
       const raceRequest = { ...request, code: raceCallback.searchParams.get('code') };
       const exchanges = await Promise.all([form('/token', raceRequest), form('/token', raceRequest)]);
-      assert(exchanges.filter(x => x.status === 200).length <= 1);
-      assert(exchanges.some(x => x.status === 400));
+      assert.ok(exchanges.filter(x => x.status === 200).length <= 1);
+      assert.ok(exchanges.some(x => x.status === 400));
       const raceWinner = exchanges.find(x => x.status === 200);
       if (raceWinner?.body.refresh_token) {
         const req = {...refreshRequest, refresh_token: raceWinner.body.refresh_token};
         const rotations = await Promise.all([form('/token', req), form('/token', req)]);
-        assert(rotations.filter(x => x.status === 200).length <= 1);
-        assert(rotations.some(x => x.status === 400));
+        assert.ok(rotations.filter(x => x.status === 200).length <= 1);
+        assert.ok(rotations.some(x => x.status === 400));
         assert.equal((await form('/token', req)).status, 400);
       }
       // Replay detection may revoke the whole grant, including the first response.

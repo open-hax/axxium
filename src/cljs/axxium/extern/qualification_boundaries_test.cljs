@@ -68,6 +68,15 @@
         (is (false? (atproto/valid-oauth-saved-state?
                       (assoc base :auth-method {:method "private_key_jwt" :kid value}))))))))
 
+(deftest sdk-optional-app-state-preserves-its-public-shape-boundaries
+  (let [saved {:iss "https://bsky.social" :verifier "v" :auth-method {:method "none"}
+               :dpop-jwk {:kty "EC" :crv "P-256" :x "x" :y "y" :d "d"}}]
+    (is (true? (atproto/valid-oauth-saved-state? saved)))
+    (doseq [value [nil "" (text 8192)]]
+      (is (true? (atproto/valid-oauth-saved-state? (assoc saved :app-state value)))))
+    (doseq [value [(text 8193) false 42 [] {}]]
+      (is (false? (atproto/valid-oauth-saved-state? (assoc saved :app-state value)))))))
+
 (defn- actor-handlers []
   (let [handlers (atom {})
         register (fn [method] (fn [_ url handler] (swap! handlers assoc [method url] handler)))]
@@ -154,6 +163,40 @@
 (deftest administrator-capability-update-enforces-public-cardinality
   (async done (-> (capability-cardinality*)
                   (.catch (fn [e] (is false (str "Capability contract rejected: " (pr-str e)))))
+                  (.finally done))))
+
+(defn- ^:async actor-page-cursor-admission* []
+  (let [handler (get (actor-handlers) [:get "/api/actors"])
+        selected {:id "actor-a" :password_hash "synthetic-private-marker"}
+        success [{:status 200 :body {:ok true :actors [{:id "actor-a"}] :count 1}}]]
+    (let [response (await (invoke-route* handler
+                           {:context administrator :rows [{:kind "human"}] :actors [selected]}))]
+      (is (= success (:responses response)))
+      (is (= 2 (count (:queries response)))))
+    (doseq [after ["a" (text 256)]]
+      (let [response (await (invoke-route* handler
+                             {:context administrator :rows [{:kind "human"} {:id after}]
+                              :actors [selected] :request {:query {:after after}}}))]
+        (is (= success (:responses response)))
+        (is (= 3 (count (:queries response))))
+        (is (empty? (:writes response)))))
+    (let [response (await (invoke-route* handler
+                           {:context administrator :rows [{:kind "human"} nil]
+                            :request {:query {:after "unknown"}}}))]
+      (is (= [{:status 400 :body {:error "Unknown actor cursor"}}] (:responses response)))
+      (is (= 2 (count (:queries response))))
+      (is (empty? (:writes response))))
+    (doseq [after ["" (text 257) false 42 [] {}]]
+      (let [response (await (invoke-route* handler
+                             {:context administrator :rows [{:kind "human"}]
+                              :request {:query {:after after}}}))]
+        (is (= [{:status 400 :body {:error "Invalid actor cursor"}}] (:responses response)))
+        (is (= 1 (count (:queries response))) "Malformed cursors refuse before any cursor/page query")
+        (is (empty? (:writes response)))))))
+
+(deftest administrator-actor-pages-refuse-malformed-or-unknown-cursors
+  (async done (-> (actor-page-cursor-admission*)
+                  (.catch (fn [e] (is false (str "Actor cursor contract rejected: " (pr-str e)))))
                   (.finally done))))
 
 (defn- reply-fixture []

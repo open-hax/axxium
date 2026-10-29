@@ -81,7 +81,7 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
     );
     input = await browse(device.verification_uri);
     const xsrf = hidden(await input.text(), 'xsrf');
-    assert(xsrf);
+    assert.ok(xsrf);
     // Exact Origin + engine session XSRF + real root session all protect writes.
     const request = { xsrf, user_code: device.user_code };
     assert.equal(
@@ -92,7 +92,7 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
     const confirm = await browse(device.verification_uri, request);
     assert.equal(confirm.status, 200);
     const confirmHtml = await confirm.text();
-    assert(confirmHtml.includes(device.user_code));
+    assert.ok(confirmHtml.includes(device.user_code));
     let response = await browse(device.verification_uri, {
       xsrf: hidden(confirmHtml, 'xsrf'),
       user_code: hidden(confirmHtml, 'user_code'),
@@ -104,11 +104,11 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
       if (!location) {
         assert.equal(response.status, 200);
         const html = await response.text();
-        assert(
+        assert.ok(
           consentSeen,
           'Every device needs explicit consent, including an existing shared browser grant',
         );
-        assert(
+        assert.ok(
           html.includes(
             decision === 'approve' ? 'Device approved' : 'Device request could not be completed.',
           ),
@@ -120,9 +120,9 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
       if (response.status === 200 && new URL(url).pathname.startsWith('/oidc/interaction/')) {
         const html = await response.text();
         const csrf = html.match(/name=csrf value='([^']+)'/)?.[1];
-        assert(csrf);
-        assert(!html.includes(rootToken));
-        assert(!html.includes(client.secret));
+        assert.ok(csrf);
+        assert.ok(!html.includes(rootToken));
+        assert.ok(!html.includes(client.secret));
         assert.equal(
           (await browse(url, { csrf, decision }, { origin: 'https://cross.invalid' })).status,
           403,
@@ -163,7 +163,7 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
     throw new Error('Device interaction exceeded its redirect bound');
   }
 
-  assert(discovery.grant_types_supported.includes(deviceGrant));
+  assert.ok(discovery.grant_types_supported.includes(deviceGrant));
   const unsignedDevice = await boundedFetch(`${origin}/oidc/device`, { redirect: 'manual' });
   assert.equal(unsignedDevice.status, 302);
   const returnTarget = new URL(unsignedDevice.headers.get('location'), origin).searchParams.get('oidc_return');
@@ -280,14 +280,14 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
   const bindings = await pool.query('SELECT token_hash FROM axxium_oidc_grant_sessions WHERE actor_id=$1', [
     actor.id,
   ]);
-  assert(bindings.rows.length > 0);
+  assert.ok(bindings.rows.length > 0);
   for (const row of bindings.rows) assert.match(row.token_hash, /^[0-9a-f]{64}$/);
   const records = await pool.query('SELECT payload::text FROM axxium_oidc_records');
   for (const row of records.rows) {
-    assert(!row.payload.includes(rootToken));
-    for (const owner of clients) assert(!row.payload.includes(owner.secret));
+    assert.ok(!row.payload.includes(rootToken));
+    for (const owner of clients) assert.ok(!row.payload.includes(owner.secret));
   }
-  assert(consentCount >= 5);
+  assert.ok(consentCount >= 5);
   console.log(
     'PASS mounted RFC8628: authenticated atomic polling/backoff, explicit root approval/denial, browser Origin/XSRF, expiry/retry caps, single redemption, actor/client binding and root logout',
   );
