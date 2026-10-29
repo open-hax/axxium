@@ -22,6 +22,18 @@ class ReaderTests(unittest.TestCase):
         found = [(before, after) for _, _, before, after, _ in campaign.sites(source)]
         self.assertEqual(found, [("=", "not="), ("and", "or"), ("true", "false"), ("not=", "=")])
 
+    def test_expanded_operators_and_integer_boundaries_are_syntactic_only(self):
+        source = '(not x) (string? x) (map? x) (even? x) (empty? x) [0 1 42 -4] ; 9\n #_123 "999"'
+        found = [(before, after) for _, _, before, after, _ in campaign.sites(source)]
+        for pair in [('not', 'identity'), ('string?', 'number?'), ('map?', 'vector?'),
+                     ('even?', 'odd?'), ('empty?', 'seq'), ('0', '-1'), ('0', '1'),
+                     ('1', '0'), ('1', '2'), ('42', '41'), ('42', '43'), ('-4', '-5'), ('-4', '-3')]:
+            self.assertIn(pair, found)
+        self.assertFalse(any(before in ('9', '123', '999') for before, _ in found))
+        self.assertEqual(len(found), len(set(found)))
+        self.assertEqual(campaign.atom_replacements('1.0'), ())
+        self.assertEqual(campaign.atom_replacements('1000000000'), ())
+
     def test_unbalanced_and_truncated_forms_are_rejected(self):
         for source in ('(= 1', '[(= 1 2)}', '"unterminated', "\\"):
             with self.subTest(source=source), self.assertRaises(ValueError):
