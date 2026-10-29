@@ -165,3 +165,43 @@
   (async done (-> (non-null-created-at-skips-locking*)
                   (.catch (fn [e] (is false (str "non-null-created-at-skips-locking rejected: " (pr-str e)))))
                   (.finally done))))
+
+(defn- ^:async interrupted-created-at-migration-rolls-back* []
+  (let [statements (atom [])
+        stopped (atom false)
+        finish-lock (atom nil)
+        mark-started (atom nil)
+        lock-started (js/Promise. (fn [resolve _] (reset! mark-started resolve)))
+        respond (fn [sql]
+                  (swap! statements conj sql)
+                  (cond
+                    (lock? sql) (js/Promise. (fn [resolve _]
+                                               (reset! finish-lock resolve)
+                                               (@mark-started nil)))
+                    (index-lookup? sql) (js/Promise.resolve (result [{:is_unique true}]))
+                    (created-at-lookup? sql) (js/Promise.resolve (result [{:is_nullable "YES"}]))
+                    :else (js/Promise.resolve (result []))))
+        released (atom [])
+        client #js {:query (fn [sql _] (respond sql))
+                    :release (fn [discard?] (swap! released conj discard?))}
+        schema-pool #js {:query (fn [sql _] (respond sql))
+                         :connect #(js/Promise.resolve client)}
+        initialization (db/init-schema! schema-pool #(deref stopped))]
+    (await lock-started)
+    (reset! stopped true)
+    (@finish-lock (result []))
+    (try
+      (await initialization)
+      (is false "interrupted schema initialization must not succeed")
+      (catch :default _ nil))
+    (is (some lock? @statements))
+    (is (not-any? backfill? @statements) "shutdown prevents the next UPDATE")
+    (is (not-any? set-not-null? @statements))
+    (is (not-any? #{"COMMIT"} @statements))
+    (is (some #{"ROLLBACK"} @statements))
+    (is (= [false] @released))))
+
+(deftest interrupted-created-at-migration-rolls-back
+  (async done (-> (interrupted-created-at-migration-rolls-back*)
+                  (.catch (fn [e] (is false (str "interrupted migration test rejected: " (pr-str e)))))
+                  (.finally done))))
