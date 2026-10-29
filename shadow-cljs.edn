@@ -75,7 +75,10 @@
   :lifecycle-fixture
   {:target :esm :runtime :node
    :output-dir "target/lifecycle"
-   :modules {:lifecycle {:exports {:install axxium.extern.lifecycle/install!}}}
+   :modules {:lifecycle {:exports {:install axxium.extern.lifecycle/install!
+                                    :attach axxium.extern.lifecycle/attach!
+                                    :closeStartup axxium.extern.lifecycle/close-startup!
+                                    :stopping axxium.extern.lifecycle/stopping?}}}
    :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
 
   :test

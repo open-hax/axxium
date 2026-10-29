@@ -16,6 +16,15 @@
       :idle-timeout-ms 30000
       :connect-timeout-ms 2000})))
 
+(defn create-schema-pool!
+  "Bound each schema statement on a dedicated pool, not the runtime pool."
+  [statement-timeout-ms]
+  (pg/create-pool! {:connection-string (cfg/db-url)
+                    :max 1
+                    :idle-timeout-ms 30000
+                    :connect-timeout-ms 2000
+                    :statement-timeout-ms statement-timeout-ms}))
+
 (defn- honey->sql
   "Format a HoneySQL map to [sql-str params]."
   [honey-map]
@@ -65,9 +74,9 @@
 
 (defn- exec-ddl!
   "Execute a HoneySQL DDL statement."
-  [honey-map]
+  [schema-pool honey-map]
   (let [[sql-str _params] (honey->sql honey-map)]
-    (pg/query! @pool sql-str [])))
+    (pg/query! schema-pool sql-str [])))
 
 (defn- ^:async actors-email-index-on!
   "Return {:is_unique .. :qualified_name ..} for idx_actors_email on the
@@ -101,10 +110,10 @@
    Otherwise the duplicate check and swap run under a table lock in one
    transaction, so an older process cannot commit a duplicate between the
    check and CREATE UNIQUE INDEX."
-  []
-  (let [index (await (actors-email-index-on! @pool))]
+  [schema-pool]
+  (let [index (await (actors-email-index-on! schema-pool))]
     (when-not (:is_unique index)
-      (await (pg/with-transaction! @pool migrate-email-index!)))))
+      (await (pg/with-transaction! schema-pool migrate-email-index!)))))
 
 (defn- ^:async migrate-actors-created-at!
   "Inside one transaction: lock actor writes, backfill NULL created_at, then
@@ -117,26 +126,30 @@
 (defn- ^:async ensure-actors-created-at-not-null!
   "Fast path: skip (no lock) when actors.created_at is already NOT NULL, so
    rolling restarts do not lock and rescan actors."
-  []
-  (let [{:keys [rows]} (await (pg/query! @pool (q/select-actors-created-at-nullable) []))]
+  [schema-pool]
+  (let [{:keys [rows]} (await (pg/query! schema-pool (q/select-actors-created-at-nullable) []))]
     (when (= "YES" (:is_nullable (first rows)))
-      (await (pg/with-transaction! @pool migrate-actors-created-at!)))))
+      (await (pg/with-transaction! schema-pool migrate-actors-created-at!)))))
 
-(defn ^:async init-schema!
+(defn- ^:async init-schema-on!
   "Initialize database schema. Idempotent. DDL runs sequentially in order."
-  []
-  (await (exec-ddl! (q/create-table-entities)))
-  (await (exec-ddl! (q/create-table-actors)))
-  (await (exec-ddl! (q/create-table-sessions)))
-  (await (exec-ddl! (q/create-table-oauth-clients)))
-  (await (exec-ddl! (q/create-table-agent-credentials)))
-  (await (exec-ddl! (q/create-table-provider-bindings)))
-  (await (pg/query! @pool (q/create-index-provider-subject) []))
-  (await (ensure-unique-actors-email-index!))
-  (await (ensure-actors-created-at-not-null!))
-  (await (pg/query! @pool (q/create-index-actors-status-created-id) []))
-  (await (pg/query! @pool (q/create-index-sessions-actor) []))
-  (await (pg/query! @pool (q/create-index-sessions-expires) [])))
+  [schema-pool]
+  (await (exec-ddl! schema-pool (q/create-table-entities)))
+  (await (exec-ddl! schema-pool (q/create-table-actors)))
+  (await (exec-ddl! schema-pool (q/create-table-sessions)))
+  (await (exec-ddl! schema-pool (q/create-table-oauth-clients)))
+  (await (exec-ddl! schema-pool (q/create-table-agent-credentials)))
+  (await (exec-ddl! schema-pool (q/create-table-provider-bindings)))
+  (await (pg/query! schema-pool (q/create-index-provider-subject) []))
+  (await (ensure-unique-actors-email-index! schema-pool))
+  (await (ensure-actors-created-at-not-null! schema-pool))
+  (await (pg/query! schema-pool (q/create-index-actors-status-created-id) []))
+  (await (pg/query! schema-pool (q/create-index-sessions-actor) []))
+  (await (pg/query! schema-pool (q/create-index-sessions-expires) [])))
+
+(defn init-schema!
+  ([] (init-schema-on! @pool))
+  ([schema-pool] (init-schema-on! schema-pool)))
 
 ;; Re-export query builders for convenience
 (def q-select-actor-by-id q/select-actor-by-id)

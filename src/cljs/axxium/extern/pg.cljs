@@ -5,12 +5,14 @@
 
 (defn create-pool!
   "Construct a PostgreSQL pool from the named runtime connection options."
-  [{:keys [connection-string max idle-timeout-ms connect-timeout-ms]}]
+  [{:keys [connection-string max idle-timeout-ms connect-timeout-ms statement-timeout-ms]}]
   (new (.-Pool pg-lib)
-       (clj->js {:connectionString connection-string
-                   :max (or max 20)
-                   :idleTimeoutMillis (or idle-timeout-ms 30000)
-                   :connectionTimeoutMillis (or connect-timeout-ms 2000)})))
+       (clj->js (cond-> {:connectionString connection-string
+                         :max (or max 20)
+                         :idleTimeoutMillis (or idle-timeout-ms 30000)
+                         :connectionTimeoutMillis (or connect-timeout-ms 2000)}
+                  statement-timeout-ms (assoc :statement_timeout statement-timeout-ms
+                                              :idle_in_transaction_session_timeout statement-timeout-ms)))))
 
 (defn- keywordize-rows
   [result]

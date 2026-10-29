@@ -25,6 +25,77 @@ function startFixture(overrides = {}) {
   return { child, readUntil, output: () => output, error: () => error };
 }
 
+async function boundedExit(exited, ms = 28000) {
+  let guard;
+  try {
+    return await Promise.race([
+      exited,
+      new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('child exceeded shutdown bound')), ms); }),
+    ]);
+  } finally {
+    clearTimeout(guard);
+  }
+}
+
+test('repeated signals during schema initialization close the pool and prevent listening', { timeout: 8000 }, async () => {
+  const fixture = startFixture({ FIXTURE_INIT: 'delayed' });
+  try {
+    await fixture.readUntil(/INIT_STARTED/);
+    const exited = once(fixture.child, 'exit');
+    fixture.child.kill('SIGTERM');
+    fixture.child.kill('SIGINT');
+    const [code, signal] = await boundedExit(exited, 6000);
+    assert.equal(signal, null);
+    assert.equal(code, 0, fixture.error());
+    assert.match(fixture.output(), /INIT_CANCELED/);
+    assert.doesNotMatch(fixture.output(), /LISTEN/);
+    assert.equal((fixture.output().match(/SCHEMA_END/g) ?? []).length, 1);
+    assert.equal((fixture.output().match(/POOL_END/g) ?? []).length, 1);
+  } finally {
+    if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+  }
+});
+
+test('signal during asynchronous app setup closes the app and prevents listening', { timeout: 8000 }, async () => {
+  const fixture = startFixture({ FIXTURE_SETUP_DELAY: '1' });
+  try {
+    await fixture.readUntil(/SETUP_STARTED/);
+    const exited = once(fixture.child, 'exit');
+    fixture.child.kill('SIGTERM');
+    const [code, signal] = await boundedExit(exited, 6000);
+    assert.equal(signal, null);
+    assert.equal(code, 0, fixture.error());
+    assert.match(fixture.output(), /SETUP_CANCELED/);
+    assert.doesNotMatch(fixture.output(), /LISTEN/);
+    assert.equal((fixture.output().match(/SCHEMA_END/g) ?? []).length, 1);
+    assert.equal((fixture.output().match(/POOL_END/g) ?? []).length, 1);
+  } finally {
+    if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+  }
+});
+
+test('blocked initialization and pool cleanup are bounded despite repeated signals', { timeout: 31000 }, async () => {
+  const fixture = startFixture({ FIXTURE_INIT: 'blocked', FIXTURE_POOL_BLOCKED: '1' });
+  try {
+    await fixture.readUntil(/INIT_STARTED/);
+    const exited = once(fixture.child, 'exit');
+    const start = performance.now();
+    fixture.child.kill('SIGTERM');
+    fixture.child.kill('SIGINT');
+    await fixture.readUntil(/SCHEMA_END/);
+    const [code, signal] = await boundedExit(exited);
+    assert.equal(signal, null);
+    assert.equal(code, 1);
+    assert.match(fixture.error(), /Axxium shutdown timed out/);
+    assert.doesNotMatch(fixture.output(), /LISTEN/);
+    assert.equal((fixture.output().match(/SCHEMA_END/g) ?? []).length, 1);
+    assert.equal((fixture.output().match(/POOL_END/g) ?? []).length, 0);
+    assert.ok(performance.now() - start >= 24000, 'deadline should remain 25 seconds');
+  } finally {
+    if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+  }
+});
+
 test('SIGTERM drains an active HTTP request before closing the database pool', { timeout: 8000 }, async () => {
   const fixture = startFixture();
   try {
@@ -72,17 +143,7 @@ test('shutdown deadline survives pool close when another handle keeps Node alive
     const start = performance.now();
     fixture.child.kill('SIGTERM');
     await fixture.readUntil(/POOL_END/);
-    let guard;
-    let outcome;
-    try {
-      outcome = await Promise.race([
-        exited,
-        new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('child exceeded shutdown bound')), 28000); }),
-      ]);
-    } finally {
-      clearTimeout(guard);
-    }
-    const [code, signal] = outcome;
+    const [code, signal] = await boundedExit(exited);
     assert.equal(signal, null);
     assert.equal(code, 1);
     assert.match(fixture.error(), /Axxium shutdown timed out/);

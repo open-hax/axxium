@@ -54,25 +54,33 @@
    Initializes database schema and starts listening."
   []
   (println "Starting Axxium identity kernel...")
-  (-> (db/init-schema!)
+  (let [statement-timeout-ms (cfg/schema-statement-timeout-ms)
+        schema-pool (db/create-schema-pool! statement-timeout-ms)
+        controller (lifecycle/install! @db/pool schema-pool statement-timeout-ms)]
+    (-> (db/init-schema! schema-pool)
       (.then
         (fn ^:async schema-ready [_]
-          (println "Database schema initialized")
-          (let [app (create-app)]
-            (await (oidc/enable! app))
-            (http/register-portal-origin!
-             app (cfg/get-in-config [:axxium/public-base-url]))
-            (register-routes! app)
-            (register-static! app)
-            (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])
-                                  :host (cfg/get-in-config [:axxium/host])})
-                (.then
-                  (fn [address]
-                    (lifecycle/install! app @db/pool)
-                    (println (str "Axxium listening on " address))
-                    (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
-                    app))))))
+          (await (lifecycle/close-startup! controller))
+          (when-not (lifecycle/stopping? controller)
+            (println "Database schema initialized")
+            (let [app (create-app)]
+              (lifecycle/attach! controller app)
+              (await (oidc/enable! app))
+              (when-not (lifecycle/stopping? controller)
+                (http/register-portal-origin!
+                 app (cfg/get-in-config [:axxium/public-base-url]))
+                (register-routes! app)
+                (register-static! app)
+                (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])
+                                      :host (cfg/get-in-config [:axxium/host])})
+                    (.then
+                      (fn [address]
+                        (when-not (lifecycle/stopping? controller)
+                          (println (str "Axxium listening on " address))
+                          (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
+                          app)))))))))
       (.catch
         (fn [err]
-          (println (str "Failed to start Axxium: " (.-message err)))
-          (js/process.exit 1)))))
+          (when-not (lifecycle/stopping? controller)
+            (println (str "Failed to start Axxium: " (.-message err)))
+            (js/process.exit 1)))))))
