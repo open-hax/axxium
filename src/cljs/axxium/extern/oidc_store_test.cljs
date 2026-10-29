@@ -115,3 +115,85 @@
     (-> (durable-polling-boundary*)
         (.catch (fn [error] (is false (str "Device polling fixture rejected: " (.-message error)))))
         (.finally done))))
+
+(defn- ^:async provider-lifetime-boundaries* []
+  (let [calls (atom [])
+        pool #js {:query (fn [sql params]
+                           (swap! calls conj [sql (vec (array-seq params))])
+                           (js/Promise.resolve #js {:rowCount 1 :rows #js []}))}
+        adapter ((store/adapter-factory pool) "Session")
+        year-seconds (* 365 24 60 60)]
+    ;; Public upserts must preserve each admitted lifetime in the SQL parameters,
+    ;; including the longest permitted provider record rather than rounding it.
+    (doseq [lifetime [1 year-seconds]]
+      (reset! calls [])
+      (is (= :accepted
+             (try (await (.upsert adapter "opaque-session" #js {} lifetime)) :accepted
+                  (catch :default error [:rejected (.-message error)]))))
+      (is (= 1 (count @calls)))
+      (is (= ["Session" "opaque-session" "{}" lifetime] (second (first @calls)))))
+    (doseq [lifetime [0 -1 0.5 (inc year-seconds) nil "1" js/NaN js/Infinity]]
+      (reset! calls [])
+      (is (= "Invalid OIDC store lifetime"
+             (try (await (.upsert adapter "opaque-session" #js {} lifetime)) :accepted
+                  (catch :default error (.-message error)))))
+      (is (empty? @calls) "Malformed or excessive lifetimes must refuse before SQL"))))
+
+(deftest provider-lifetime-boundaries
+  (async done
+    (-> (provider-lifetime-boundaries*)
+        (.catch (fn [error] (is false (str "Provider lifetime fixture rejected: " (.-message error)))))
+        (.finally done))))
+
+(defn- ^:async opaque-key-public-boundaries* []
+  (let [calls (atom [])
+        pool #js {:query (fn [sql params]
+                           (swap! calls conj [sql (vec (array-seq params))])
+                           (js/Promise.resolve
+                             #js {:rowCount 1 :rows #js [#js {:payload #js {} :consumed_at nil
+                                                              :active true :expires_ms "10000"}]}))}
+        factory (store/adapter-factory pool)
+        adapter (factory "Session")
+        digest (apply str (repeat 64 "a"))
+        operations [["upsert" #(.upsert adapter % #js {} 60)]
+                    ["find" #(.find adapter %)]
+                    ["findByUserCode" #(.findByUserCode adapter %)]
+                    ["findByUid" #(.findByUid adapter %)]
+                    ["destroy" #(.destroy adapter %)]
+                    ["revokeByGrantId" #(.revokeByGrantId adapter %)]
+                    ["consume" #(.consume adapter %)]
+                    ["bind grant" #(store/bind-session! pool % "actor" digest)]
+                    ["bind actor" #(store/bind-session! pool "grant" % digest)]
+                    ["active grant" #(store/session-grant-active? pool % "actor")]
+                    ["active actor" #(store/session-grant-active? pool "grant" %)]
+                    ["expiry grant" #(store/session-grant-expiry! pool % "actor")]
+                    ["expiry actor" #(store/session-grant-expiry! pool "grant" %)]
+                    ["revoke family" #(store/revoke-family! pool %)]]]
+    (doseq [key ["k" (apply str (repeat 2048 "k"))]]
+      (is (object? (factory key)) "The public constructor admits bounded opaque model keys")
+      (doseq [[label operation] operations]
+        (reset! calls [])
+        (is (= :accepted
+               (try (await (operation key)) :accepted
+                    (catch :default error [:rejected (.-message error)]))) label)
+        (is (= 1 (count @calls)) label)
+        (is (some #(some #{key} (second %)) @calls)
+            (str label " passes the opaque key as a parameter without truncation"))))
+    (doseq [key [nil "" 42 #js {} #js [] (apply str (repeat 2049 "k"))]]
+      (reset! calls [])
+      (is (= "Invalid OIDC store identifier"
+             (try (factory key) :accepted
+                  (catch :default error (.-message error)))))
+      (is (empty? @calls))
+      (doseq [[label operation] operations]
+        (reset! calls [])
+        (is (= "Invalid OIDC store identifier"
+               (try (await (operation key)) :accepted
+                    (catch :default error (.-message error)))) label)
+        (is (empty? @calls) (str label " refuses malformed keys before SQL"))))))
+
+(deftest opaque-key-public-boundaries
+  (async done
+    (-> (opaque-key-public-boundaries*)
+        (.catch (fn [error] (is false (str "Opaque key fixture rejected: " (.-message error)))))
+        (.finally done))))
