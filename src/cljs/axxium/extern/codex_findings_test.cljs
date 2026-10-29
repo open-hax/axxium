@@ -291,6 +291,7 @@
   (let [fixture (google-db {:existing-email? true})
         outcome (await (google-callback! fixture))]
     (is (empty? (:actors outcome)))
+    (is (empty? @(:committed fixture)))
     (is (= 409 (:status (first (:responses outcome)))))
     (is (= "Email is already bound to another Axxium actor"
            (get-in outcome [:responses 0 :body :error])))))
