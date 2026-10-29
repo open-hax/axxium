@@ -72,6 +72,16 @@
                               :installHttp axxium.extern.oidc-fixture/install-http}}}
    :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
 
+  :lifecycle-fixture
+  {:target :esm :runtime :node
+   :output-dir "target/lifecycle"
+   :modules {:lifecycle {:exports {:install axxium.extern.lifecycle/install!
+                                    :attach axxium.extern.lifecycle/attach!
+                                    :closeStartup axxium.extern.lifecycle/close-startup!
+                                    :shutdownBound axxium.extern.lifecycle/shutdown-bound-ms
+                                    :stopping axxium.extern.lifecycle/stopping?}}}
+   :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
+
   :test
   {:target :node-test
    :output-to "target/test.cjs"

@@ -18,6 +18,19 @@
   (let [v (env key)]
     (if v (= "true" (str/lower-case v)) default)))
 
+(defn parse-schema-statement-timeout-ms
+  "Admit a bounded per-statement schema timeout in milliseconds."
+  [value]
+  (when-not (and (string? value) (re-matches #"[0-9]{1,6}" value))
+    (throw (ex-info "Invalid AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS" {})))
+  (let [timeout-ms (environment/parse-int value)]
+    (when-not (<= 1000 timeout-ms 300000)
+      (throw (ex-info "AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS must be 1000..300000" {})))
+    timeout-ms))
+
+(defn schema-statement-timeout-ms []
+  (parse-schema-statement-timeout-ms (env "AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS" "20000")))
+
 (defn trust-proxy-option
   "Fastify trustProxy from AXXIUM_TRUST_PROXY, admitted by
    `axxium.law.atproto/trust-proxy-admission`; a refusal is a configuration
