@@ -153,10 +153,10 @@
 (deftest oauth-saved-state-key-material-and-key-id-bounds
   (let [state {:iss "https://bsky.social" :verifier "abc"
                :auth-method {:method "private_key_jwt" :kid (apply str (repeat 256 "k"))}
-               :dpop-jwk {:kty "EC" :crv "P-256" :x (apply str (repeat 512 "x"))
-                          :y "ycoord" :d "dpriv"}}]
+               :dpop-jwk {:kty "EC" :crv "P-256" :x "xcoord"
+                          :y (apply str (repeat 512 "y")) :d "dpriv"}}]
     (is (true? (atproto/valid-oauth-saved-state? state)))
     (is (false? (atproto/valid-oauth-saved-state?
                  (assoc-in state [:auth-method :kid] (apply str (repeat 257 "k"))))))
     (is (false? (atproto/valid-oauth-saved-state?
-                 (assoc-in state [:dpop-jwk :x] (apply str (repeat 513 "x"))))))))
+                 (assoc-in state [:dpop-jwk :y] (apply str (repeat 513 "y"))))))))
