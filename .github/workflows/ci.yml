@@ -51,6 +51,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Verify Compose shutdown grace
+        run: npm run test:compose
+
       - name: Install isolated PostgreSQL test tools
         run: |
           if ! command -v pg_config >/dev/null; then

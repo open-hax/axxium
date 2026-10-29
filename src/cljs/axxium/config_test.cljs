@@ -6,7 +6,9 @@
             [cljs.test :refer [deftest is]]))
 
 (deftest schema-timeout-is-explicit-and-bounded
+  (is (= 1000 (config/parse-schema-statement-timeout-ms "1000")))
   (is (= 20000 (config/parse-schema-statement-timeout-ms "20000")))
+  (is (= 300000 (config/parse-schema-statement-timeout-ms "300000")))
   (is (= 120000 (config/parse-schema-statement-timeout-ms "120000")))
   (doseq [invalid ["" "0" "999" "300001" "20ms" "-1" "1e4"]]
     (is (thrown? js/Error (config/parse-schema-statement-timeout-ms invalid)))))

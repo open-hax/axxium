@@ -116,6 +116,8 @@ All configuration is via environment variables:
 
 Container stop grace must exceed `max(25000, 2 * AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS + 5000)` milliseconds (45 seconds at the default). This allows time for the current schema statement and a rollback before the startup shutdown deadline. Choose a larger schema timeout and matching stop grace when a reviewed migration needs longer than the default. A timed-out schema statement fails startup; transactional migrations roll back. A statement already issued before shutdown may still finish, and a commit already in flight cannot be undone by the signal. Connection failures can still make the outcome uncertain and require database-side inspection.
 
+The repository `docker-compose.yml` forwards the schema timeout and sets the Axxium service's stop grace to 610 seconds. That covers the maximum admitted 300,000 ms timeout and a five-second margin; a clean shutdown does not wait for the grace period. External Compose files and command-line stop-timeout overrides must provide their own matching grace.
+
 ## Architecture
 
 ```

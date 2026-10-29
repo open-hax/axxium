@@ -78,6 +78,7 @@
    :modules {:lifecycle {:exports {:install axxium.extern.lifecycle/install!
                                     :attach axxium.extern.lifecycle/attach!
                                     :closeStartup axxium.extern.lifecycle/close-startup!
+                                    :shutdownBound axxium.extern.lifecycle/shutdown-bound-ms
                                     :stopping axxium.extern.lifecycle/stopping?}}}
    :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
 
