@@ -68,5 +68,6 @@
   (let [uris (mapv #(str "https://knoxx.example.test/callback/" %) (range 16))
         at-limit (assoc-in config [:clients 0 :redirect-uris] uris)
         over-limit (assoc-in config [:clients 0 :redirect-uris] (conj uris "https://knoxx.example.test/extra"))]
-    (is (= at-limit (law/require-config! at-limit)))
+    (is (= at-limit (try (law/require-config! at-limit)
+                         (catch cljs.core/ExceptionInfo _ nil))))
     (is (thrown? cljs.core/ExceptionInfo (law/require-config! over-limit)))))
