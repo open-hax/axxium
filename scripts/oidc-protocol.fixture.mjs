@@ -47,6 +47,11 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
         await provider.interactionFinished(req, res, result, { mergeWithLastSubmission: false });
       } else await provider.callback()(req, res);
     } catch {
+      // A failed synthetic handler/provider is an execution error, even when
+      // its HTTP projection also violates an asserted response contract.
+      // The accepted measurement preload verifies this fixture caller and
+      // records an independent error counter; no exception payload is emitted.
+      process.emit('axxiumQualificationFixtureError');
       if (!res.headersSent) res.statusCode = 500;
       res.end('Synthetic fixture failure');
     }
@@ -83,9 +88,26 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
     return { status: response.status,
       body: await readProtocolJSON(response, 'Authority form response', allowEmpty) };
   }
+  // The protocol engine can consume a rejected database promise and render a
+  // 500 internally. Observe this owned pool during the fixture so the original
+  // query rejection remains an error independently of its HTTP projection.
+  const originalQuery = pool.query;
+  pool.query = function (...args) {
+    try {
+      const result = Reflect.apply(originalQuery, this, args);
+      return result && typeof result.then === 'function' ? result.catch(error => {
+        process.emit('axxiumQualificationFixtureError'); throw error;
+      }) : result;
+    } catch (error) {
+      process.emit('axxiumQualificationFixtureError'); throw error;
+    }
+  };
   try {
   provider = createProvider(pool, config, async id => id === 'synthetic-actor'
     ? { id, status: actorActive ? 'active' : 'disabled', display_name: 'Synthetic Actor' } : null);
+    // The engine handles some rejected queries internally before callback()
+    // rejects. Observe its public error event as well as our outer handler.
+    provider.on('server_error', () => process.emit('axxiumQualificationFixtureError'));
     const discovery = await readProtocolJSON(
       await boundedFetch(issuer + '/.well-known/openid-configuration'), 'Authority discovery');
     assert.equal(discovery.issuer, issuer);
@@ -209,6 +231,7 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
     for (const row of grants.rows) assert.equal(await sessionGrantActive(pool, row.grant_id, 'synthetic-actor'), false);
     console.log('PASS durable authority: shared synthetic login, PKCE, state/nonce/audience, code replay refusal, own-client introspection, disabled actor refusal and revocation');
   } finally {
+    pool.query = originalQuery;
     await new Promise(resolve => server.close(resolve));
     server.closeAllConnections();
   }
