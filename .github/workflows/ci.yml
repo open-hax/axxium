@@ -10,6 +10,14 @@ permissions:
   contents: read
 
 jobs:
+  mutation-pilot-boundaries:
+    name: mutation-pilot-boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify mutation parser, outcome and recovery contracts
+        run: python3 -m unittest discover -s qualification -p test_mutation_campaign.py -v
+
   deployment-boundary:
     name: deployment-boundary
     runs-on: ubuntu-latest

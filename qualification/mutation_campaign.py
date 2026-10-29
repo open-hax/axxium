@@ -27,11 +27,13 @@ SOURCE_SHA = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, tex
 if not re.fullmatch(r"[0-9a-f]{40}", SOURCE_SHA):
     raise ValueError("A full immutable Git revision is required")
 SOURCE = ROOT / "src/cljs"
-NODE = subprocess.check_output(["volta", "run", "--node", "22.23.3", "node", "-p", "process.execPath"],
-                               cwd=ROOT, text=True).strip()
-COMPILE = [NODE, "node_modules/.bin/shadow-cljs",
-           "--config-merge", "{:autorun false}", "compile", "test"]
-TEST = [NODE, "target/test.cjs"]
+def pinned_commands():
+    """Resolve Node only for execution; parser/law tests need no Node runtime."""
+    node = subprocess.check_output(["volta", "run", "--node", "22.23.3", "node", "-p", "process.execPath"],
+                                   cwd=ROOT, text=True).strip()
+    return (node,
+            [node, "node_modules/.bin/shadow-cljs", "--config-merge", "{:autorun false}", "compile", "test"],
+            [node, "target/test.cjs"])
 REPLACEMENTS = {
     "=": ("not=",), "not=": ("=",), "<": ("<=", ">"), "<=": ("<", ">="),
     ">": (">=", "<"), ">=": (">", "<="), "and": ("or",), "or": ("and",),
@@ -443,7 +445,8 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
     if out.exists():
         raise ValueError("Output already exists; preserve earlier evidence")
     out.mkdir(mode=0o700, parents=True)
-    node_version = subprocess.check_output([NODE, "--version"],
+    node, compile_command, test_command = pinned_commands()
+    node_version = subprocess.check_output([node, "--version"],
                                            cwd=ROOT, text=True).strip()
     if node_version != "v22.23.3":
         raise ValueError("The test runtime does not match the pinned Node version")
@@ -451,7 +454,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
              "sample_seed": sample_seed,
              "producer_sha256": digest(Path(__file__).read_bytes()), "node_version": node_version,
              "package_lock_sha256": digest((ROOT / "package-lock.json").read_bytes()),
-             "compile_command": COMPILE, "test_command": TEST,
+             "compile_command": compile_command, "test_command": test_command,
              "limitations": "Not independently reviewed, not production qualification; no integration or E2E receipt; installed dependency bytes not audited",
              "baseline": None, "containment": "not_proven", "candidate_inventory": len(candidates), "results": []}
 
@@ -460,14 +463,14 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
         temporary.write_text(json.dumps(state, indent=2) + "\n")
         temporary.replace(out / "report.json")
 
-    compile_result = execute(COMPILE, out / "baseline.compile.log", timeout)
+    compile_result = execute(compile_command, out / "baseline.compile.log", timeout)
     if classify_compile(compile_result) != "passed":
         if compile_result["containment_unknown"]:
             state["containment"] = "unknown_after_aborted_execution"
             save()
             raise RuntimeError("Baseline compiler containment unknown; inspect processes before retrying")
         raise RuntimeError("Baseline compiler did not pass with zero warnings")
-    test_result = execute(TEST, out / "baseline.test.log", timeout)
+    test_result = execute(test_command, out / "baseline.test.log", timeout)
     baseline = counts(test_result["output"])
     if test_result["containment_unknown"]:
         state["containment"] = "unknown_after_aborted_execution"
@@ -499,7 +502,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
         entry = {**candidate, "status": "unverified", "phase": "compile"}
         try:
             path.write_bytes(changed)
-            build = execute(COMPILE, out / f"{index:04}.compile.log", timeout)
+            build = execute(compile_command, out / f"{index:04}.compile.log", timeout)
             require_only_mutant(path, changed)
             entry.update(compile_status=classify_compile(build), compile_seconds=build["seconds"],
                          compile_log_sha256=build["log_sha256"],
@@ -507,7 +510,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
             if entry["compile_status"] != "passed":
                 entry["status"] = entry["compile_status"]
             else:
-                test = execute(TEST, out / f"{index:04}.test.log", timeout)
+                test = execute(test_command, out / f"{index:04}.test.log", timeout)
                 require_only_mutant(path, changed)
                 entry.update(status=classify_test(test, baseline), phase="test", test_seconds=test["seconds"],
                              test_exit=test["exit_code"], counts=counts(test["output"]), test_log_sha256=test["log_sha256"],
@@ -524,14 +527,14 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=
         if unknown:
             raise RuntimeError("Execution containment unknown; source restored; inspect processes before retrying")
         print(index, candidate["path"], candidate["before"], "=>", candidate["after"], entry["status"], flush=True)
-    restored = execute(COMPILE, out / "restored.compile.log", timeout)
+    restored = execute(compile_command, out / "restored.compile.log", timeout)
     if classify_compile(restored) != "passed":
         if restored["containment_unknown"]:
             state["containment"] = "unknown_after_aborted_execution"
             save()
             raise RuntimeError("Restored compile containment unknown; inspect processes before retrying")
         raise RuntimeError("Restored source did not compile cleanly")
-    final_test = execute(TEST, out / "restored.test.log", timeout)
+    final_test = execute(test_command, out / "restored.test.log", timeout)
     if final_test["containment_unknown"]:
         state["containment"] = "unknown_after_aborted_execution"
         save()

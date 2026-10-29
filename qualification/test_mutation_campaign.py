@@ -1,5 +1,6 @@
 """Boundary tests for the candidate runner; fixture outcomes are not evidence."""
 import tempfile
+import importlib.util
 import os
 import signal
 import subprocess
@@ -14,6 +15,22 @@ import mutation_campaign as campaign
 
 
 class ReaderTests(unittest.TestCase):
+    def test_import_needs_git_but_does_not_probe_node_or_volta(self):
+        probes = []
+
+        def git_only(command, **_options):
+            probes.append(command)
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "a" * 40
+            raise AssertionError("Unit-test import must not resolve an execution runtime")
+
+        spec = importlib.util.spec_from_file_location("mutation_import_fixture", campaign.__file__)
+        module = importlib.util.module_from_spec(spec)
+        with patch("subprocess.check_output", side_effect=git_only):
+            spec.loader.exec_module(module)
+        self.assertEqual(module.SOURCE_SHA, "a" * 40)
+        self.assertEqual(probes, [["git", "rev-parse", "HEAD"]])
+
     def test_excludes_comment_string_regex_quote_discard_and_character_literals(self):
         source = r'''(= a b) ; (= comment here)
 "(= string content)" #"(= regex)" '(= quoted 0) `(~(+ 1 2) (= quoted 0))

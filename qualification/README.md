@@ -5,8 +5,9 @@ checkout. It is an experimental candidate, not reviewed or adopted
 production-qualification machinery. The Services gate requires exact-revision
 integration, E2E and four disjoint 250-kill batches. This pilot neither
 constructs nor asserts those receipts; it always reports `qualified_batch: false`.
-It currently requires Linux, a Git checkout with installed locked npm
-dependencies, Python 3, Volta and Node 22.23.3.
+Actual mutation execution requires Linux, a Git checkout with installed locked
+npm dependencies, Python 3, Volta and Node 22.23.3. Inventory and the Python
+boundary tests require only Python 3 and Git; CI runs those contracts separately.
 
 ```sh
 python3 -m unittest discover -s qualification -p test_mutation_campaign.py -v
@@ -35,7 +36,7 @@ restores the source, and stops the campaign; descendants can escape the group
 and may remain alive. This is not proof of process containment or cleanup.
 Use an isolated environment and inspect it before retrying. Before each compile
 or test execution, the runner publishes a durable checkout-wide containment
-marker. Import-time Git and Volta probes and the Node version probe are outside
+marker. The import-time Git probe and runtime Volta/Node-version probes are outside
 this marker. A SIGINT, SIGTERM, hard interruption, timeout, overflow, or start
 failure during a protected execution leaves the marker and blocks new runs and
 recovery. After inspecting and dealing with
