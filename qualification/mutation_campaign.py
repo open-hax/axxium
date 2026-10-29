@@ -379,7 +379,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
              "package_lock_sha256": digest((ROOT / "package-lock.json").read_bytes()),
              "compile_command": COMPILE, "test_command": TEST,
              "limitations": "Not independently reviewed, not production qualification; no integration or E2E receipt; installed dependency bytes not audited",
-             "baseline": None, "candidate_inventory": len(candidates), "results": []}
+             "baseline": None, "containment": "not_proven", "candidate_inventory": len(candidates), "results": []}
 
     def save():
         temporary = out / ".report.json.tmp"
@@ -388,9 +388,17 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
 
     compile_result = execute(COMPILE, out / "baseline.compile.log", timeout)
     if classify_compile(compile_result) != "passed":
+        if compile_result["containment_unknown"]:
+            state["containment"] = "unknown_after_aborted_execution"
+            save()
+            raise RuntimeError("Baseline compiler containment unknown; inspect processes before retrying")
         raise RuntimeError("Baseline compiler did not pass with zero warnings")
     test_result = execute(TEST, out / "baseline.test.log", timeout)
     baseline = counts(test_result["output"])
+    if test_result["containment_unknown"]:
+        state["containment"] = "unknown_after_aborted_execution"
+        save()
+        raise RuntimeError("Baseline test containment unknown; inspect processes before retrying")
     if (test_result["timed_out"] or test_result["containment_unknown"] or test_result["exit_code"] != 0 or not baseline or
             baseline["tests"] <= 0 or baseline["assertions"] <= 0 or baseline["failures"] or baseline["errors"]):
         raise RuntimeError("Baseline test did not complete cleanly")
@@ -420,27 +428,40 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
             build = execute(COMPILE, out / f"{index:04}.compile.log", timeout)
             require_only_mutant(path, changed)
             entry.update(compile_status=classify_compile(build), compile_seconds=build["seconds"],
-                         compile_log_sha256=build["log_sha256"])
+                         compile_log_sha256=build["log_sha256"],
+                         compile_containment_unknown=build["containment_unknown"])
             if entry["compile_status"] != "passed":
                 entry["status"] = entry["compile_status"]
             else:
                 test = execute(TEST, out / f"{index:04}.test.log", timeout)
                 require_only_mutant(path, changed)
                 entry.update(status=classify_test(test, baseline), phase="test", test_seconds=test["seconds"],
-                             test_exit=test["exit_code"], counts=counts(test["output"]), test_log_sha256=test["log_sha256"])
+                             test_exit=test["exit_code"], counts=counts(test["output"]), test_log_sha256=test["log_sha256"],
+                             test_containment_unknown=test["containment_unknown"])
         finally:
             restore(path, original, changed)
             journal.unlink()
         require_unchanged_tree()
         state["results"].append(entry)
+        unknown = build["containment_unknown"] or (entry["phase"] == "test" and test["containment_unknown"])
+        if unknown:
+            state["containment"] = "unknown_after_aborted_execution"
         save()
-        if build["containment_unknown"] or (entry["phase"] == "test" and test["containment_unknown"]):
+        if unknown:
             raise RuntimeError("Execution containment unknown; source restored; inspect processes before retrying")
         print(index, candidate["path"], candidate["before"], "=>", candidate["after"], entry["status"], flush=True)
     restored = execute(COMPILE, out / "restored.compile.log", timeout)
     if classify_compile(restored) != "passed":
+        if restored["containment_unknown"]:
+            state["containment"] = "unknown_after_aborted_execution"
+            save()
+            raise RuntimeError("Restored compile containment unknown; inspect processes before retrying")
         raise RuntimeError("Restored source did not compile cleanly")
     final_test = execute(TEST, out / "restored.test.log", timeout)
+    if final_test["containment_unknown"]:
+        state["containment"] = "unknown_after_aborted_execution"
+        save()
+        raise RuntimeError("Restored test containment unknown; inspect processes before retrying")
     if (final_test["timed_out"] or final_test["containment_unknown"] or final_test["exit_code"] != 0 or
             counts(final_test["output"]) != baseline):
         raise RuntimeError("Restored source did not reproduce the clean baseline")
