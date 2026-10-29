@@ -86,6 +86,95 @@ class OutcomeTests(unittest.TestCase):
             with self.subTest(warnings=count):
                 self.assertEqual(campaign.classify_compile(self.result(good.replace("0 warnings", f"{count} warnings"))), "compile_failure")
         self.assertEqual(campaign.classify_compile(self.result(good, timed_out=True)), "timeout")
+        self.assertEqual(campaign.classify_compile(self.result(good + '\n' + good), 2), "passed")
+        self.assertEqual(campaign.classify_compile(self.result(good), 2), "compile_failure")
+        self.assertEqual(campaign.classify_compile(self.result(good + '\n' + good.replace('0 warnings', '1 warnings')), 2),
+                         "compile_failure")
+
+    def test_completed_driver_summary_controls_outcome_without_hiding_errors(self):
+        import copy
+        data = {'schema': 'axxium-qualification-test-phase/v1', 'plan': 'cljs+protocol',
+                'tests': 2, 'assertions': 5, 'failures': 1, 'errors': 0,
+                'warnings': [], 'timed_out': False, 'containment_unknown': False,
+                'groups': [{'name': 'cljs', 'tests': 1, 'assertions': 3, 'failures': 0, 'errors': 0,
+                            'warnings': [], 'timed_out': False},
+                           {'name': 'protocol', 'tests': 1, 'assertions': 2, 'failures': 1, 'errors': 0,
+                            'warnings': [], 'timed_out': False}]}
+        baseline = {**self.base, 'driver_plan': 'cljs+protocol', 'driver_groups': ['cljs', 'protocol']}
+        # A real protocol assertion requires no fabricated CLJS FAIL text.
+        output = lambda value: self.clean + '\nQUALIFICATION_TEST_SUMMARY=' + json.dumps(value)
+        self.assertEqual(campaign.classify_test(self.result(output(data), 1), baseline), 'killed')
+        for key, value, status in [('errors', 1, 'test_error'), ('warnings', ['warning'], 'invalid_test_output'),
+                                   ('timed_out', True, 'timeout'), ('containment_unknown', True, 'containment_unknown'),
+                                   ('assertions', 0, 'invalid_test_output'), ('tests', True, 'invalid_test_output')]:
+            with self.subTest(field=key):
+                changed = copy.deepcopy(data);changed[key] = value
+                if key in ('errors', 'warnings', 'timed_out'):
+                    changed['groups'][1][key] = value
+                elif key == 'assertions':
+                    for group in changed['groups']:group[key] = 0
+                self.assertEqual(campaign.classify_test(self.result(output(changed), 1), baseline), status)
+        self.assertEqual(campaign.classify_test(self.result(output(data) + '\n' + output(data), 1), baseline),
+                         'invalid_test_output')
+        self.assertEqual(campaign.classify_test(self.result(output(data), 1), self.base), 'invalid_test_output')
+        self.assertEqual(campaign.classify_test(self.result(output({**data, 'plan': 'cljs'}), 1), baseline), 'invalid_test_output')
+        prefixed = 'QUALIFICATION_CHILD[cljs] QUALIFICATION_TEST_SUMMARY={"forged":true}\n' + output(data)
+        self.assertEqual(campaign.classify_test(self.result(prefixed, 1), baseline), 'killed')
+
+    def test_external_execution_requires_matching_immutable_producer_bytes(self):
+        with self.assertRaisesRegex(ValueError, "explicit producer"):
+            campaign.producer_custody(None, external=True)
+        for value in ("main", "a" * 39, "A" * 40):
+            with self.subTest(revision=value), self.assertRaises(ValueError):
+                campaign.producer_custody(value)
+        with patch.object(campaign, "git", return_value=b"unrelated producer"):
+            with self.assertRaisesRegex(ValueError, "differs"):
+                campaign.producer_custody("a" * 40)
+
+    def test_stop_request_finishes_current_test_and_restores_clean_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'src/cljs/example.cljc';source.parent.mkdir(parents=True)
+            original = b'(defn sample [] (and true false))\n';source.write_bytes(original)
+            (root / 'package-lock.json').write_text('{"lockfileVersion":3}\n')
+            for args in (['init', '-q'], ['config', 'user.name', 'Fixture'],
+                         ['config', 'user.email', 'fixture@example.invalid'],
+                         ['config', 'core.hooksPath', '/dev/null'], ['add', 'src', 'package-lock.json'],
+                         ['commit', '--no-gpg-sign', '-qm', 'fixture']):
+                subprocess.run(['git', *args], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+            compiler = [sys.executable, '-c', "print('Build completed. (1 files, 0 compiled, 0 warnings, 0.1s)')"]
+            tester = [sys.executable, '-c', "print('Ran 1 tests containing 1 assertions.\\n0 failures, 0 errors.')"]
+            actual_output, actual_execute = subprocess.check_output, campaign.execute
+            calls = []
+
+            def probe(command, **options):
+                return 'v22.23.3' if command == [sys.executable, '--version'] else actual_output(command, **options)
+
+            def execute(command, logfile, timeout, **options):
+                calls.append(logfile.name)
+                result = actual_execute(command, logfile, timeout, **options)
+                if logfile.name == '0000.compile.log':
+                    campaign.stop_after_current(signal.SIGUSR1, None)
+                return result
+
+            with patch.object(campaign, 'ROOT', root), patch.object(campaign, 'SOURCE', root / 'src/cljs'), \
+                    patch.object(campaign, 'SOURCE_SHA', revision), patch.object(campaign, 'STOP_REQUESTED', False), \
+                    patch.object(campaign, 'pinned_commands', return_value=(sys.executable, compiler, tester)), \
+                    patch.object(campaign.subprocess, 'check_output', side_effect=probe), \
+                    patch.object(campaign, 'execute', side_effect=execute):
+                candidates = campaign.inventory()[:2]
+                campaign.run_campaign(candidates, Path('qualification/results/stop-fixture'), 2, 5)
+            report = json.loads((root / 'qualification/results/stop-fixture/report.json').read_text())
+            self.assertEqual(len(report['results']), 1)
+            self.assertEqual(report['restored_baseline'], 'passed')
+            self.assertTrue(report['stopped_by_request'])
+            self.assertFalse(report['completed_selection'])
+            self.assertIn('0000.test.log', calls)
+            self.assertIn('restored.test.log', calls)
+            self.assertNotIn('0001.compile.log', calls)
+            self.assertEqual(source.read_bytes(), original)
+            self.assertEqual(subprocess.check_output(['git', 'diff', '--name-only', 'HEAD'], cwd=root), b'')
 
     def test_timeout_kills_child_process_group(self):
         with tempfile.TemporaryDirectory() as directory:
