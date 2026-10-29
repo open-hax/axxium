@@ -104,6 +104,7 @@ All configuration is via environment variables:
 | `DB_NAME` | axxium | Database name |
 | `DB_USER` | axxium | Database user |
 | `DB_PASSWORD` | | Database password |
+| `AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS` | 20000 | Per-statement and idle-in-transaction timeout for the dedicated schema-initialization pool, from 1000 to 300000 ms. A longer migration statement fails startup unless this value is raised. It does not change the application pool or global database settings. |
 | `JWT_SECRET` | change-me | JWT signing secret |
 | `AXXIUM_PUBLIC_BASE_URL` | http://127.0.0.1:8787 | Exact public origin for callbacks and CORS; AT OAuth requires a loopback IP for local redirects |
 | `AXXIUM_TRUST_PROXY` | unset | Fastify `trustProxy` behind a reverse proxy, so the per-client AT Protocol sign-in start limit (10/min; IPv6 clients keyed by /64) keys by the real client address. Set the trusted proxy addresses/CIDRs that match the proxy chain (`false` disables). Bare `true` is refused because it trusts every hop, so a client that reaches the port directly could spoof `X-Forwarded-For` and bypass the limit. Hop counts are refused because Fastify 5 trusts no proxy for them |
@@ -112,6 +113,10 @@ All configuration is via environment variables:
 | `JWT_ISSUER` | axxium | JWT issuer |
 | `JWT_AUDIENCE` | promethean | JWT audience |
 | `BCRYPT_SALT_ROUNDS` | 12 | Password hashing rounds |
+
+Container stop grace must exceed `max(25000, 2 * AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS + 5000)` milliseconds (45 seconds at the default). This allows time for the current schema statement and a rollback before the startup shutdown deadline. Choose a larger schema timeout and matching stop grace when a reviewed migration needs longer than the default. A timed-out schema statement fails startup; transactional migrations roll back. A statement already issued before shutdown may still finish, and a commit already in flight cannot be undone by the signal. Connection failures can still make the outcome uncertain and require database-side inspection.
+
+The repository `docker-compose.yml` forwards the schema timeout and sets the Axxium service's stop grace to 610 seconds. That covers the maximum admitted 300,000 ms timeout and a five-second margin; a clean shutdown does not wait for the grace period. External Compose files and command-line stop-timeout overrides must provide their own matching grace.
 
 ## Architecture
 

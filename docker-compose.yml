@@ -2,12 +2,16 @@ services:
   axxium:
     build: .
     container_name: axxium
+    # Covers every admitted schema timeout: 2 * 300s + 5s, plus margin.
+    # A clean shutdown exits immediately; this is the maximum Docker waits.
+    stop_grace_period: 610s
     ports:
       - "8787:8787"
     environment:
       - AXXIUM_PORT=8787
       - AXXIUM_HOST=0.0.0.0
       - AXXIUM_PUBLIC_BASE_URL=https://axxium.promethean.rest
+      - AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS=${AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS:-20000}
       - DB_HOST=axxium-db
       - DB_PORT=5432
       - DB_NAME=axxium
