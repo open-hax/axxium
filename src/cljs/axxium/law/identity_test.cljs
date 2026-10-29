@@ -160,3 +160,14 @@
                  (assoc-in state [:auth-method :kid] (apply str (repeat 257 "k"))))))
     (is (false? (atproto/valid-oauth-saved-state?
                  (assoc-in state [:dpop-jwk :y] (apply str (repeat 513 "y"))))))))
+
+(deftest did-web-and-rsa-crt-member-length-boundaries
+  (let [did (str "did:web:" (apply str (repeat 504 "a")))
+        state {:iss "https://bsky.social" :verifier "abc" :auth-method {:method "none"}
+               :dpop-jwk {:kty "RSA" :n "n" :e "AQAB" :d "d" :p "p" :q "q"
+                          :dp (apply str (repeat 4096 "p")) :dq "dq" :qi "qi"}}]
+    (is (true? (atproto/did? did)))
+    (is (false? (atproto/did? (str did "a"))))
+    (is (true? (atproto/valid-oauth-saved-state? state)))
+    (is (false? (atproto/valid-oauth-saved-state?
+                 (assoc-in state [:dpop-jwk :dp] (apply str (repeat 4097 "p"))))))))
