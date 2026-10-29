@@ -5,6 +5,7 @@
             [axxium.db :as db]
             [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
+            [axxium.extern.lifecycle :as lifecycle]
             [axxium.infra.oidc :as oidc]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
@@ -67,6 +68,7 @@
                                   :host (cfg/get-in-config [:axxium/host])})
                 (.then
                   (fn [address]
+                    (lifecycle/install! app @db/pool)
                     (println (str "Axxium listening on " address))
                     (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
                     app))))))
