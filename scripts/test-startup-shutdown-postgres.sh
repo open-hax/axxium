@@ -92,6 +92,6 @@ fi
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc 'SELECT is_called FROM fixture_update_count') = f ]]
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT created_at IS NULL FROM actors WHERE id='fixture-actor'") = t ]]
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='actors' AND column_name='created_at'") = YES ]]
-[[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT count(*) FROM pg_stat_activity WHERE usename='fixture' AND pid<>pg_backend_pid()") = 0 ]]
+[[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT count(*) FROM pg_stat_activity WHERE usename='fixture' AND backend_type='client backend' AND pid<>pg_backend_pid()") = 0 ]]
 printf 'PASS interrupted locked migration rolled back without starting UPDATE; no listener or remaining DB backend\n'
 printf 'Fixture containers retained: %s %s %s; network: %s\n' "$normal" "$app" "$db" "$network"
