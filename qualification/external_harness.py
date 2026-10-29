@@ -16,6 +16,7 @@ import subprocess
 
 APPLICATION_SHA = '58234df96ca86507e6cdd87f65aaa9ab35621415'
 HARNESS_SHA = '5b0e9be2170c8b79662077c612efec7bb79f21b8'
+BOUNDARY_HARNESS_SHA = '4a7ceeb948c03b9198222c27bb8a8007db2979ea'
 CHANGED_TEST_PATHS = frozenset({
     'src/cljs/axxium/config_test.cljs',
     'src/cljs/axxium/extern/authorization_boundaries_test.cljs',
@@ -28,6 +29,15 @@ CHANGED_TEST_PATHS = frozenset({
 })
 DESCRIPTOR = 'external-harness.json'
 BUILD_DIRECTORIES = frozenset({'target', '.shadow-cljs', '.cpcache'})
+
+
+def accepted_harnesses():
+    """Closed test-only heads; merge commits containing tooling are not harnesses."""
+    return {
+        HARNESS_SHA: CHANGED_TEST_PATHS,
+        BOUNDARY_HARNESS_SHA: CHANGED_TEST_PATHS | {
+            'src/cljs/axxium/extern/qualification_boundaries_test.cljs'},
+    }
 
 
 class HarnessError(ValueError):
@@ -94,7 +104,8 @@ def canonical(value):
 
 def contract(root, application_sha, harness_sha):
     root = Path(root).resolve(strict=True)
-    require(application_sha == APPLICATION_SHA and harness_sha == HARNESS_SHA,
+    expected_paths = accepted_harnesses().get(harness_sha)
+    require(application_sha == APPLICATION_SHA and expected_paths is not None,
             'Only the fixed application and accepted regression harness are supported')
     require(git(root, 'rev-parse', '--show-toplevel').decode().strip() == str(root)
             and git(root, 'rev-parse', 'HEAD').decode().strip() == APPLICATION_SHA,
@@ -102,8 +113,8 @@ def contract(root, application_sha, harness_sha):
     application, harness = tree(root, application_sha), tree(root, harness_sha)
     changed = {path for path in application.keys() | harness.keys()
                if application.get(path) != harness.get(path)}
-    require(changed == CHANGED_TEST_PATHS and all(is_test(path) for path in changed),
-            'Regression harness differs outside the eight accepted test files')
+    require(changed == expected_paths and all(is_test(path) for path in changed),
+            'Regression harness differs outside its exact accepted test files')
     original = {path: row for path, row in application.items() if not is_test(path)}
     require(original == {path: row for path, row in harness.items() if not is_test(path)},
             'Non-test repository bytes or modes differ')
@@ -146,7 +157,9 @@ def require_directory(path):
 
 
 def validate(root: Path, descriptor: dict) -> None:
-    root, project, expected, _ = contract(root, APPLICATION_SHA, HARNESS_SHA)
+    require(isinstance(descriptor, dict) and isinstance(descriptor.get('harness_sha'), str),
+            'Harness descriptor identity changed')
+    root, project, expected, _ = contract(root, APPLICATION_SHA, descriptor['harness_sha'])
     require(isinstance(descriptor, dict) and descriptor == expected, 'Harness descriptor identity changed')
     for directory in (root / 'qualification', root / 'qualification/harness', project, project / 'src'):
         require_directory(directory)

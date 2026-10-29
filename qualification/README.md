@@ -35,8 +35,10 @@ fixture; inspect the owning process and fixture before retrying.
 
 ## Fixed application source with a separate accepted test harness
 
-`--external-harness-sha` can select the accepted test-only regression revision
-`5b0e9be2170c8b79662077c612efec7bb79f21b8` while the application checkout and
+`--external-harness-sha` can select either fixed test-only regression revision
+`5b0e9be2170c8b79662077c612efec7bb79f21b8` (eight changed test files) or
+`4a7ceeb948c03b9198222c27bb8a8007db2979ea` (the same eight plus the public
+boundary test namespace), while the application checkout and
 mutation fingerprints remain bound to
 `58234df96ca86507e6cdd87f65aaa9ab35621415`. The helper refuses any other
 application/harness pair, any non-test Git difference, or a changed immutable
@@ -52,6 +54,11 @@ hashes separately. The producer revision must contain the exact runner/helper
 bytes. Matching Git bytes does not prove native review or adoption; qualification
 collection must verify that custody separately. Neither a harness proposal nor
 an existing regression result is a mutation kill.
+
+These identities name the test-only PR heads. A subsequent main merge containing
+qualification tooling cannot replace them: its non-test repository tree differs
+from the application. Each harness keeps a separate generated project and the
+older project's descriptor remains valid under its original identity.
 
 ```sh
 python3 qualification/mutation_campaign.py --path-prefix src/cljs/ \

@@ -199,6 +199,44 @@ class ExternalHarnessTests(unittest.TestCase):
         with self.assertRaises(harness.HarnessError):
             harness.validate(self.root, descriptor)
 
+    def test_second_test_only_head_is_selected_without_reinterpreting_older_project(self):
+        self.git('checkout', '-q', '--detach', self.regressions)
+        added = 'src/cljs/axxium/extern/qualification_boundaries_test.cljs'
+        self.write(added, '; accepted public boundary contracts\n')
+        self.write('src/cljs/axxium/law/oidc_test.cljs', '; strengthened boundary coverage\n')
+        second = self.commit('accepted second test-only head')
+        self.git('checkout', '-q', '--detach', self.application)
+        first = self.prepare()
+        with mock.patch.object(harness, 'BOUNDARY_HARNESS_SHA', second):
+            descriptor = harness.prepare(self.root, self.application, second)
+            self.assertEqual(second, descriptor['harness_sha'])
+            self.assertEqual(harness.CHANGED_TEST_PATHS | {added}, set(descriptor['changed_test_paths']))
+            self.assertEqual(first['non_test_tree_sha256'], descriptor['non_test_tree_sha256'])
+            self.assertNotEqual(first['project_dir'], descriptor['project_dir'])
+            self.assertEqual('; accepted public boundary contracts\n',
+                             (Path(descriptor['project_dir']) / 'src/axxium/extern/qualification_boundaries_test.cljs').read_text())
+            harness.validate(self.root, first)
+            harness.validate(self.root, descriptor)
+            self.assertEqual(first, self.prepare())
+
+    def test_second_head_still_refuses_non_test_or_extra_test_changes(self):
+        for path in ['README.md', 'src/cljs/axxium/unaccepted_test.cljs']:
+            self.git('checkout', '-q', '--detach', self.regressions)
+            self.write('src/cljs/axxium/extern/qualification_boundaries_test.cljs', '; accepted boundary tests\n')
+            self.write(path, '; additional unaccepted input\n')
+            bad = self.commit('unaccepted second head input')
+            self.git('checkout', '-q', '--detach', self.application)
+            with mock.patch.object(harness, 'BOUNDARY_HARNESS_SHA', bad), self.assertRaises(harness.HarnessError):
+                harness.prepare(self.root, self.application, bad)
+
+    def test_descriptor_cannot_select_an_unknown_harness_or_a_non_string(self):
+        descriptor = self.prepare()
+        for identity in ['b' * 40, [], None]:
+            altered = copy.deepcopy(descriptor)
+            altered['harness_sha'] = identity
+            with self.subTest(identity=identity), self.assertRaises(harness.HarnessError):
+                harness.validate(self.root, altered)
+
 
 if __name__ == '__main__':
     unittest.main()
