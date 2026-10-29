@@ -37,3 +37,7 @@
             :node_id "synthetic-node" :scope "proxx:relay" :jti "test-jti" :iat 990 :exp 1000
             :allowed_models ["test-model"] :allowed_tenants ["local-tenant"] :grant_revision "revision"}
            (relay/claims "https://authority.example/oidc" grant 990 "test-jti" "revision")))))
+
+(t/deftest broker-audience-length-boundary
+  (t/is (relay/grants-valid? [(assoc grant :broker-audience (apply str (repeat 2048 "a")))] []))
+  (t/is (not (relay/grants-valid? [(assoc grant :broker-audience (apply str (repeat 2049 "a")))] []))))
