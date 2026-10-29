@@ -17,6 +17,7 @@
                      (update config :clients #(conj % (first %)))
                      (update config :clients #(conj % (assoc (first %) :id "another-client")))
                      (assoc-in config [:clients 0 :secret] "short")
+                     (assoc-in config [:clients 0 :secret] (apply str (repeat 31 "x")))
                      (assoc-in config [:clients 0 :id] "")
                      (assoc config :issuer "")
                      (assoc-in config [:clients 0 :unexpected-privilege] true)
@@ -63,3 +64,11 @@
                 "/oidc/device?user_code=ABCD#fragment" "/oidc/device?user_code=ABCD\n"
                 (str "/oidc/device?user_code=" (apply str (repeat 65 "a")))]]
     (is (= "/oidc/device" (law/device-login-return path)))))
+
+(deftest registered-client-redirect-count-boundary
+  (let [uris (mapv #(str "https://knoxx.example.test/callback/" %) (range 16))
+        at-limit (assoc-in config [:clients 0 :redirect-uris] uris)
+        over-limit (assoc-in config [:clients 0 :redirect-uris] (conj uris "https://knoxx.example.test/extra"))]
+    (is (= at-limit (try (law/require-config! at-limit)
+                         (catch cljs.core/ExceptionInfo _ nil))))
+    (is (thrown? cljs.core/ExceptionInfo (law/require-config! over-limit)))))
