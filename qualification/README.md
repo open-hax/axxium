@@ -12,7 +12,7 @@ dependencies, Python 3, Volta and Node 22.23.3.
 python3 -m unittest discover -s qualification -p test_mutation_campaign.py -v
 python3 qualification/mutation_campaign.py --inventory
 python3 qualification/inspect_expanded_inventory.py
-python3 qualification/mutation_campaign.py --limit 8 --out qualification/results/new-pilot
+python3 qualification/mutation_campaign.py --path-prefix src/cljs/ --sample-seed exploration-1 --limit 12 --out qualification/results/new-pilot
 python3 qualification/mutation_campaign.py --path-prefix src/cljs/ --batch-index 0 --limit 1000 --out qualification/results/batch-0
 ```
 
@@ -57,9 +57,10 @@ with a completed assertion-failure summary is counted as a test kill.
 The current scanner excludes test and `_fixture` source files. It finds list-head
 and literal candidates outside strings, regular expressions, reader-discarded,
 quoted, and `(comment ...)` forms. Candidates are syntactic proposals, not a
-claim of valid, non-equivalent or covered mutations. The expanded inventory
-adds unreviewed integer-boundary/type-predicate proposals and intentionally
-performs no mutations. Future work must independently review each operator,
+claim of valid, non-equivalent or covered mutations. Integer boundary and predicate substitutions are exploratory proposals;
+the inventory performs no mutations. Seeded selection orders candidate
+fingerprints deterministically; it is a bounded exploratory sample and does
+not establish representativeness, non-equivalence, or a killed count. Future work must independently review each operator,
 establish comprehensive test coverage, run real test-phase evaluations, dedupe
 source identities, and independently review the resulting evidence.
 

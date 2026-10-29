@@ -38,9 +38,20 @@ REPLACEMENTS = {
     "when": ("when-not",), "when-not": ("when",), "if": ("if-not",), "if-not": ("if",),
     "nil?": ("some?",), "some?": ("nil?",), "pos?": ("neg?", "zero?"),
     "neg?": ("pos?", "zero?"), "zero?": ("pos?",), "true?": ("false?",),
-    "false?": ("true?",),
+    "false?": ("true?",), "not": ("identity",),
+    "string?": ("number?",), "number?": ("string?",),
+    "map?": ("vector?",), "vector?": ("map?",), "keyword?": ("string?",),
+    "even?": ("odd?",), "odd?": ("even?",), "empty?": ("seq",),
 }
-ATOM_REPLACEMENTS = {"true": ("false",), "false": ("true",), "0": ("1",), "1": ("0",)}
+ATOM_REPLACEMENTS = {"true": ("false",), "false": ("true",)}
+
+
+def atom_replacements(token):
+    """Syntactic integer boundary proposals; equivalence is not established."""
+    if re.fullmatch(r"-?(?:0|[1-9][0-9]{0,8})", token) and token != "-0":
+        number = int(token)
+        return (str(number - 1), str(number + 1))
+    return ATOM_REPLACEMENTS.get(token, ())
 
 
 def tokens(source: str):
@@ -140,7 +151,7 @@ def sites(source: str):
         if token in close_for.values():
             raise ValueError("Unexpected reader delimiter")
         if not disabled:
-            for replacement in ATOM_REPLACEMENTS.get(token, ()):
+            for replacement in atom_replacements(token):
                 found.append((start, end, token, replacement, "literal"))
         return index + 1
 
@@ -427,7 +438,7 @@ def recover(journal):
     print("Recovered pinned source:", relative)
 
 
-def run_campaign(candidates, out, limit, timeout, batch_index=None):
+def run_campaign(candidates, out, limit, timeout, batch_index=None, sample_seed=None):
     out = owned_output(out)
     if out.exists():
         raise ValueError("Output already exists; preserve earlier evidence")
@@ -437,6 +448,7 @@ def run_campaign(candidates, out, limit, timeout, batch_index=None):
     if node_version != "v22.23.3":
         raise ValueError("The test runtime does not match the pinned Node version")
     state = {"source_sha": SOURCE_SHA, "scope": "bounded CLJS node-test pilot", "batch_index": batch_index,
+             "sample_seed": sample_seed,
              "producer_sha256": digest(Path(__file__).read_bytes()), "node_version": node_version,
              "package_lock_sha256": digest((ROOT / "package-lock.json").read_bytes()),
              "compile_command": COMPILE, "test_command": TEST,
@@ -549,6 +561,7 @@ def main():
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--batch-index", type=int, choices=range(4), default=None,
                         help="Select one disjoint fingerprint partition; no qualification is implied")
+    parser.add_argument("--sample-seed", help="Deterministically order candidate fingerprints for bounded exploration")
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--out", type=Path, default=ROOT / "qualification/results/pilot-20261029")
     args = parser.parse_args()
@@ -572,6 +585,8 @@ def main():
         selected = [c for c in candidates if c["path"].startswith(args.path_prefix)]
         if args.batch_index is not None:
             selected = [c for c in selected if batch_for(c["fingerprint"]) == args.batch_index]
+        if args.sample_seed is not None:
+            selected.sort(key=lambda c: digest((args.sample_seed + ":" + c["fingerprint"]).encode()))
         if args.inventory:
             print(json.dumps({"source_sha": SOURCE_SHA, "all_candidates": len(candidates),
                               "selected_candidates": len(selected), "paths_with_candidates": len({c["path"] for c in candidates}),
@@ -579,7 +594,7 @@ def main():
             return
         if not selected:
             raise ValueError("No candidates selected")
-        run_campaign(selected, args.out, args.limit, args.timeout, args.batch_index)
+        run_campaign(selected, args.out, args.limit, args.timeout, args.batch_index, args.sample_seed)
 
 
 if __name__ == "__main__":
