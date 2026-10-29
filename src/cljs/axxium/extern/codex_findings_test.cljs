@@ -316,3 +316,20 @@
   (async done (-> (administrator-can-read-entity*)
                   (.catch (fn [e] (is false (str "Entity fixture rejected: " (pr-str e)))))
                   (.finally done))))
+
+(defn- ^:async signup-rejects-blank-email-before-persistence* []
+  (let [handler (get (routes auth/register-auth-routes!) [:post "/api/auth/signup"])
+        responses (atom [])
+        queries (atom 0)]
+    (with-redefs [cfg/get-in-config (fn [_] nil)
+                  http/body (fn [_] {:email "  " :password "long-enough"})
+                  db/query-one-sql (fn [_] (swap! queries inc) (js/Promise.resolve nil))
+                  http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
+      (await (handler {} nil))
+      (is (= [{:status 400 :body {:error "email is required"}}] @responses))
+      (is (zero? @queries)))))
+
+(deftest signup-rejects-blank-email-before-persistence
+  (async done (-> (signup-rejects-blank-email-before-persistence*)
+                  (.catch (fn [e] (is false (str "Blank email fixture rejected: " (pr-str e)))))
+                  (.finally done))))

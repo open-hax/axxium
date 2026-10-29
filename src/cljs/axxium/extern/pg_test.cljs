@@ -36,6 +36,23 @@
   (is (not (pg/actor-email-conflict? #js {:code "23505" :constraint "idx_provider_bindings_subject"})))
   (is (not (pg/actor-email-conflict? #js {:code "23503" :constraint "idx_actors_email"}))))
 
+(defn- ^:async parameterized-query-preserves-values* []
+  (let [seen (atom nil)
+        client #js {:query (fn [sql params]
+                             (reset! seen {:sql sql :params params})
+                             (js/Promise.resolve #js {:rows #js [] :rowCount 0}))}]
+    (is (= {:rows [] :row-count 0} (await (pg/query! client "SELECT $1" ["value"]))))
+    (is (= "SELECT $1" (:sql @seen)))
+    (let [params (:params @seen)
+          values (when (.isArray js/Array params) (vec (array-seq params)))]
+      (is (.isArray js/Array params))
+      (is (= ["value"] values)))))
+
+(deftest parameterized-query-preserves-values
+  (async done (-> (parameterized-query-preserves-values*)
+                  (.catch (fn [e] (is false (str "Parameterized query fixture rejected: " (pr-str e)))))
+                  (.finally done))))
+
 (defn- ^:async shutdown-prevents-transaction-commit* []
   (let [commands (atom [])
         stopped (atom false)

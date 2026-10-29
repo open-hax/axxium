@@ -6,10 +6,12 @@
             [cljs.test :refer [deftest is]]))
 
 (deftest schema-timeout-is-explicit-and-bounded
-  (is (= 1000 (config/parse-schema-statement-timeout-ms "1000")))
-  (is (= 20000 (config/parse-schema-statement-timeout-ms "20000")))
-  (is (= 300000 (config/parse-schema-statement-timeout-ms "300000")))
-  (is (= 120000 (config/parse-schema-statement-timeout-ms "120000")))
+  (doseq [[input expected] [["1000" 1000] ["20000" 20000]
+                            ["300000" 300000] ["120000" 120000]]]
+    ;; Valid configuration must be accepted, including both interval bounds.
+    (is (= [:accepted expected]
+           (try [:accepted (config/parse-schema-statement-timeout-ms input)]
+                (catch :default _ [:refused])))))
   (doseq [invalid ["" "0" "999" "300001" "20ms" "-1" "1e4"]]
     (is (thrown? js/Error (config/parse-schema-statement-timeout-ms invalid)))))
 
