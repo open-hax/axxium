@@ -88,7 +88,11 @@ if ! status=$(timeout 8s docker wait "$app"); then
   exit 1
 fi
 [[ "$status" = 0 ]]
-! docker logs "$app" 2>&1 | grep -q 'Axxium listening on'
+app_logs=$(docker logs "$app" 2>&1)
+if grep -q 'Axxium listening on' <<< "$app_logs"; then
+  printf 'FAIL interrupted startup reached listening\n' >&2
+  exit 1
+fi
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc 'SELECT is_called FROM fixture_update_count') = f ]]
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT created_at IS NULL FROM actors WHERE id='fixture-actor'") = t ]]
 [[ $(docker exec --user 999:999 "$db" psql -U fixture -d fixture -Atc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='actors' AND column_name='created_at'") = YES ]]

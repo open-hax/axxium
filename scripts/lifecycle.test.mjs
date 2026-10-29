@@ -3,8 +3,24 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { install } from '../target/lifecycle/lifecycle.js';
 
 const fixture = fileURLToPath(new URL('./lifecycle-child.fixture.mjs', import.meta.url));
+
+test('invalid installation adds no process signal handlers', () => {
+  const pool = { end() { return Promise.resolve(); } };
+  const beforeTerm = process.listeners('SIGTERM');
+  const beforeInt = process.listeners('SIGINT');
+  for (const args of [
+    [null, pool, 20000], [pool, {}, 20000], [pool, { end: true }, 20000],
+    [pool, pool, 999], [pool, pool, 300001], [pool, pool, NaN],
+    [pool, pool, Infinity], [pool, pool, '20000'],
+  ]) {
+    assert.throws(() => install(...args), /Invalid lifecycle installation/);
+    assert.deepEqual(process.listeners('SIGTERM'), beforeTerm);
+    assert.deepEqual(process.listeners('SIGINT'), beforeInt);
+  }
+});
 
 function startFixture(overrides = {}) {
   const child = spawn(process.execPath, [fixture], {

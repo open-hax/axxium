@@ -1,5 +1,6 @@
 (ns axxium.extern.lifecycle
-  "Node process signals and orderly Fastify/PostgreSQL shutdown boundary.")
+  "Node process signals and orderly Fastify/PostgreSQL shutdown boundary."
+  (:require [axxium.law.lifecycle :as law]))
 
 (defn stopping? [controller]
   @(:stopping? controller))
@@ -31,6 +32,10 @@
    max(25 seconds, twice the schema statement limit plus 5 seconds);
    repeated signals cannot start a competing close."
   [pool startup-pool statement-timeout-ms]
+  (law/require-installation!
+   {:runtime-pool-close? (and (some? pool) (fn? (.-end pool)))
+    :schema-pool-close? (and (some? startup-pool) (fn? (.-end startup-pool)))
+    :statement-timeout-ms statement-timeout-ms})
   (let [controller {:stopping? (atom false) :app (atom nil)
                     :startup-pool startup-pool :startup-close (atom nil)
                     :startup-closed? (atom false)}
