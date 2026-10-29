@@ -5,6 +5,20 @@ import { generateKeyPairSync, randomBytes, createHash } from 'node:crypto';
 // Synthetic interaction transport. It is never mounted by the product server.
 const boundedFetch = (url, options = {}) => fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
 
+// Observe the public response contract before consuming token/discovery fields.
+// A plaintext error must fail an assertion rather than escape as a parser error.
+export async function readProtocolJSON(response, label, allowEmpty = false) {
+  const text = await response.text();
+  if (allowEmpty && text === '') return null;
+  assert.match(response.headers.get('content-type') ?? '', /^application\/json(?:\s*;|$)/i,
+    `${label} must declare a JSON response`);
+  let value;
+  assert.doesNotThrow(() => { value = JSON.parse(text); }, `${label} must contain valid JSON`);
+  assert.ok(value !== null && typeof value === 'object' && !Array.isArray(value),
+    `${label} must contain a JSON object`);
+  return value;
+}
+
 export async function runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive) {
   await pool.query("CREATE TABLE actors(id text PRIMARY KEY,status text NOT NULL); CREATE TABLE sessions(actor_id text,token_hash text,expires_at timestamptz); INSERT INTO actors VALUES('synthetic-actor','active'); INSERT INTO sessions VALUES('synthetic-actor','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',clock_timestamp()+interval '1 hour')");
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -33,6 +47,11 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
         await provider.interactionFinished(req, res, result, { mergeWithLastSubmission: false });
       } else await provider.callback()(req, res);
     } catch {
+      // A failed synthetic handler/provider is an execution error, even when
+      // its HTTP projection also violates an asserted response contract.
+      // The accepted measurement preload verifies this fixture caller and
+      // records an independent error counter; no exception payload is emitted.
+      process.emit('axxiumQualificationFixtureError');
       if (!res.headersSent) res.statusCode = 500;
       res.end('Synthetic fixture failure');
     }
@@ -63,13 +82,34 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
   async function form(path, data) {
     const response = await boundedFetch(issuer + path, { method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(data) });
-    const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : null };
+    // RFC7009 successful revocation permits an empty200 body; other protocol
+    // responses, including revocation errors, must remain JSON objects.
+    const allowEmpty = path === '/token/revocation' && response.status === 200;
+    return { status: response.status,
+      body: await readProtocolJSON(response, 'Authority form response', allowEmpty) };
   }
+  // The protocol engine can consume a rejected database promise and render a
+  // 500 internally. Observe this owned pool during the fixture so the original
+  // query rejection remains an error independently of its HTTP projection.
+  const originalQuery = pool.query;
+  pool.query = function (...args) {
+    try {
+      const result = Reflect.apply(originalQuery, this, args);
+      return result && typeof result.then === 'function' ? result.catch(error => {
+        process.emit('axxiumQualificationFixtureError'); throw error;
+      }) : result;
+    } catch (error) {
+      process.emit('axxiumQualificationFixtureError'); throw error;
+    }
+  };
   try {
   provider = createProvider(pool, config, async id => id === 'synthetic-actor'
     ? { id, status: actorActive ? 'active' : 'disabled', display_name: 'Synthetic Actor' } : null);
-    const discovery = await (await boundedFetch(issuer + '/.well-known/openid-configuration')).json();
+    // The engine handles some rejected queries internally before callback()
+    // rejects. Observe its public error event as well as our outer handler.
+    provider.on('server_error', () => process.emit('axxiumQualificationFixtureError'));
+    const discovery = await readProtocolJSON(
+      await boundedFetch(issuer + '/.well-known/openid-configuration'), 'Authority discovery');
     assert.equal(discovery.issuer, issuer);
     assert.ok(!discovery.grant_types_supported.includes('urn:ietf:params:oauth:grant-type:device_code'));
     for (const client of clients) {
@@ -191,6 +231,7 @@ export async function runAuthorityFixture(pool, createProvider, bindSession, ses
     for (const row of grants.rows) assert.equal(await sessionGrantActive(pool, row.grant_id, 'synthetic-actor'), false);
     console.log('PASS durable authority: shared synthetic login, PKCE, state/nonce/audience, code replay refusal, own-client introspection, disabled actor refusal and revocation');
   } finally {
+    pool.query = originalQuery;
     await new Promise(resolve => server.close(resolve));
     server.closeAllConnections();
   }

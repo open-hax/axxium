@@ -62,6 +62,45 @@ class TestPhaseTests(unittest.TestCase):
         measured['warnings'] = ['DeprecationWarning']
         self.assertEqual(phase.protocol_result(0, full, measured)['warnings'], ['DeprecationWarning'])
 
+    def test_observed_fixture_error_denies_kill_even_alongside_response_assertion(self):
+        run, measured = self.native('''
+import assert from 'node:assert/strict';
+process.emit('axxiumQualificationFixtureError');
+assert.equal('text/plain', 'application/json');
+''', filename='oidc-protocol.fixture.mjs', node_test=False)
+        self.assertEqual(measured['setup_failures'], 1)
+        self.assertEqual(measured['failed'], 1)
+        actual = phase.protocol_result(run.returncode, run.stdout + run.stderr, measured)
+        self.assertEqual((actual['failures'], actual['errors']), (1, 1))
+        import mutation_campaign as campaign
+        group = {'name': 'protocol', **actual}
+        summary = {'schema': 'axxium-qualification-test-phase/v1', 'plan': 'protocol',
+                   'groups': [group], 'containment_unknown': False, **actual}
+        result = {'exit_code': 1, 'timed_out': False,
+                  'output': phase.PREFIX + json.dumps(summary)}
+        baseline = {'tests': 1, 'assertions': 1, 'driver_plan': 'protocol', 'driver_groups': ['protocol']}
+        self.assertEqual(campaign.classify_test(result, baseline), 'test_error')
+
+    def test_foreign_fixture_error_event_cannot_relabel_a_genuine_contract_assertion(self):
+        run, measured = self.native('''
+import assert from 'node:assert/strict';
+process.emit('axxiumQualificationFixtureError');
+assert.equal(1, 2);
+''', filename='actor-pages.test.mjs', node_test=False)
+        self.assertEqual(measured['setup_failures'], 0)
+        self.assertEqual(measured['failed'], 1)
+        self.assertEqual(phase.protocol_result(run.returncode, run.stdout + run.stderr, measured)['errors'], 0)
+
+    def test_fresh_protocol_baseline_after_error_observation_has_no_error_credit(self):
+        run, measured = self.native('''
+import assert from 'node:assert/strict';
+assert.equal(1, 1);
+''' + ''.join('console.log(' + json.dumps(marker) + ');\n' for marker in phase.PROTOCOL_MARKERS),
+            filename='oidc-protocol.fixture.mjs', node_test=False)
+        self.assertEqual(measured['setup_failures'], 0)
+        self.assertEqual(phase.protocol_result(run.returncode, run.stdout + run.stderr, measured),
+                         phase.result(1, 1))
+
     def native(self, code, filename='actor-pages.test.mjs', *, node_test=True):
         node = node_binary()
         with tempfile.TemporaryDirectory(prefix='aq-law-', dir='/tmp') as temporary:

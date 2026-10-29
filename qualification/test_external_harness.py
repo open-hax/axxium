@@ -289,6 +289,61 @@ class ExternalHarnessTests(unittest.TestCase):
         with mock.patch.object(harness, 'PROTOCOL_HARNESS_SHA', missing), self.assertRaises(harness.HarnessError):
             harness.prepare(self.root, self.application, missing)
 
+    def test_json_protocol_head_has_its_own_inputs_without_reinterpreting_older_protocol_project(self):
+        protocol = self.protocol_commit()
+        self.git('checkout', '-q', '--detach', protocol)
+        changed = sorted(harness.TEST_SUPPORT_PATHS)[0]
+        self.write(changed, "import assert from 'node:assert/strict'; assert.ok('JSON object contract');\n")
+        json_protocol = self.commit('accepted JSON response test contract')
+        self.git('checkout', '-q', '--detach', self.application)
+        with (mock.patch.object(harness, 'PROTOCOL_HARNESS_SHA', protocol),
+              mock.patch.object(harness, 'JSON_PROTOCOL_HARNESS_SHA', json_protocol)):
+            older = harness.prepare(self.root, self.application, protocol)
+            older_record = (Path(older['project_dir']) / harness.DESCRIPTOR).read_bytes()
+            newer = harness.prepare(self.root, self.application, json_protocol)
+            self.assertNotEqual(older['project_dir'], newer['project_dir'])
+            self.assertEqual(older['non_test_tree_sha256'], newer['non_test_tree_sha256'])
+            self.assertEqual(older['test_support_paths'], newer['test_support_paths'])
+            self.assertIn('JSON object contract', (Path(newer['project_dir']) / changed).read_text())
+            self.assertNotIn('JSON object contract', (Path(older['project_dir']) / changed).read_text())
+            self.assertNotIn('JSON object contract', (self.root / changed).read_text())
+            harness.validate(self.root, older)
+            harness.validate(self.root, newer)
+            self.assertEqual(older_record, (Path(older['project_dir']) / harness.DESCRIPTOR).read_bytes())
+
+    def test_json_protocol_head_cannot_change_undeclared_production_inputs(self):
+        bad = self.protocol_commit('README.md')
+        with mock.patch.object(harness, 'JSON_PROTOCOL_HARNESS_SHA', bad), self.assertRaises(harness.HarnessError):
+            harness.prepare(self.root, self.application, bad)
+
+    def test_fixture_error_head_preserves_the_older_json_manifest_and_production_scope(self):
+        protocol = self.protocol_commit()
+        self.git('checkout', '-q', '--detach', protocol)
+        changed = sorted(harness.TEST_SUPPORT_PATHS)[0]
+        self.write(changed, "import assert from 'node:assert/strict'; assert.ok('JSON contract');\n")
+        json_protocol = self.commit('accepted JSON contract')
+        self.write(changed, "process.emit('axxiumQualificationFixtureError');\n")
+        error_protocol = self.commit('accepted fixture error observation')
+        self.git('checkout', '-q', '--detach', self.application)
+        with (mock.patch.object(harness, 'JSON_PROTOCOL_HARNESS_SHA', json_protocol),
+              mock.patch.object(harness, 'FIXTURE_ERROR_HARNESS_SHA', error_protocol)):
+            older = harness.prepare(self.root, self.application, json_protocol)
+            record = (Path(older['project_dir']) / harness.DESCRIPTOR).read_bytes()
+            newer = harness.prepare(self.root, self.application, error_protocol)
+            self.assertNotEqual(older['project_dir'], newer['project_dir'])
+            self.assertEqual(older['non_test_tree_sha256'], newer['non_test_tree_sha256'])
+            self.assertEqual(older['test_support_paths'], newer['test_support_paths'])
+            self.assertIn('axxiumQualificationFixtureError', (Path(newer['project_dir']) / changed).read_text())
+            self.assertNotIn('axxiumQualificationFixtureError', (Path(older['project_dir']) / changed).read_text())
+            harness.validate(self.root, older)
+            harness.validate(self.root, newer)
+            self.assertEqual(record, (Path(older['project_dir']) / harness.DESCRIPTOR).read_bytes())
+
+    def test_fixture_error_head_cannot_change_undeclared_production_inputs(self):
+        bad = self.protocol_commit('README.md')
+        with mock.patch.object(harness, 'FIXTURE_ERROR_HARNESS_SHA', bad), self.assertRaises(harness.HarnessError):
+            harness.prepare(self.root, self.application, bad)
+
 
 if __name__ == '__main__':
     unittest.main()

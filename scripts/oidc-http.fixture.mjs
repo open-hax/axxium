@@ -6,6 +6,7 @@ import { createServer } from 'node:net';
 import Fastify from 'fastify';
 import cookiePlugin from '@fastify/cookie';
 import { runDeviceFixture } from './oidc-device.fixture.mjs';
+import { readProtocolJSON } from './oidc-protocol.fixture.mjs';
 
 const boundedFetch = (url, options = {}) => fetch(url, { ...options, signal: AbortSignal.timeout(10000) });
 
@@ -54,7 +55,8 @@ export async function runHttpFixture(pool, installHttp, root) {
     const malformed = await boundedFetch(`${origin}/oidc/interaction/invalid`, { method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', origin }, body: 'decision=approve' });
     assert.equal(malformed.status, 400);
-    const discovery = await (await boundedFetch(`${origin}/oidc/.well-known/openid-configuration`)).json();
+    const discovery = await readProtocolJSON(
+      await boundedFetch(`${origin}/oidc/.well-known/openid-configuration`), 'Mounted discovery');
     assert.equal(discovery.issuer, config.issuer);
     assert.deepEqual(discovery.code_challenge_methods_supported, ['S256']);
     const verifier = randomBytes(32).toString('base64url');
@@ -103,13 +105,16 @@ export async function runHttpFixture(pool, installHttp, root) {
     const tokens = await boundedFetch(discovery.token_endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, grant_type: 'authorization_code', code,
         code_verifier: verifier, redirect_uri: client['redirect-uris'][0] }) });
-    const body = await tokens.json();
+    const body = await readProtocolJSON(tokens, 'Mounted token response');
     assert.equal(tokens.status, 200, JSON.stringify(body));
     const claims = JSON.parse(Buffer.from(body.id_token.split('.')[1], 'base64url'));
     assert.equal(claims.sub, actor.id); assert.equal(claims.aud, client.id); assert.equal(claims.nonce, nonce);
-    const introspect = async () => (await (await boundedFetch(discovery.introspection_endpoint, { method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, token: body.access_token }) })).json()).active;
+    const introspect = async () => {
+      const response = await boundedFetch(discovery.introspection_endpoint, { method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, token: body.access_token }) });
+      return (await readProtocolJSON(response, 'Mounted introspection response')).active;
+    };
     assert.equal(await introspect(), true);
     await runDeviceFixture({ pool, discovery, origin, clients: [client, other], actor, rootToken, jar });
     await pool.query('DELETE FROM sessions WHERE token_hash=$1', [rootDigest]);
@@ -156,7 +161,8 @@ export async function runHttpFixture(pool, installHttp, root) {
       body: new URLSearchParams({ client_id: client.id, client_secret: client.secret, grant_type: 'authorization_code', code: switchedCode,
         code_verifier: verifier, redirect_uri: client['redirect-uris'][0] }) });
     assert.equal(switchedTokens.status, 200);
-    const switchedClaims = JSON.parse(Buffer.from((await switchedTokens.json()).id_token.split('.')[1], 'base64url'));
+    const switchedBody = await readProtocolJSON(switchedTokens, 'Account-switch token response');
+    const switchedClaims = JSON.parse(Buffer.from(switchedBody.id_token.split('.')[1], 'base64url'));
     assert.equal(switchedClaims.sub, otherActor.id);
     console.log('PASS mounted Fastify authority: discovery, root-session consent, Origin/CSRF refusal, token exchange and parent-session revocation');
   } finally {

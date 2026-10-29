@@ -11,6 +11,16 @@ const allowed = new Set(['oidc-store.integration.mjs', 'oidc-protocol.fixture.mj
   'oidc-http.fixture.mjs', 'oidc-device.fixture.mjs', 'lifecycle.test.mjs',
   'compose-stop-grace.test.mjs', 'actor-pages.test.mjs', 'oidc-return.test.mjs']);
 const passed = {}, failed = {}, setupFailures = {}, warnings = [];
+process.on('axxiumQualificationFixtureError', () => {
+  const stack = new Error().stack?.split('\n') ?? [];
+  const fixture = root + '/scripts/oidc-protocol.fixture.mjs';
+  const observed = stack.some(line => {
+    const file = line.match(/(file:\/\/[^\s)]+):\d+:\d+/)?.[1];
+    return file && fileURLToPath(file) === fixture;
+  });
+  if (observed) setupFailures['scripts/oidc-protocol.fixture.mjs'] =
+    (setupFailures['scripts/oidc-protocol.fixture.mjs'] ?? 0) + 1;
+});
 for (const method of ['ok', 'equal', 'notEqual', 'deepEqual', 'notDeepEqual', 'strictEqual',
   'notStrictEqual', 'deepStrictEqual', 'notDeepStrictEqual', 'throws', 'rejects',
   'doesNotThrow', 'doesNotReject', 'ifError', 'match', 'doesNotMatch', 'partialDeepStrictEqual']) {

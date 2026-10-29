@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { safeInteractionReturn } from '../resources/public/oidc-return.js';
+import { readProtocolJSON } from './oidc-protocol.fixture.mjs';
 
 // Synthetic device approval over the real mounted transport and owned fixture PG.
 // The clock is advanced in owned rows; no sleeps or service credentials are used.
@@ -14,7 +15,7 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(data),
     });
-    return { status: response.status, body: await response.json() };
+    return { status: response.status, body: await readProtocolJSON(response, 'Device form response') };
   };
   const issue = async (owner = client) => {
     const result = await form(discovery.device_authorization_endpoint, {
@@ -218,7 +219,7 @@ export async function runDeviceFixture({ pool, discovery, origin, clients, actor
     headers: { authorization: `Bearer ${tokens.body.access_token}` },
   });
   assert.equal(userinfo.status, 200);
-  assert.equal((await userinfo.json()).sub, actor.id);
+  assert.equal((await readProtocolJSON(userinfo, 'Device userinfo response')).sub, actor.id);
   assert.equal(await status(tokens.body.access_token, other), false);
   assert.equal((await poll(device)).body.error, 'invalid_grant');
 
