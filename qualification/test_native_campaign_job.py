@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -63,6 +64,39 @@ class NativeJobLaws(unittest.TestCase):
             self.assertEqual(args[args.index('--limit')+1],'1000')
             self.assertEqual(len(digest),64);self.assertGreater(count,700)
             self.assertFalse(any(flag in args for flag in ['--continue-from','--acknowledge-containment','--restore-from']))
+
+    def test_non_home_volta_install_survives_the_stripped_runtime_boundary(self):
+        home=Path('/synthetic/home');volta_home=Path('/synthetic/hosted-cache/volta/2.0.2')
+        volta=volta_home/'bin/volta';node=volta_home/'tools/image/node/22.23.3/bin/node'
+        with patch.dict(os.environ,{'GH_TOKEN':'synthetic-secret','GITHUB_TOKEN':'synthetic-secret'}):
+            environment=native.runtime_environment(node,volta,volta_home,self.base,home)
+        self.assertEqual(environment['VOLTA_HOME'],str(volta_home))
+        self.assertIn(str(volta.parent),environment['PATH'].split(':'))
+        self.assertNotIn(str(home/'.volta/bin'),environment['PATH'].split(':'))
+        self.assertNotIn('GH_TOKEN',environment);self.assertNotIn('GITHUB_TOKEN',environment)
+        calls=[]
+        def probe(argv,**options):
+            calls.append((argv,options))
+            return '2.0.2' if argv==['volta','--version'] else str(node) if '-p' in argv else 'v22.23.3'
+        result=native.verify_runtime(environment,node,self.root,command=probe)
+        self.assertTrue(result['canonical_lookup_verified_before_gate'])
+        self.assertEqual(calls[1][0],['volta','run','--node','22.23.3','node','-p','process.execPath'])
+        self.assertTrue(all(options=={'cwd':self.root,'env':environment} for _,options in calls))
+        with self.assertRaises(ValueError):native.verify_runtime(environment,node,self.root,command=lambda *a,**k:'wrong-tool')
+        def another_node(argv,**options):return '2.0.2' if argv==['volta','--version'] else '/another/node'
+        with self.assertRaises(ValueError):native.verify_runtime(environment,node,self.root,command=another_node)
+        self.assertFalse(self.gate.exists())
+
+    def test_public_runtime_refusal_has_a_fixed_stage_without_private_input(self):
+        private='https://private.invalid/private-runtime-payload'
+        result=subprocess.run([sys.executable,'-B',native.__file__,'--partition','2'],
+            env={'HOME':str(self.base),'PATH':os.defpath,'LANG':'C.UTF-8','GITHUB_REPOSITORY':private},
+            capture_output=True,text=True,check=False)
+        self.assertEqual(result.returncode,1)
+        value=json.loads(result.stdout)
+        self.assertEqual(value['stage'],'native-context');self.assertEqual(value['error_type'],'ValueError')
+        self.assertFalse(value['production_admitted'])
+        self.assertNotIn(private,result.stdout+result.stderr);self.assertNotIn('Traceback',result.stderr)
 
     def test_caps_must_be_actual_active_and_match_every_native_limit(self):
         witness=self.witness();self.assertEqual(witness['properties']['MainPID'],'123')
