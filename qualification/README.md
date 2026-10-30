@@ -286,6 +286,10 @@ producer `b87a7ddf24d63147f2a8c85a789fb97b55047c9e`, pure harness
 reads verify the producer's exact merged PR/main ancestry, the pure-harness
 ancestor, and the collector's own exact Git bytes and native merged-main PR.
 Neither a copied summary nor the collector's local tests supplies adoption.
+Before native adoption or raw-evidence reads, the collector independently checks
+its actual six evaluator files against the immutable producer Git blobs and
+pins imported evaluator modules to those nonsymlink paths. Worker-side hashes
+cannot stand in for the bytes evaluating their evidence.
 
 Use four final reports, one for each partition. They may live in two reused
 workers after the two execution waves, but every worker must be restored and
@@ -319,7 +323,9 @@ containing exactly four objects. Each names `batch_index`, absolute
 `worker_root`, absolute `report`, and the corresponding native `unit`. A final
 aborted report also names absolute `containment_ack` and `restoration` files.
 Units follow `axxium-qual582-standard-v2-v5-worker0.service`, the corresponding
-worker1 name, and the `-batch2`/`-batch3` suffixes for the later wave. Use a fresh
+worker1 name, and the `-batch2`/`-batch3` suffixes for the later wave. Canonical
+continued invocations append `-continue1` through `-continue999`; zero,
+leading-zero and unbounded suffixes refuse. Use a fresh
 output under an existing owned private directory outside all workers:
 
 ```sh

@@ -58,6 +58,11 @@ class CollectionTests(unittest.TestCase):
             self.write(self.root/'qualification'/name,(collect.HERE/name).read_bytes())
         self.harness = {'harness_sha':collect.HARNESS,'scope':'EXPLICIT SYNTHETIC UNIT FIXTURE, NOT EVIDENCE'}
         self.write(self.root/'qualification/harness'/collect.HARNESS/collect.external_harness.DESCRIPTOR,self.harness)
+        patch=mock.patch.object(collect,'HERE',self.root/'qualification');patch.start();self.addCleanup(patch.stop)
+        for module,name in [(collect.campaign,'mutation_campaign.py'),(collect.lineage,'campaign_lineage.py'),
+                            (collect.external_harness,'external_harness.py'),(collect.test_phase,'test_phase.py')]:
+            patch=mock.patch.object(module,'__file__',str(self.root/'qualification'/name))
+            patch.start();self.addCleanup(patch.stop)
         patch = mock.patch.object(collect.external_harness,'validate');self.validate=patch.start();self.addCleanup(patch.stop)
         self.summary = {'schema':'axxium-qualification-test-phase/v1','plan':'cljs','tests':1,'assertions':1,
             'failures':0,'errors':0,'warnings':[],'timed_out':False,'containment_unknown':False,
@@ -243,6 +248,14 @@ class CollectionTests(unittest.TestCase):
                 try:collect.fcntl.flock(other,collect.fcntl.LOCK_EX|collect.fcntl.LOCK_NB)
                 finally:os.close(other)
 
+    def test_continuation_unit_names_are_bounded_and_require_native_inactivity(self):
+        observation=lambda argv:'LoadState=not-found\nActiveState=inactive\nMainPID=0\nControlGroup=\n'
+        prefix='axxium-qual582-standard-v2-v5-worker0'
+        for suffix in ('-continue1','-batch2-continue12','-batch3-continue999'):
+            self.assertTrue(collect.unit_closed(prefix+suffix+'.service',execute=observation)['cgroup_empty_or_absent'])
+        for suffix in ('-continue0','-continue01','-continue1000','-continue-1','-batch0-continue1'):
+            with self.assertRaises(collect.Refusal):collect.unit_closed(prefix+suffix+'.service',execute=observation)
+
     def test_aborted_terminal_requires_bound_ack_and_fresh_canonical_restoration(self):
         entry,data=self.report(0,['killed']*250+['timeout'],aborted=True)
         with self.assertRaises(KeyError):collect.collect_batch(entry,observe_unit=self.closed)
@@ -303,13 +316,22 @@ class NativeAdoptionTests(unittest.TestCase):
     def setUp(self):
         temporary=tempfile.TemporaryDirectory(prefix='axxium-collector-custody-');self.addCleanup(temporary.cleanup)
         self.root=Path(temporary.name);here=self.root/'qualification';here.mkdir()
-        (here/Path(collect.__file__).name).write_bytes(Path(collect.__file__).read_bytes())
+        for name in collect.RUNTIME_FILES:
+            (here/name).write_bytes((collect.HERE/name).read_bytes())
         for args in (['init','-q'],['config','user.name','Fixture'],['config','user.email','fixture@example.invalid'],
                      ['config','core.hooksPath','/dev/null'],['add','qualification'],
-                     ['commit','--no-gpg-sign','-qm','explicit collector custody fixture']):
+                     ['commit','--no-gpg-sign','-qm','explicit evaluator custody fixture']):
+            subprocess.run(['git',*args],cwd=self.root,check=True,capture_output=True)
+        producer=subprocess.check_output(['git','rev-parse','HEAD'],cwd=self.root,text=True).strip()
+        (here/Path(collect.__file__).name).write_bytes(Path(collect.__file__).read_bytes())
+        for args in (['add','qualification'],['commit','--no-gpg-sign','-qm','explicit collector custody fixture']):
             subprocess.run(['git',*args],cwd=self.root,check=True,capture_output=True)
         self.revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=self.root,text=True).strip()
         patch=mock.patch.object(collect,'HERE',here);patch.start();self.addCleanup(patch.stop)
+        patch=mock.patch.object(collect,'PRODUCER',producer);patch.start();self.addCleanup(patch.stop)
+        for module,name in [(collect.campaign,'mutation_campaign.py'),(collect.lineage,'campaign_lineage.py'),
+                            (collect.external_harness,'external_harness.py'),(collect.test_phase,'test_phase.py')]:
+            patch=mock.patch.object(module,'__file__',str(here/name));patch.start();self.addCleanup(patch.stop)
         self.calls=[]
         self.data={
             'pulls/42':self.pr(42,collect.PRODUCER,collect.PRODUCER_MERGE),
@@ -345,6 +367,19 @@ class NativeAdoptionTests(unittest.TestCase):
             self.data=copy.deepcopy(original);change(self.data[key])
             with self.subTest(key=key),self.assertRaises(collect.Refusal):
                 collect.verify_adoption(self.revision,api=self.api)
+
+    def test_modified_collector_evaluator_bytes_or_foreign_import_origin_refuse_before_native_reads(self):
+        path=collect.HERE/'campaign_lineage.py';original=path.read_bytes()
+        path.write_bytes(original+b'\n# synthetic collector-side drift\n')
+        with self.assertRaisesRegex(collect.Refusal,'Collector-side evaluator'):
+            collect.verify_adoption(self.revision,api=self.api)
+        self.assertEqual(self.calls,[])
+        path.write_bytes(original)
+        with mock.patch.object(collect.lineage,'__file__',str(self.root/'foreign-lineage.py')):
+            with self.assertRaisesRegex(collect.Refusal,'another directory'):
+                collect.verify_adoption(self.revision,api=self.api)
+        self.assertEqual(self.calls,[])
+        self.assertEqual(len(collect.verify_evaluator_custody()),6)
 
 
 if __name__=='__main__':unittest.main()

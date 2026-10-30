@@ -14,6 +14,7 @@ import subprocess
 import campaign_lineage as lineage
 import external_harness
 import mutation_campaign as campaign
+import test_phase
 
 REPOSITORY = 'open-hax/axxium'
 APPLICATION = '58234df96ca86507e6cdd87f65aaa9ab35621415'
@@ -25,7 +26,7 @@ PROFILE = 'standard-v2'
 SEED = 'full-qualification-58234-v1'
 REQUIRED_KILLS = 250
 HEX40 = re.compile(r'[0-9a-f]{40}')
-UNIT = re.compile(r'axxium-qual582-standard-v2-v5-worker[01](?:-batch[23])?\.service')
+UNIT = re.compile(r'axxium-qual582-standard-v2-v5-worker[01](?:-batch[23])?(?:-continue[1-9][0-9]{0,2})?\.service')
 RUNTIME_FILES = ('mutation_campaign.py', 'campaign_lineage.py', 'external_harness.py',
                  'test_phase.py', 'assertion_measurement.mjs', 'node_test_reporter.mjs')
 AUTHORITY_DONE = 'QUALIFICATION_CHILD[protocol] PASS durable authority:'
@@ -68,10 +69,31 @@ def accepted_pr(value, head):
             and HEX40.fullmatch(value['merge_commit_sha']) is not None)
 
 
+def verify_evaluator_custody():
+    """Bind actual collector-side evaluator files independently of their methods."""
+    origins = {'mutation_campaign.py': campaign, 'campaign_lineage.py': lineage,
+               'external_harness.py': external_harness, 'test_phase.py': test_phase}
+    hashes = {}
+    for name in RUNTIME_FILES:
+        path = HERE/name
+        info = path.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1,
+                'A collector evaluator file is redirected or not regular')
+        if name in origins:
+            require(Path(origins[name].__file__).absolute() == path,
+                    'An imported evaluator came from another directory')
+        raw = path.read_bytes()
+        expected = subprocess.check_output(['git','show',PRODUCER+':qualification/'+name],cwd=HERE.parent)
+        require(raw == expected, 'Collector-side evaluator differs from the immutable producer')
+        hashes[name] = sha(raw)
+    return hashes
+
+
 def verify_adoption(collector_revision, *, api=github):
     """Git equality, native accepted PR and main ancestry are distinct checks."""
     require(isinstance(collector_revision, str) and HEX40.fullmatch(collector_revision),
             'An immutable collector revision is required')
+    evaluators = verify_evaluator_custody()
     raw = Path(__file__).read_bytes()
     require(subprocess.check_output(['git', 'show', collector_revision + ':qualification/' + Path(__file__).name],
                                     cwd=HERE.parent) == raw, 'Collector differs from its Git revision')
@@ -93,6 +115,7 @@ def verify_adoption(collector_revision, *, api=github):
     require(api('compare/' + collector_revision + '...main').get('merge_base_commit', {}).get('sha') == collector_revision,
             'Collector is not a native main ancestor')
     return {'collector_revision': collector_revision, 'collector_sha256': sha(raw),
+            'evaluator_runtime_files': evaluators,
             'collector_pr': accepted[0]['number'], 'collector_merge_sha': accepted[0]['merge_commit_sha'],
             'producer_pr': PRODUCER_PR, 'producer_revision': PRODUCER, 'producer_merge_sha': PRODUCER_MERGE,
             'pure_harness_sha': HARNESS, 'native_adoption_verified': True}
@@ -217,6 +240,7 @@ def observed_corpus(history):
 
 
 def collect_batch(entry, *, observe_unit=unit_closed):
+    verify_evaluator_custody()
     index = entry.get('batch_index')
     require(type(index) is int and index in range(4), 'Batch index is invalid')
     root = absolute(entry['worker_root'])
@@ -313,6 +337,7 @@ def collect_batch(entry, *, observe_unit=unit_closed):
 
 
 def collect(entries, *, observe_unit=unit_closed):
+    verify_evaluator_custody()
     require(isinstance(entries, list) and len(entries) == 4, 'Exactly four partitions are required')
     require(all(isinstance(row, dict) for row in entries), 'Malformed partition input')
     require({row.get('batch_index') for row in entries} == set(range(4))
