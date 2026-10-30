@@ -206,6 +206,31 @@ class NativeJobLaws(unittest.TestCase):
         self.assertIn('controller-refusal.json',manifest['files'])
         self.assertFalse((destination/'partition.json').exists())
 
+    def test_closure_observation_refusal_still_preserves_raw_negative_artifact(self):
+        root=self.root
+        subprocess.run(['git','init','-q'],cwd=root,check=True)
+        (root/'source').write_text('synthetic source fixture')
+        subprocess.run(['git','add','.'],cwd=root,check=True)
+        subprocess.run(['git','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],cwd=root,check=True)
+        results=root/'qualification/results';results.mkdir(parents=True)
+        (results/'negative.log').write_text('synthetic raw negative survives failed closure observation')
+        out=self.base/'closure-failed-artifact';out.mkdir()
+        real_run=subprocess.run
+        def journal(argv,**kwargs):
+            if argv[0]=='git':return real_run(argv,**kwargs)
+            kwargs['stdout'].write(b'synthetic native journal after failed closure')
+        with patch.object(native,'system_properties',side_effect=PermissionError('https://private.invalid/payload')),             patch.object(native.subprocess,'run',side_effect=journal):
+            with self.assertRaises(ValueError):native.preserve(root,out,{'synthetic':'no credit'},self.unit,{})
+        refusal=json.loads((out/'origin-closure-refusal.json').read_text())
+        self.assertEqual(refusal['error_type'],'PermissionError');self.assertFalse(refusal['closure_verified'])
+        self.assertNotIn('private.invalid',(out/'origin-closure-refusal.json').read_text())
+        manifest=json.loads((out/'artifact-manifest.json').read_text())
+        self.assertEqual(manifest['status'],'unqualified_snapshot')
+        self.assertFalse(manifest['origin_quiescence_verified'])
+        self.assertIn('qualification/results/negative.log',manifest['raw_members'])
+        self.assertIn('origin-closure-refusal.json',manifest['files'])
+        self.assertTrue((out/'native-unit.log').exists());self.assertFalse((out/'partition.json').exists())
+
     def test_workflow_is_manual_readonly_pinned_and_retains_failed_jobs(self):
         workflow=(native.CONTROLLER/native.WORKFLOW).read_text()
         self.assertIn('workflow_dispatch:',workflow)

@@ -206,7 +206,7 @@ def file_sha(path):
     return checksum.hexdigest()
 
 
-def snapshot(root, destination, origin):
+def snapshot(root, destination, origin, *, quiescence_verified=True):
     """Retain every raw result/log and exact reusable input without compiler caches."""
     bundle = destination/'source.bundle'
     subprocess.run(['git','bundle','create',str(bundle),'--all'],cwd=root,check=True,capture_output=True)
@@ -226,7 +226,8 @@ def snapshot(root, destination, origin):
                 stream.add(path,arcname=str(relative),recursive=False)
                 if stat.S_ISREG(info.st_mode):manifest[str(relative)]={'sha256':file_sha(path),'mode':stat.S_IMODE(info.st_mode)}
                 elif stat.S_ISLNK(info.st_mode):manifest[str(relative)]={'symlink':os.readlink(path)}
-    write(destination/'artifact-manifest.json',{'schema':'axxium-native-raw-artifact/v1','status':'complete','origin':origin,
+    write(destination/'artifact-manifest.json',{'schema':'axxium-native-raw-artifact/v1','status':'complete' if quiescence_verified else 'unqualified_snapshot',
+        'origin_quiescence_verified':quiescence_verified,'origin':origin,
         'worker_root':str(root),'files':{'source.bundle':file_sha(bundle),
         'raw-evidence.tar':file_sha(archive),
         **{path.name:file_sha(path) for path in destination.iterdir()
@@ -309,6 +310,50 @@ def execute(index, root, unit, destination, origin, adoption, state):
     require(collected,'Native partition retained without qualification; independent investigation may be required')
 
 
+def preserve(root, destination, origin, unit, state):
+    """Observation failure cannot suppress the independently attempted raw snapshot."""
+    errors=[];verified=False
+    try:
+        props=system_properties(unit)
+        forced=props.get('ActiveState')=='active'
+        if forced:
+            subprocess.run(['sudo','systemctl','stop',unit],check=True,capture_output=True,timeout=120)
+        closure=(closed(unit,witness=state['caps']) if 'caps' in state else
+                 {'no_active_invocation_witness':True,'native':system_properties(unit),'qualification_credit':False})
+        verified='caps' in state
+        write(destination/'origin-closure.json',{'origin':origin,'closure':closure,
+            'forced_stop':forced,'restoration_or_acknowledgement_claimed':False})
+    except Exception as error:
+        errors.append('origin-closure')
+        write(destination/'origin-closure-refusal.json',{'stage':'origin-closure','error_type':type(error).__name__,
+            'closure_verified':False,'production_admitted':False,'self_acknowledged':False})
+    try:
+        with (destination/'native-unit.log').open('xb') as output:
+            subprocess.run(['sudo','journalctl','--unit='+unit,'--no-pager','--output=cat'],check=True,stdout=output)
+    except Exception as error:
+        errors.append('native-journal')
+        write(destination/'journal-refusal.json',{'stage':'native-journal','error_type':type(error).__name__})
+    try:
+        if (root/'.git').exists():
+            if (root/'qualification/results/.campaign.lock').exists():
+                leased=False
+                try:
+                    with collector.read_leases([root]):
+                        leased=True
+                        snapshot(root,destination,origin,quiescence_verified=verified)
+                except collector.Refusal:
+                    if leased:raise
+                    # A still-held lock allows only explicitly unqualified raw
+                    # capture; it supplies neither a coherent history nor credit.
+                    errors.append('active-campaign-lock')
+                    snapshot(root,destination,origin,quiescence_verified=False)
+            else:snapshot(root,destination,origin,quiescence_verified=False)
+    except Exception as error:
+        errors.append('raw-snapshot')
+        write(destination/'snapshot-refusal.json',{'stage':'raw-snapshot','error_type':type(error).__name__})
+    require(not errors,'Native evidence preservation has unqualified stages: '+','.join(errors))
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--partition',type=int,required=True)
     args=parser.parse_args();origin=context(args.partition)
@@ -326,22 +371,7 @@ def main():
             'production_admitted':False,'self_acknowledged':False,'retry_attempted':False})
         raise
     finally:
-        # A monitor/controller failure must not strand its ephemeral workload.
-        # Forced native unit stop is explicitly not restored-source evidence.
-        props=system_properties(unit)
-        forced=props.get('ActiveState')=='active'
-        if forced:
-            subprocess.run(['sudo','systemctl','stop',unit],check=True,capture_output=True,timeout=120)
-        closure=(closed(unit,witness=state['caps']) if 'caps' in state else
-                 {'no_active_invocation_witness':True,'native':system_properties(unit),'qualification_credit':False})
-        write(destination/'origin-closure.json',{'origin':origin,'closure':closure,
-            'forced_stop':forced,'restoration_or_acknowledgement_claimed':False})
-        with (destination/'native-unit.log').open('xb') as output:
-            subprocess.run(['sudo','journalctl','--unit='+unit,'--no-pager','--output=cat'],check=True,stdout=output)
-        if (root/'.git').exists():
-            if (root/'qualification/results/.campaign.lock').exists():
-                with collector.read_leases([root]):snapshot(root,destination,origin)
-            else:snapshot(root,destination,origin)
+        preserve(root,destination,origin,unit,state)
 
 
 if __name__=='__main__':

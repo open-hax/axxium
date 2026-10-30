@@ -393,7 +393,10 @@ or disk-reserve boundary is reached. All six restored plans must still pass.
 An unknown containment outcome is retained without self-acknowledgement,
 automatic retry, or collection. A controller failure forces native group cleanup
 and retains the failure; forced cleanup is never represented as a restored
-application baseline. Later independent inspection remains a separate action.
+application baseline. A closure-observation refusal still triggers independent
+journal and raw capture attempts, explicitly marked as an unqualified snapshot
+when quiescence could not be verified. Later independent inspection remains a
+separate action.
 
 One-partition export reuses the accepted collector's read leases, native adoption
 and `collect_batch` implementation. Its explicit SYSTEM-bus observer binds the
