@@ -31,6 +31,11 @@ jobs:
         uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
         with:
           volta-version: '2.0.2'
+      - name: Select the compiler's genuine Java 21 runtime
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Prepare pinned native tools
         run: |
           volta install node@22.23.3

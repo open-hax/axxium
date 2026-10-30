@@ -388,6 +388,12 @@ released. The first native attempt failed before baseline or mutation execution
 because that location had been assumed to be HOME; its negative artifacts remain
 unqualified. Public refusals identify a fixed stage and exception type, and the
 active resource witness is emitted without workflow credentials.
+The compiler additionally requires Java 21 (Closure Compiler uses class-file
+level 65). The workflow selects genuine Temurin 21 as the existing build CI does;
+its resolved executable directory and matching JAVA_HOME survive the stripped
+environment. Both compiler lookup routes are verified before gate release. The
+second native attempt's Java 17 compiler failure remains an unqualified negative
+with zero executed mutants; compiler errors never supply kill credit.
 Every campaign runs without the workflow tokens in a verified active
 system cgroup with 5 GiB memory, 4 GiB memory high, zero swap, four CPU quota and
 192 tasks before its canonical CLI is released. The controller never selects a
