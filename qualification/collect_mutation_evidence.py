@@ -30,6 +30,8 @@ UNIT = re.compile(r'axxium-qual582-standard-v2-v5-worker[01](?:-batch[23])?(?:-c
 RUNTIME_FILES = ('mutation_campaign.py', 'campaign_lineage.py', 'external_harness.py',
                  'test_phase.py', 'assertion_measurement.mjs', 'node_test_reporter.mjs')
 AUTHORITY_DONE = 'QUALIFICATION_CHILD[protocol] PASS durable authority:'
+PROTOCOL_FRAGMENT = 'QUALIFICATION_CHILD[protocol] '
+AUTHORITY_PAYLOAD = 'PASS durable authority:'
 HERE = Path(__file__).resolve().parent
 
 
@@ -210,7 +212,13 @@ def eligibility_exclusion(row, plan, output=None):
     if protocol is not None and protocol['failures'] > 0:
         if not isinstance(output, str):
             return 'protocol-raw-output-unavailable'
-        if any(line.startswith(AUTHORITY_DONE) for line in output.splitlines()):
+        # The immutable child driver prefixes each read fragment, not complete
+        # logical lines. Removing those prefixes and joining every payload can
+        # over-exclude ambiguous output; it cannot miss an ASCII completion
+        # marker split at the producer's 8192-byte read boundary.
+        payload = ''.join(line[len(PROTOCOL_FRAGMENT):] for line in output.splitlines()
+                          if line.startswith(PROTOCOL_FRAGMENT))
+        if AUTHORITY_PAYLOAD in payload:
             return 'protocol-failure-after-authority-observer-scope'
     return None
 
@@ -241,8 +249,11 @@ def observed_corpus(history):
 
 def collect_batch(entry, *, observe_unit=unit_closed):
     verify_evaluator_custody()
+    require(isinstance(entry, dict), 'A batch input must be an object')
     index = entry.get('batch_index')
     require(type(index) is int and index in range(4), 'Batch index is invalid')
+    require(all(isinstance(entry.get(key), str) and entry[key] for key in ('worker_root','unit','report')),
+            'A batch requires worker_root, unit and report inputs')
     root = absolute(entry['worker_root'])
     require(root.is_dir() and root.stat().st_uid == os.getuid(), 'Worker ownership is unavailable')
     closure = observe_unit(entry['unit'])
@@ -267,6 +278,8 @@ def collect_batch(entry, *, observe_unit=unit_closed):
                  'fixture_path': 'scripts/oidc-protocol.fixture.mjs', 'fixture_sha256': sha(fixture_bytes),
                  'producer_revision': PRODUCER, 'driver_sha256': producer['files']['test_phase.py'],
                  'authority_done_raw_prefix': AUTHORITY_DONE,
+                 'protocol_fragment_raw_prefix': PROTOCOL_FRAGMENT, 'authority_payload_marker': AUTHORITY_PAYLOAD,
+                 'framing': 'Conservatively concatenate all protocol-prefixed payload fragments before marker search.',
                  'exclusion': 'Protocol failures after authority completed have no complete query-error observer; exclude the entire row, including mixed group failures.'}
         candidates, selection = lineage.select_candidates(campaign, profile=PROFILE,
             path_prefix='src/cljs/', batch_index=index, sample_seed=SEED)
@@ -275,6 +288,8 @@ def collect_batch(entry, *, observe_unit=unit_closed):
         terminal = history['document']
         closure_refs = {}
         if terminal['terminal_state'] == 'aborted':
+            require(all(isinstance(entry.get(key), str) and entry[key] for key in ('containment_ack','restoration')),
+                    'An aborted report requires containment_ack and restoration inputs')
             ack = lineage.validate_ack(campaign, absolute(entry['containment_ack']), history)
             restored = lineage.validate_restoration(campaign, absolute(entry['restoration']), history=history,
                 ack=ack, candidates=candidates, selection=selection, producer=producer, harness=harness)
@@ -342,6 +357,8 @@ def collect(entries, *, observe_unit=unit_closed):
     require(all(isinstance(row, dict) for row in entries), 'Malformed partition input')
     require({row.get('batch_index') for row in entries} == set(range(4))
             and all(type(row.get('batch_index')) is int for row in entries), 'Indexes must be exactly 0 through 3')
+    require(all(isinstance(row.get('worker_root'), str) and row['worker_root'] for row in entries),
+            'Each batch requires a worker_root input')
     batches, audits, seen = [], [], set()
     with read_leases([absolute(row['worker_root']) for row in entries]):
         for entry in sorted(entries, key=lambda value: value['batch_index']):
@@ -369,14 +386,19 @@ def main():
     parser.add_argument('--collector-revision', required=True)
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
+    stage = 'input-plan'
     try:
         inputs = absolute(args.inputs)
         require(inputs.is_file() and inputs.stat().st_size <= 65536, 'Collection input plan is unavailable')
         plan = json.loads(inputs.read_text(), object_pairs_hook=lineage._pairs)
         require(isinstance(plan, dict) and plan.get('schema') == 'axxium-collection-inputs/v1', 'Unknown input plan')
+        stage = 'native-adoption'
         adoption = verify_adoption(args.collector_revision)
+        stage = 'raw-evidence-collection'
         batches, audits = collect(plan.get('batches'))
+        stage = 'native-adoption-recheck'
         require(verify_adoption(args.collector_revision) == adoption, 'Native source adoption changed during collection')
+        stage = 'output-bundle'
         audit = {'schema': 'axxium-mutation-collection-audit/v1', 'repository': REPOSITORY,
                  'source_sha': APPLICATION, 'adoption': adoption, 'partitions': audits,
                  'production_admitted': False, 'raw_outcomes_preserved': True}
@@ -408,8 +430,9 @@ def main():
     except Refusal as error:
         print(json.dumps({'collected': False, 'reason': str(error), 'production_admitted': False}))
         raise SystemExit(1) from None
-    except Exception:
+    except Exception as error:
         print(json.dumps({'collected': False, 'reason': 'Native or source evidence unavailable or inconsistent',
+                          'stage': stage, 'error_type': type(error).__name__,
                           'production_admitted': False}))
         raise SystemExit(1) from None
 

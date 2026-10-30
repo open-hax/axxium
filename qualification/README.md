@@ -316,6 +316,10 @@ can qualify when protocol itself passed without failures. The guard records the
 pure fixture hash, producer/driver hash, exact marker and explicit exclusion
 reasons. It deliberately excludes some potentially valid later assertions; it
 does not relabel their raw `killed` observations or claim they are equivalent.
+The accepted driver prefixes each read fragment independently, so the collector
+conservatively joins all protocol-prefixed payload fragments before searching
+for the marker. An 8192-byte split cannot turn later-phase failures into credit;
+ambiguous reconstructed matches are excluded as well.
 The same guard applies to the 250-kill clean-stop monitor.
 
 Create an input plan with schema `axxium-collection-inputs/v1` and `batches`
@@ -343,6 +347,9 @@ and closure references, all exclusions, and every unexecuted fingerprint.
 collections and an audit hash, staying within the Services receipt size budget.
 The final `manifest.json` is written last and hashes both files. Output is
 private, new-only, and explicitly `production_admitted: false`.
+Missing input fields produce specific refusals. Unexpected failures identify a
+fixed processing stage and exception type without printing the exception
+payload or traceback; detailed raw evidence remains private and inspectable.
 
 Before immutable Services qualification-record adoption, publish the complete
 audit and every referenced raw report/log/acknowledgement/restoration and native

@@ -172,13 +172,15 @@ class CollectionTests(unittest.TestCase):
             changed['driver_summary']['groups'][0][field]=value
             self.assertFalse(collect.eligible(changed,plan))
 
-    def protocol_control(self, *, after_authority=False, passing=False):
+    def protocol_control(self, *, after_authority=False, passing=False, filler=0):
         with tempfile.TemporaryDirectory(prefix='aq-collection-control-') as temporary:
             root=Path(temporary);(root/'scripts').mkdir();counter=root/'counter';counter.mkdir()
             script=root/'scripts/oidc-protocol.fixture.mjs'
             markers=phase.PROTOCOL_MARKERS if passing else [phase.PROTOCOL_MARKERS[0]] if after_authority else []
             script.write_text("import assert from 'node:assert/strict';\n"+
+                ('process.stdout.write('+json.dumps('x'*filler+'\n')+');\n' if filler else '')+
                 ''.join('console.log('+json.dumps(marker)+');\n' for marker in markers)+
+                "await new Promise(resolve => process.stdout.write('',resolve));\n"+
                 'assert.equal(1,'+('1' if passing else '2')+');\n')
             environment={'PATH':os.defpath,'HOME':str(root),'LANG':'C.UTF-8',
                 'AXXIUM_QUAL_SOURCE_ROOT':str(root),'AXXIUM_QUAL_COUNTER_DIR':str(counter),
@@ -216,6 +218,21 @@ class CollectionTests(unittest.TestCase):
         protocol,raw=self.protocol_control(passing=True)
         self.assertEqual((protocol['failures'],protocol['errors']),(0,0))
         self.assertTrue(collect.eligible(result(protocol,1),plan,raw))
+
+    def test_actual_8192_byte_child_fragment_boundary_cannot_hide_authority_completion(self):
+        _,data=self.report(0,['killed']);row=data['results'][0]
+        protocol,raw=self.protocol_control(after_authority=True,filler=8189)
+        self.assertIn('QUALIFICATION_CHILD[protocol] PA\n',raw)
+        self.assertIn('QUALIFICATION_CHILD[protocol] SS durable authority:',raw)
+        self.assertNotIn(collect.AUTHORITY_DONE,raw)
+        cljs=self.summary['groups'][0]
+        groups=[cljs,{'name':'protocol',**protocol}]
+        summary={'schema':'axxium-qualification-test-phase/v1','plan':'cljs+protocol','groups':groups,
+            'warnings':[],'timed_out':False,'containment_unknown':False,
+            **{field:sum(g[field] for g in groups) for field in ('tests','assertions','failures','errors')}}
+        candidate={**row,'driver_summary':summary}
+        self.assertEqual(collect.eligibility_exclusion(candidate,{'key':'cljs+protocol','groups':['cljs','protocol']},raw),
+                         'protocol-failure-after-authority-observer-scope')
 
     def test_raw_log_report_source_runtime_and_harness_drift_fail_closed(self):
         entry,data=self.report(0)
@@ -258,7 +275,8 @@ class CollectionTests(unittest.TestCase):
 
     def test_aborted_terminal_requires_bound_ack_and_fresh_canonical_restoration(self):
         entry,data=self.report(0,['killed']*250+['timeout'],aborted=True)
-        with self.assertRaises(KeyError):collect.collect_batch(entry,observe_unit=self.closed)
+        with self.assertRaisesRegex(collect.Refusal,'containment_ack and restoration'):
+            collect.collect_batch(entry,observe_unit=self.closed)
         report=Path(entry['report']);ack=self.results/'containment-ack-200.json'
         self.write(ack,{'marker':{'source_sha':self.application,'state':'execution_active_or_containment_unknown',
             'operator_pid':123,'started_ns':100,'logfile':str(report.parent/'0250.test.log')},
@@ -276,6 +294,16 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(len(batch['mutants']),250)
         self.assertEqual(audit['raw_outcome_counts'],{'killed':250,'timeout':1})
         self.assertEqual(set(audit['terminal_closure']),{'containment_ack','restoration'})
+
+    def test_missing_required_fields_are_explicit_refusals_before_worker_access(self):
+        entry,_=self.report(0,['killed'])
+        for field in ('worker_root','unit','report'):
+            changed=dict(entry);changed.pop(field)
+            with self.subTest(field=field),self.assertRaisesRegex(collect.Refusal,'requires worker_root, unit and report'):
+                collect.collect_batch(changed,observe_unit=self.closed)
+        entries=[dict(entry,batch_index=i) for i in range(4)];entries[2].pop('worker_root')
+        with self.assertRaisesRegex(collect.Refusal,'requires a worker_root'):
+            collect.collect(entries,observe_unit=self.closed)
 
     def test_cli_writes_private_complete_bundle_last_and_refuses_a_deficit_before_output(self):
         entries=[self.report(i)[0] for i in range(4)]
@@ -310,6 +338,18 @@ class CollectionTests(unittest.TestCase):
             rejected=self.root.parent/'deficit'
             with self.assertRaises(SystemExit):invoke(rejected)
             self.assertFalse(rejected.exists())
+
+    def test_public_unexpected_refusal_identifies_stage_and_type_without_exception_payload(self):
+        inputs=self.root.parent/'inputs.json';self.write(inputs,{'schema':'axxium-collection-inputs/v1','batches':[]})
+        output=self.root.parent/'private-refusal';stdout=io.StringIO();stderr=io.StringIO()
+        with mock.patch.object(sys,'argv',['collector','--inputs',str(inputs),'--collector-revision','c'*40,'--out',str(output)]), \
+                mock.patch.object(collect,'verify_adoption',side_effect=ValueError('https://private.invalid/?token=DO_NOT_COPY')), \
+                contextlib.redirect_stdout(stdout),contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit):collect.main()
+        value=json.loads(stdout.getvalue())
+        self.assertEqual((value['stage'],value['error_type']),('native-adoption','ValueError'))
+        self.assertNotIn('DO_NOT_COPY',stdout.getvalue()+stderr.getvalue())
+        self.assertNotIn('Traceback',stderr.getvalue());self.assertFalse(output.exists())
 
 
 class NativeAdoptionTests(unittest.TestCase):
