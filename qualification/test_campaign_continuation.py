@@ -78,8 +78,10 @@ raise SystemExit(failed)
                 with mock.patch.object(campaign, 'campaign_plans', side_effect=plans), \
                         mock.patch.object(campaign, 'pinned_commands', return_value=(sys.executable, compiler, test_command)):
                     initial = root / 'qualification/results/initial/report.json'
+                    # Cold Python startup under the one-CPU control unit may
+                    # exceed 200 ms; the intentional mutant still blocks 30 s.
                     with self.assertRaisesRegex(RuntimeError, 'containment unknown'):
-                        campaign.run_campaign(candidates, initial.parent, 1000, .2,
+                        campaign.run_campaign(candidates, initial.parent, 1000, 1,
                             external_harness_sha='e'*40, producer_revision='c'*40,
                             selection=selection, operator_id='fixture-controller')
                     self.assertEqual(source.read_text(), original)

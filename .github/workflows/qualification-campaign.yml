@@ -1,0 +1,67 @@
+name: Native mutation qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: axxium-native-mutation-qualification
+  cancel-in-progress: false
+
+jobs:
+  partition:
+    if: github.repository == 'open-hax/axxium' && github.ref == 'refs/heads/main'
+    name: Native partition ${{ matrix.partition }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [2, 3]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install genuine pinned Volta
+        uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
+        with:
+          volta-version: '2.0.2'
+      - name: Prepare pinned native tools
+        run: |
+          volta install node@22.23.3
+          test "$(volta run --node 22.23.3 node --version)" = v22.23.3
+          test -x /usr/lib/postgresql/16/bin/initdb
+          test -x /usr/lib/postgresql/16/bin/pg_ctl
+          java -version
+          sudo systemctl --version
+      - name: Run adopted canonical whole partition under verified native caps
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PARTITION: ${{ matrix.partition }}
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/qualification-python-cache"
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/qualification-python-cache" python3 -B -u qualification/native_campaign_job.py --partition "$PARTITION"
+      - name: Preserve complete origin evidence and negatives
+        if: always()
+        id: evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: axxium-native-partition-${{ matrix.partition }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-evidence-${{ matrix.partition }}/
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          include-hidden-files: true
+      - name: Publish native artifact custody pointer
+        if: always() && steps.evidence.outcome == 'success'
+        env:
+          ARTIFACT_ID: ${{ steps.evidence.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          printf 'Native artifact ID: %s\nNative artifact SHA-256: %s\n' "$ARTIFACT_ID" "$ARTIFACT_DIGEST" >> "$GITHUB_STEP_SUMMARY"

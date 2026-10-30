@@ -367,3 +367,58 @@ integration fixture. Separate test-only candidate `9aedef0dc290754ba73bb13a56828
 adds four boundary assertions; its counterfactual run kills those four mutants,
 but its changed test revision cannot be retroactively attributed to the parent
 source's test suite. Those retained local reports are not bundled release proof.
+## Native isolated partitions 2 and 3
+
+The manually dispatched `qualification-campaign.yml` workflow runs only on the
+canonical repository's `main` branch. Its two fresh GitHub-hosted Ubuntu jobs
+execute the same accepted six-file producer `b87a7ddf`, application `58234df9`,
+pure harness `9bfa2725`, `standard-v2` inventory and original seed. The complete
+ordered partitions contain 703 and 708 proposals. These counts are not kills.
+No local mutation worker is added by this workflow.
+
+`native_campaign_job.py` is a native resource gate and evidence witness. It binds
+the actual GitHub run, attempt, numeric job ID, runner name, workflow path and
+controller revision before creating a worker. The controller and collector must
+be accepted main source; the collector's actual evaluator files retain its
+independent immutable-producer custody checks. Genuine pinned Volta resolves
+Node 22.23.3. Every campaign runs without the workflow tokens in a verified active
+system cgroup with 5 GiB memory, 4 GiB memory high, zero swap, four CPU quota and
+192 tasks before its canonical CLI is released. The controller never selects a
+different corpus or implements a mutation operator.
+
+The monitor rehashes completed raw logs, calls the accepted producer classifiers
+and the accepted collector's conservative eligibility guard. It requests one
+clean stop when 250 eligible positives are observed, or when its five-hour time
+or disk-reserve boundary is reached. All six restored plans must still pass.
+An unknown containment outcome is retained without self-acknowledgement,
+automatic retry, or collection. A controller failure forces native group cleanup
+and retains the failure; forced cleanup is never represented as a restored
+application baseline. A closure-observation refusal still triggers independent
+journal and raw capture attempts, explicitly marked as an unqualified snapshot
+when quiescence could not be verified. Later independent inspection remains a
+separate action.
+
+One-partition export reuses the accepted collector's read leases, native adoption
+and `collect_batch` implementation. Its explicit SYSTEM-bus observer binds the
+origin closure to the prior active invocation, original controller absence and
+empty descendant cgroups. Local absence after an artifact download supplies no
+remote closure evidence. This export is not a four-partition collection or a
+production admission decision.
+
+Every job uploads its source Git bundle and the actual current `src/cljs` bytes
+(including tracked changes and untracked source), all raw results and logs (including
+negatives, unexecuted tail and partial/aborted reports), immutable harness input
+copies and source-link metadata, six runtime files, native start/closure/journal
+observations and any one-partition export. Compiler caches and installed
+dependencies are omitted and explicitly declared. `artifact-manifest.json` is
+written last and hashes the complete raw archive plus the source bundle and
+origin files. The native Actions artifact ID and ZIP digest are published in the
+job summary. Any later aggregation must verify that digest and native repository,
+workflow/controller/run/attempt/job custody, then retain these full artifacts;
+neither copied JSON nor this workflow's green check grants production authority.
+
+The public standard runner supplies four CPU and 16 GiB RAM with a six-hour job
+limit, so the two isolated jobs can overlap the two bounded local campaigns.
+The monitor reserves space for its final raw archive and stops early rather than
+inventing missing evidence. Setup failures or resource-limited partial runs stay
+unqualified. Synthetic controller laws supply no real mutation credit.
