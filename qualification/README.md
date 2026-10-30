@@ -405,7 +405,8 @@ empty descendant cgroups. Local absence after an artifact download supplies no
 remote closure evidence. This export is not a four-partition collection or a
 production admission decision.
 
-Every job uploads its source Git bundle, all raw results and logs (including
+Every job uploads its source Git bundle and the actual current `src/cljs` bytes
+(including tracked changes and untracked source), all raw results and logs (including
 negatives, unexecuted tail and partial/aborted reports), immutable harness input
 copies and source-link metadata, six runtime files, native start/closure/journal
 observations and any one-partition export. Compiler caches and installed

@@ -209,9 +209,12 @@ class NativeJobLaws(unittest.TestCase):
     def test_closure_observation_refusal_still_preserves_raw_negative_artifact(self):
         root=self.root
         subprocess.run(['git','init','-q'],cwd=root,check=True)
-        (root/'source').write_text('synthetic source fixture')
+        source=root/'src/cljs/example.cljc';source.parent.mkdir(parents=True)
+        source.write_text('(def value 1)\n')
         subprocess.run(['git','add','.'],cwd=root,check=True)
         subprocess.run(['git','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],cwd=root,check=True)
+        source.write_text('(def value 2)\n')
+        untracked=source.parent/'untracked.cljc';untracked.write_text('(def untracked true)\n')
         results=root/'qualification/results';results.mkdir(parents=True)
         (results/'negative.log').write_text('synthetic raw negative survives failed closure observation')
         out=self.base/'closure-failed-artifact';out.mkdir()
@@ -228,6 +231,14 @@ class NativeJobLaws(unittest.TestCase):
         self.assertEqual(manifest['status'],'unqualified_snapshot')
         self.assertFalse(manifest['origin_quiescence_verified'])
         self.assertIn('qualification/results/negative.log',manifest['raw_members'])
+        self.assertEqual(manifest['raw_members']['src/cljs/example.cljc']['sha256'],native.file_sha(source))
+        self.assertIn('src/cljs/untracked.cljc',manifest['raw_members'])
+        with tarfile.open(out/'raw-evidence.tar') as archive:
+            self.assertEqual(archive.extractfile('src/cljs/example.cljc').read(),b'(def value 2)\n')
+            self.assertEqual(archive.extractfile('src/cljs/untracked.cljc').read(),b'(def untracked true)\n')
+        restored=self.base/'committed-source'
+        subprocess.run(['git','clone','-q',str(out/'source.bundle'),str(restored)],check=True,capture_output=True)
+        self.assertEqual((restored/'src/cljs/example.cljc').read_bytes(),b'(def value 1)\n')
         self.assertIn('origin-closure-refusal.json',manifest['files'])
         self.assertTrue((out/'native-unit.log').exists());self.assertFalse((out/'partition.json').exists())
 

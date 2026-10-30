@@ -211,7 +211,7 @@ def snapshot(root, destination, origin, *, quiescence_verified=True):
     bundle = destination/'source.bundle'
     subprocess.run(['git','bundle','create',str(bundle),'--all'],cwd=root,check=True,capture_output=True)
     archive = destination/'raw-evidence.tar'
-    paths = [root/'qualification/results',root/'qualification/harness']
+    paths = [root/'qualification/results',root/'qualification/harness',root/'src/cljs']
     paths += [root/'qualification'/name for name in collector.RUNTIME_FILES]
     paths = [path for path in paths if path.exists()]
     manifest = {}
