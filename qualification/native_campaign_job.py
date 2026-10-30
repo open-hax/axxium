@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import shutil
 import signal
 import stat
 import subprocess
@@ -31,6 +32,7 @@ PARTITIONS = {
 }
 INVENTORY = '08ac0fb39ac2ff5a8068891906f867ca14573c50609af99dde2f5c8a97401ce3'
 GATE = 'while [[ ! -f "$1" ]]; do sleep 0.1; done; shift; exec "$@"'
+STAGE = 'native-context'
 
 
 def require(value, reason):
@@ -161,6 +163,28 @@ def cli(root, index):
         '--out',str(root/'qualification/results/native-standard-v2-v5')]
 
 
+def runtime_environment(node, volta, volta_home, cache, home):
+    """Keep the installer's actual tool locations across the credential boundary."""
+    require(all(path.is_absolute() for path in (node,volta,volta_home,cache,home)),
+            'Native runtime paths must be absolute')
+    user=pwd.getpwuid(os.getuid()).pw_name
+    return {'HOME':str(home),'USER':user,'LOGNAME':user,'LANG':'C.UTF-8',
+        'PATH':str(node.parent)+':'+str(volta.parent)+':/usr/local/bin:/usr/bin:/bin',
+        'VOLTA_HOME':str(volta_home),'JAVA_TOOL_OPTIONS':'-Xmx3g','NODE_OPTIONS':'--max-old-space-size=1024',
+        'PYTHONPYCACHEPREFIX':str(cache),'NPM_CONFIG_USERCONFIG':'/dev/null',
+        'AXXIUM_TEST_PG_BIN':'/usr/lib/postgresql/16/bin'}
+
+
+def verify_runtime(environment, node, root, *, command=run):
+    require(command(['volta','--version'],cwd=root,env=environment)=='2.0.2',
+            'The genuine pinned Volta runtime is unavailable in the stripped environment')
+    resolved=command(['volta','run','--node','22.23.3','node','-p','process.execPath'],cwd=root,env=environment)
+    require(resolved==str(node) and command([resolved,'--version'],cwd=root,env=environment)=='v22.23.3',
+            'The canonical pinned Node lookup differs in the stripped environment')
+    return {'volta_version':'2.0.2','node_version':'v22.23.3','node_path':resolved,
+            'canonical_lookup_verified_before_gate':True}
+
+
 def progress(root, report, candidates, selection, producer, harness):
     """Monitoring only: rehash completed raw rows and call accepted classifiers/guard."""
     with collector.worker_context(root):
@@ -211,7 +235,8 @@ def snapshot(root, destination, origin, *, quiescence_verified=True):
     bundle = destination/'source.bundle'
     subprocess.run(['git','bundle','create',str(bundle),'--all'],cwd=root,check=True,capture_output=True)
     archive = destination/'raw-evidence.tar'
-    paths = [root/'qualification/results',root/'qualification/harness',root/'src/cljs']
+    paths = [root/'qualification/results',root/'qualification/harness',root/'src/cljs',
+             root/'qualification/runtime-preflight.json']
     paths += [root/'qualification'/name for name in collector.RUNTIME_FILES]
     paths = [path for path in paths if path.exists()]
     manifest = {}
@@ -237,6 +262,8 @@ def snapshot(root, destination, origin, *, quiescence_verified=True):
 
 
 def execute(index, root, unit, destination, origin, adoption, state):
+    global STAGE
+    STAGE='worker-source-preparation'
     subprocess.run(['sudo','mkdir','-p',str(BASE)],check=True,capture_output=True)
     subprocess.run(['sudo','chown',str(os.getuid())+':'+str(os.getgid()),str(BASE)],check=True,capture_output=True)
     subprocess.run(['git','clone','--no-hardlinks','--no-checkout',str(CONTROLLER),str(root)],check=True,capture_output=True)
@@ -244,17 +271,24 @@ def execute(index, root, unit, destination, origin, adoption, state):
     for name in collector.RUNTIME_FILES:
         path=root/'qualification'/name;path.parent.mkdir(mode=0o700,exist_ok=True)
         write(path,subprocess.check_output(['git','show',collector.PRODUCER+':qualification/'+name],cwd=root))
+    STAGE='stripped-runtime-preflight'
     home=Path.home();node=Path(run(['volta','run','--node','22.23.3','node','-p','process.execPath']))
     require(node.is_absolute() and run([str(node),'--version']) == 'v22.23.3','Pinned native Node is unavailable')
+    binary=shutil.which('volta')
+    require(binary is not None,'The genuine Volta executable is unavailable')
+    volta=Path(binary).resolve()
+    volta_home=Path(os.environ.get('VOLTA_HOME',str(home/'.volta'))).absolute()
     cache=root/'qualification/fresh-python-cache';cache.mkdir(mode=0o700)
-    environment={'HOME':str(home),'USER':pwd.getpwuid(os.getuid()).pw_name,'LOGNAME':pwd.getpwuid(os.getuid()).pw_name,
-        'LANG':'C.UTF-8','PATH':str(node.parent)+':'+str(home/'.volta/bin')+':/usr/local/bin:/usr/bin:/bin',
-        'VOLTA_HOME':str(home/'.volta'),'JAVA_TOOL_OPTIONS':'-Xmx3g','NODE_OPTIONS':'--max-old-space-size=1024',
-        'PYTHONPYCACHEPREFIX':str(cache),'NPM_CONFIG_USERCONFIG':'/dev/null','AXXIUM_TEST_PG_BIN':'/usr/lib/postgresql/16/bin'}
+    environment=runtime_environment(node,volta,volta_home,cache,home)
+    runtime=verify_runtime(environment,node,root)
+    write(root/'qualification/runtime-preflight.json',{'origin':origin,'runtime':runtime,
+        'volta_binary':str(volta),'volta_home':str(volta_home),'qualification_credit':False})
+    STAGE='locked-dependency-preparation'
     subprocess.run(['sudo','systemd-run','--wait','--pipe','--uid='+str(os.getuid()),'--gid='+str(os.getgid()),
         '--property=WorkingDirectory='+str(root),'--property=MemoryMax=2G','--property=MemorySwapMax=0',
         '--property=CPUQuota=200%','--property=TasksMax=96','--property=RuntimeMaxSec=600',
         '/usr/bin/env','-i',*[k+'='+v for k,v in environment.items()],str(node.parent/'npm'),'ci','--ignore-scripts','--no-audit','--no-fund'],check=True)
+    STAGE='immutable-input-preparation'
     with collector.worker_context(root):
         m,l,h=collector.campaign,collector.lineage,collector.external_harness
         m.require_unchanged_tree();m.prepare_evidence_directories()
@@ -272,12 +306,18 @@ def execute(index, root, unit, destination, origin, adoption, state):
         '--property=KillMode=control-group','--property=OOMPolicy=stop','--property=RuntimeMaxSec=19800',
         '/usr/bin/env','-i',*[k+'='+v for k,v in environment.items()],'/bin/bash','--noprofile','--norc','-c',GATE,
         'qualification-native-cap-gate',str(gate),*cli(root,index)]
+    STAGE='active-resource-gate'
     subprocess.run(argv,check=True,capture_output=True)
     caps=active_caps(unit,root,gate,environment,index)
     state['caps']=caps
     write(root/'qualification/results/native-launch.json',{'origin':origin,'adoption':adoption,'caps':caps,
-        'command':argv,'selection':selection,'producer':producer,'harness':harness,'qualification_credit':False})
+        'command':argv,'runtime':runtime,'selection':selection,'producer':producer,'harness':harness,'qualification_credit':False})
+    print(json.dumps({'native_active_resource_witness':{'origin':origin,'properties':caps['properties'],
+        'cgroup':caps['cgroup'],'runtime':runtime,'producer':producer['revision'],
+        'harness_sha':harness['harness_sha'],'selection_sha256':selection['selection_sha256']},
+        'qualification_credit':False}),flush=True)
     write(gate,b'ACTIVE native caps and immutable inputs verified before canonical execution.\n')
+    STAGE='canonical-campaign-monitor'
     start=time.monotonic();signalled=False;summary=None;stop_reason=None
     while system_properties(unit)['ActiveState']=='active':
         if report.exists():
@@ -300,6 +340,7 @@ def execute(index, root, unit, destination, origin, adoption, state):
         'stop_reason':stop_reason,'self_acknowledged':False,'retry_attempted':False,'qualification_credit':False})
     collected=False
     if summary and summary.get('terminal_state') in {'clean_partial','complete'} and summary.get('eligible',0)>=250:
+        STAGE='origin-partition-collection'
         entry={'batch_index':index,'worker_root':str(root),'report':str(report),'unit':unit}
         with collector.read_leases([root]):
             batch,audit=collector.collect_batch(entry,observe_unit=lambda name:closed(name,witness=state['caps']))
@@ -355,8 +396,10 @@ def preserve(root, destination, origin, unit, state):
 
 
 def main():
+    global STAGE
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--partition',type=int,required=True)
     args=parser.parse_args();origin=context(args.partition)
+    STAGE='native-collector-adoption'
     adoption=collector.verify_adoption(COLLECTOR)
     index=args.partition;root=BASE/('worker'+str(index));unit=unit_name(index)
     destination=CONTROLLER/('native-evidence-'+str(index))
@@ -367,7 +410,7 @@ def main():
     try:
         execute(index,root,unit,destination,origin,adoption,state)
     except Exception as error:
-        write(destination/'controller-refusal.json',{'error_type':type(error).__name__,
+        write(destination/'controller-refusal.json',{'stage':STAGE,'error_type':type(error).__name__,
             'production_admitted':False,'self_acknowledged':False,'retry_attempted':False})
         raise
     finally:
@@ -377,6 +420,6 @@ def main():
 if __name__=='__main__':
     try:main()
     except Exception as error:
-        print(json.dumps({'native_campaign_complete':False,'error_type':type(error).__name__,
+        print(json.dumps({'native_campaign_complete':False,'stage':STAGE,'error_type':type(error).__name__,
                           'production_admitted':False}),flush=True)
         raise SystemExit(1) from None

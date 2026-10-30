@@ -381,7 +381,14 @@ the actual GitHub run, attempt, numeric job ID, runner name, workflow path and
 controller revision before creating a worker. The controller and collector must
 be accepted main source; the collector's actual evaluator files retain its
 independent immutable-producer custody checks. Genuine pinned Volta resolves
-Node 22.23.3. Every campaign runs without the workflow tokens in a verified active
+Node 22.23.3. The stripped environment retains the installer's actual Volta home
+and executable directory, including hosted tool-cache locations outside HOME.
+Its exact canonical `volta run` lookup is checked before any resource gate is
+released. The first native attempt failed before baseline or mutation execution
+because that location had been assumed to be HOME; its negative artifacts remain
+unqualified. Public refusals identify a fixed stage and exception type, and the
+active resource witness is emitted without workflow credentials.
+Every campaign runs without the workflow tokens in a verified active
 system cgroup with 5 GiB memory, 4 GiB memory high, zero swap, four CPU quota and
 192 tasks before its canonical CLI is released. The controller never selects a
 different corpus or implements a mutation operator.
