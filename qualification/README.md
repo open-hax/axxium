@@ -273,8 +273,77 @@ Collection pass describes the selected positive-evidence requirement; it must
 never imply every proposal passed, a 100% mutation score, or convert a raw
 `qualified_batch: false` report into an admitted receipt. Integration/E2E and
 the immutable Services qualification record remain separate admission inputs.
-This slice specifies that collector law; it does not implement the collector or
-publish a qualification record before the real campaign outcomes exist.
+`collect_mutation_evidence.py` implements that collection law separately from
+the six immutable running producer files. It grants no deployment admission and
+does not publish the resulting evidence or a Services qualification record.
+
+## Read-only positive-evidence collector
+
+The collector is closed to application `58234df96ca86507e6cdd87f65aaa9ab35621415`,
+producer `b87a7ddf24d63147f2a8c85a789fb97b55047c9e`, pure harness
+`9bfa2725a1763380d3bbb55b884bbeed060aa04c`, profile `standard-v2`, the full
+`src/cljs/` scope and original seed `full-qualification-58234-v1`. Native GitHub
+reads verify the producer's exact merged PR/main ancestry, the pure-harness
+ancestor, and the collector's own exact Git bytes and native merged-main PR.
+Neither a copied summary nor the collector's local tests supplies adoption.
+
+Use four final reports, one for each partition. They may live in two reused
+workers after the two execution waves, but every worker must be restored and
+idle. The collector opens the existing canonical campaign lock read-only and
+takes a shared nonblocking lease; a running producer's exclusive lease blocks
+collection, and a new cooperating producer cannot start while collection reads
+that worker. Native unit inactivity/cgroup emptiness, clean source/index,
+unchanged six runtime files, immutable harness files, complete ordered selection,
+recursive report ancestry and every raw execution hash/classification are
+checked. No worker files are written. A terminal aborted report additionally
+requires its independently declared containment acknowledgement and canonical
+fresh all-plan restoration; a running or unresolved report cannot supply proof.
+
+Positive eligibility requires a unique genuine structured driver summary,
+the selected plan/groups and a clean compile/test boundary. Legacy text alone
+cannot supply external-harness credit. The owned query-error observer in this
+harness covers `runAuthorityFixture`; it is restored before the mounted
+HTTP/device fixtures run. Consequently a protocol-group failure after the exact
+immutable raw prefix `QUALIFICATION_CHILD[protocol] PASS durable authority:`
+earns no credit, including a mixed failure with another group. A genuine
+protocol failure before that marker can qualify if its structured summary has
+no errors, warnings, timeout or unknown containment. Another group's failure
+can qualify when protocol itself passed without failures. The guard records the
+pure fixture hash, producer/driver hash, exact marker and explicit exclusion
+reasons. It deliberately excludes some potentially valid later assertions; it
+does not relabel their raw `killed` observations or claim they are equivalent.
+The same guard applies to the 250-kill clean-stop monitor.
+
+Create an input plan with schema `axxium-collection-inputs/v1` and `batches`
+containing exactly four objects. Each names `batch_index`, absolute
+`worker_root`, absolute `report`, and the corresponding native `unit`. A final
+aborted report also names absolute `containment_ack` and `restoration` files.
+Units follow `axxium-qual582-standard-v2-v5-worker0.service`, the corresponding
+worker1 name, and the `-batch2`/`-batch3` suffixes for the later wave. Use a fresh
+output under an existing owned private directory outside all workers:
+
+```sh
+python3 qualification/collect_mutation_evidence.py \
+  --inputs /absolute/collection-inputs.json \
+  --collector-revision <accepted-full-collector-head> \
+  --out /absolute/collections/new-collection
+```
+
+All four partitions must have at least 250 eligible actual kills before any
+output is created. `audit.json` preserves every observed row and negative
+status, full source/producer/harness/selection manifests, all report/ancestor
+and closure references, all exclusions, and every unexecuted fingerprint.
+`mutation-batches.json` contains the four compact policy-shaped positive
+collections and an audit hash, staying within the Services receipt size budget.
+The final `manifest.json` is written last and hashes both files. Output is
+private, new-only, and explicitly `production_admitted: false`.
+
+Before immutable Services qualification-record adoption, publish the complete
+audit and every referenced raw report/log/acknowledgement/restoration and native
+launch/closure receipt with immutable hashes and inspectable custody. A local
+path and a collection label alone are not published evidence. The canonical
+Services policy still evaluates the exact integration/E2E receipts and four
+positive batches; the collector does not reimplement that admission decision.
 
 The original exploratory run on `ea44a20631c2c46ae9c5488487f24044cb2bc351`
 reported two assertion kills, four survivors and two test errors. The two
