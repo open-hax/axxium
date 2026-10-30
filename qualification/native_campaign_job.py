@@ -163,13 +163,14 @@ def cli(root, index):
         '--out',str(root/'qualification/results/native-standard-v2-v5')]
 
 
-def runtime_environment(node, volta, volta_home, cache, home):
+def runtime_environment(node, volta, volta_home, java, cache, home):
     """Keep the installer's actual tool locations across the credential boundary."""
-    require(all(path.is_absolute() for path in (node,volta,volta_home,cache,home)),
+    require(all(path.is_absolute() for path in (node,volta,volta_home,java,cache,home)),
             'Native runtime paths must be absolute')
     user=pwd.getpwuid(os.getuid()).pw_name
     return {'HOME':str(home),'USER':user,'LOGNAME':user,'LANG':'C.UTF-8',
-        'PATH':str(node.parent)+':'+str(volta.parent)+':/usr/local/bin:/usr/bin:/bin',
+        'PATH':str(node.parent)+':'+str(volta.parent)+':'+str(java.parent)+':/usr/local/bin:/usr/bin:/bin',
+        'JAVA_HOME':str(java.parent.parent),
         'VOLTA_HOME':str(volta_home),'JAVA_TOOL_OPTIONS':'-Xmx3g','NODE_OPTIONS':'--max-old-space-size=1024',
         'PYTHONPYCACHEPREFIX':str(cache),'NPM_CONFIG_USERCONFIG':'/dev/null',
         'AXXIUM_TEST_PG_BIN':'/usr/lib/postgresql/16/bin'}
@@ -181,7 +182,17 @@ def verify_runtime(environment, node, root, *, command=run):
     resolved=command(['volta','run','--node','22.23.3','node','-p','process.execPath'],cwd=root,env=environment)
     require(resolved==str(node) and command([resolved,'--version'],cwd=root,env=environment)=='v22.23.3',
             'The canonical pinned Node lookup differs in the stripped environment')
+    java_home=Path(environment.get('JAVA_HOME',''))
+    require(java_home.is_absolute(),'The compiler Java home is unavailable')
+    path_lines=command(['java','--version'],cwd=root,env=environment).splitlines()
+    home_lines=command([str(java_home/'bin/java'),'--version'],cwd=root,env=environment).splitlines()
+    require(path_lines and home_lines,'The compiler Java 21 version output is unavailable')
+    version,home_version=path_lines[0],home_lines[0]
+    require(version==home_version and version.split()[:1] in [['openjdk'],['java']]
+            and len(version.split())>=2 and version.split()[1].split('.')[0].split('+')[0]=='21',
+            'The compiler requires genuine Java 21 through both PATH and JAVA_HOME')
     return {'volta_version':'2.0.2','node_version':'v22.23.3','node_path':resolved,
+            'java_version':version,'java_home':str(java_home),
             'canonical_lookup_verified_before_gate':True}
 
 
@@ -278,8 +289,11 @@ def execute(index, root, unit, destination, origin, adoption, state):
     require(binary is not None,'The genuine Volta executable is unavailable')
     volta=Path(binary).resolve()
     volta_home=Path(os.environ.get('VOLTA_HOME',str(home/'.volta'))).absolute()
+    java_binary=shutil.which('java')
+    require(java_binary is not None,'The genuine Java executable is unavailable')
+    java=Path(java_binary).resolve()
     cache=root/'qualification/fresh-python-cache';cache.mkdir(mode=0o700)
-    environment=runtime_environment(node,volta,volta_home,cache,home)
+    environment=runtime_environment(node,volta,volta_home,java,cache,home)
     runtime=verify_runtime(environment,node,root)
     write(root/'qualification/runtime-preflight.json',{'origin':origin,'runtime':runtime,
         'volta_binary':str(volta),'volta_home':str(volta_home),'qualification_credit':False})

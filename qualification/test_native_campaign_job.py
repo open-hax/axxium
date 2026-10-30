@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -68,16 +69,20 @@ class NativeJobLaws(unittest.TestCase):
     def test_non_home_volta_install_survives_the_stripped_runtime_boundary(self):
         home=Path('/synthetic/home');volta_home=Path('/synthetic/hosted-cache/volta/2.0.2')
         volta=volta_home/'bin/volta';node=volta_home/'tools/image/node/22.23.3/bin/node'
+        java=Path('/synthetic/java21/bin/java')
         with patch.dict(os.environ,{'GH_TOKEN':'synthetic-secret','GITHUB_TOKEN':'synthetic-secret'}):
-            environment=native.runtime_environment(node,volta,volta_home,self.base,home)
+            environment=native.runtime_environment(node,volta,volta_home,java,self.base,home)
         self.assertEqual(environment['VOLTA_HOME'],str(volta_home))
         self.assertIn(str(volta.parent),environment['PATH'].split(':'))
         self.assertNotIn(str(home/'.volta/bin'),environment['PATH'].split(':'))
         self.assertNotIn('GH_TOKEN',environment);self.assertNotIn('GITHUB_TOKEN',environment)
+        self.assertIn(str(java.parent),environment['PATH'].split(':'))
+        self.assertEqual(environment['JAVA_HOME'],str(java.parent.parent))
         calls=[]
         def probe(argv,**options):
             calls.append((argv,options))
-            return '2.0.2' if argv==['volta','--version'] else str(node) if '-p' in argv else 'v22.23.3'
+            return ('2.0.2' if argv==['volta','--version'] else str(node) if '-p' in argv else
+                    'openjdk 21.0.1 synthetic fixture' if argv[0]=='java' or argv[0].endswith('/bin/java') else 'v22.23.3')
         result=native.verify_runtime(environment,node,self.root,command=probe)
         self.assertTrue(result['canonical_lookup_verified_before_gate'])
         self.assertEqual(calls[1][0],['volta','run','--node','22.23.3','node','-p','process.execPath'])
@@ -86,6 +91,40 @@ class NativeJobLaws(unittest.TestCase):
         def another_node(argv,**options):return '2.0.2' if argv==['volta','--version'] else '/another/node'
         with self.assertRaises(ValueError):native.verify_runtime(environment,node,self.root,command=another_node)
         self.assertFalse(self.gate.exists())
+
+    def test_java17_or_mismatched_java_home_refuses_before_gate(self):
+        node=Path('/synthetic/node/bin/node');java=Path('/synthetic/java21/bin/java')
+        environment=native.runtime_environment(node,Path('/synthetic/volta/bin/volta'),Path('/synthetic/volta'),java,self.base,self.base)
+        def probe(argv,**options):
+            if argv==['volta','--version']:return '2.0.2'
+            if '-p' in argv:return str(node)
+            if argv==[str(node),'--version']:return 'v22.23.3'
+            return 'openjdk 17.0.21 synthetic fixture'
+        with self.assertRaisesRegex(ValueError,'Java 21'):native.verify_runtime(environment,node,self.root,command=probe)
+        def wrong_home(argv,**options):
+            if argv==['java','--version']:return 'openjdk 21.0.1 synthetic fixture'
+            return probe(argv,**options)
+        with self.assertRaisesRegex(ValueError,'Java 21'):native.verify_runtime(environment,node,self.root,command=wrong_home)
+        def empty_java(argv,**options):return '' if argv==['java','--version'] else probe(argv,**options)
+        with self.assertRaisesRegex(ValueError,'Java 21'):native.verify_runtime(environment,node,self.root,command=empty_java)
+        self.assertFalse(self.gate.exists())
+
+    def test_actual_java21_executes_compiler_level65_outside_home(self):
+        selected=os.environ.get('JAVA_HOME_21_X64')
+        java=(Path(selected)/'bin/java') if selected else Path(shutil.which('java')).resolve()
+        javac=java.parent/'javac'
+        source=self.base/'RuntimeBoundary.java'
+        source.write_text('public class RuntimeBoundary { public static void main(String[] args) {'
+                          ' if(Runtime.version().feature()!=21) throw new AssertionError();'
+                          ' System.out.print("java21-boundary-ok"); }}')
+        home=self.base/'isolated-home';home.mkdir()
+        environment={'HOME':str(home),'LANG':'C.UTF-8','PATH':str(java.parent)+':/usr/bin:/bin',
+                     'JAVA_HOME':str(java.parent.parent),'JAVA_TOOL_OPTIONS':'-Xmx128m'}
+        subprocess.run([str(javac),'-d',str(self.base),str(source)],env=environment,check=True,capture_output=True)
+        bytecode=(self.base/'RuntimeBoundary.class').read_bytes()
+        self.assertEqual(bytecode[:4],b'\xca\xfe\xba\xbe');self.assertEqual(int.from_bytes(bytecode[6:8],'big'),65)
+        result=subprocess.run(['java','-cp',str(self.base),'RuntimeBoundary'],env=environment,check=True,capture_output=True,text=True)
+        self.assertEqual(result.stdout,'java21-boundary-ok')
 
     def test_public_runtime_refusal_has_a_fixed_stage_without_private_input(self):
         private='https://private.invalid/private-runtime-payload'
@@ -286,6 +325,7 @@ class NativeJobLaws(unittest.TestCase):
         self.assertIn('pull-requests: read',workflow);self.assertIn('if: always()',workflow)
         self.assertIn('artifact-digest',workflow);self.assertIn('include-hidden-files: true',workflow)
         self.assertIn('fetch-depth: 0',workflow);self.assertIn('persist-credentials: false',workflow)
+        self.assertIn('java-version: \'21\'',workflow);self.assertIn('distribution: temurin',workflow)
         self.assertIn('GH_TOKEN: ${{ github.token }}',workflow);self.assertIn('GITHUB_TOKEN: ${{ github.token }}',workflow)
         for line in workflow.splitlines():
             if 'uses:' in line:self.assertRegex(line,r'@[0-9a-f]{40}(?:\s|$)')
