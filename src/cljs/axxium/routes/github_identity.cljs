@@ -6,6 +6,8 @@
    GET  /api/github/manifest/callback  session = same parent; converts the
         one-time code, seals the App PEM to the child DID, registers it
    POST /api/github/mcp                session; {tool, arguments (EDN)}
+   POST /api/identity/admin            session; the portal's identity manager
+        (JSON {op, ...}; see axxium.law.identity-admin)
    POST /api/identity/agent            a host agent as itself:
         x-axxium-actor: <agent did>, authorization: Bearer <bootstrap key>;
         only credentials_self, token_for, actor_list
@@ -72,7 +74,7 @@
 
 (defn- ^:async manifest! [req reply context]
   (let [parent (caller context)
-        child (some-> (http/body req) .-did)
+        child (:did (http/body req))
         st (state/fold (current-ledger))]
     (if-not (and (configured?) (string? child) (gi/may-manage? st parent child))
       (http/send! reply 403 {:error "not a managing ancestor of that actor"})
@@ -122,8 +124,8 @@
   (if-not (configured?)
     (http/send! reply 503 {:error "GitHub identities are not configured on this Axxium"})
     (let [body (http/body req)
-          tool (some-> body .-tool)
-          args (try (edn/read-one (or (some-> body .-arguments) "{}")) (catch :default _ ::bad))]
+          tool (:tool body)
+          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (if (= ::bad args)
         (http/send! reply 400 {:error "arguments must be one EDN map"})
         (let [out (await (serialized #(mcp/call (deps %) {:actor (caller context)} tool args)))]
@@ -136,8 +138,8 @@
           key (some-> (http/authorization req) (str/replace #"^Bearer " ""))
           self (mcp/authenticate (state/fold (current-ledger)) did key)
           body (http/body req)
-          tool (some-> body .-tool)
-          args (try (edn/read-one (or (some-> body .-arguments) "{}")) (catch :default _ ::bad))]
+          tool (:tool body)
+          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (cond
         (nil? self) (http/send! reply 401 {:error "unknown agent or bad bootstrap key"})
         (not (contains? mcp/agent-tools tool)) (http/send! reply 403 {:error "tool not open to agents"})
@@ -146,7 +148,33 @@
         (let [out (await (serialized #(mcp/call (deps %) {:actor self} tool args)))]
           (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
 
+(defn- host [] (str/replace (base-url) #"^https?://" ""))
+
+(defn- ^:async admin! [req reply context]
+  (if-not (configured?)
+    (http/send! reply 503 {:error "identities are not configured on this Axxium"})
+    (let [out (await (serialized #(mcp/admin (deps %) (caller context) (http/body req)
+                                             {:read-edn edn/read-one :host (host)})))]
+      (http/send-secret! reply (:status out) (:body out)))))
+
+(defn ^:async apply-seed-file!
+  "AXXIUM_IDENTITY_SEED_FILE: apply a secret-free EDN tree idempotently,
+   as its root, through the policy-checked provision op. Existing actors
+   are untouched, so restarts are no-ops."
+  []
+  (when-let [path (not-empty (cfg/get-in-config [:identity/seed-file]))]
+    (when (configured?)
+      (let [seed (gi/resolve-seed (edn/read-one (ledger-file/read-text path)) (host))
+            out (await (serialized
+                        #(js/Promise.resolve
+                          (gi/apply-seed % (get-in seed [:root :did]) seed ids))))]
+        (println "Identity seed:" (count (:created out)) "created,"
+                 (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
+        out))))
+
 (defn register-github-identity-routes! [app]
+  (http/post! app "/api/identity/admin" (auth-context/with-auth admin!))
+  (.catch (apply-seed-file!) (fn [e] (println "Identity seed failed:" (ex-message e))))
   (http/post! app "/api/identity/agent" (fn [req reply] (agent! req reply nil)))
   (http/post! app "/api/github/manifest" (auth-context/with-auth manifest!))
   (http/get! app law/manifest-callback-path (auth-context/with-auth callback!))

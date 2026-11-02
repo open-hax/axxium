@@ -7,6 +7,9 @@
             [axxium.shape.ledger-edn :as edn-lines]
             [clojure.string :as str]))
 
+(defn read-text "A UTF-8 resource file (e.g. an identity seed)." [path]
+  (fs/readFileSync path "utf8"))
+
 (defn load-ledger [path]
   (if (fs/existsSync path)
     (let [text (fs/readFileSync path "utf8")

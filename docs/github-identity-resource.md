@@ -13,13 +13,13 @@ rooted at a human. Every actor owns its own credentials.
     `:github-app`, `:github-pat` or `:ssh-key`.
 - **Morphisms:** register-root, provision (actor or credential), set-policy,
   suspend, resume, revoke, rotate and mint.
-- **Tree:** `did:web:<host>:actors:err` is the root. Grok Bot, PR Review Bot and
-  each repo bot are its children. Any bot can have children of its own.
+- **Tree:** a human root (e.g. `did:web:<host>:actors:alice`) with groups,
+  hosts, agents and bots below it. Any actor can have children of its own.
 
 ```
-err ─┬─ grok-bot        credential github-app (grokbot-foresight, imported)
-     ├─ pr-review-bot   credential github-app (own App)
-     └─ clio-bot ── clio-helper
+alice ─┬─ assistant-bot   credential github-app (existing App, imported)
+       ├─ review-bot      credential github-app (own App via manifest)
+       └─ widgets-bot ── widgets-helper
 ```
 
 ## Laws
@@ -67,14 +67,14 @@ rotation invalidates the cache.
 `<!-- axxium-actor:v1 did=… -->`, for attribution in comments. The function
 `law/action-allowed?` encodes the forbid rules `:approve-own` and `:merge-own`.
 
-## Importing grokbot-foresight
+## Importing an existing GitHub App
 
-To make the existing app Grok Bot's credential, the key stays where it is.
+To make an existing App an actor's credential, the key stays where it is.
 
 1. Set `AXXIUM_GITHUB_IDENTITY_KEY_DIR` to the directory that holds the PEM.
-2. Call `credential_provision` with `{:actor/did <grok> :credential/label
-   "github-app" :credential/key-file <path> :github/app-id 5572746
-   :github/app-slug "grokbot-foresight" :github/installation-id 177661475}`.
+2. Call `credential_provision` with `{:actor/did <did> :credential/label
+   "github-app" :credential/key-file <path> :github/app-id <id>
+   :github/app-slug <slug> :github/installation-id <installation id>}`.
 
 Axxium only reads key files under that directory, resolved with `realpath`.
 
@@ -82,7 +82,8 @@ Axxium only reads key files under that directory, resolved with `realpath`.
 
 The tools are `actor_list`, `actor_provision`, `actor_suspend`, `actor_resume`,
 `actor_revoke`, `credential_provision`, `credential_rotate`, `credential_revoke`
-and `token_for`.
+`token_for`, `bootstrap_issue`, `credentials_self`, `subtree_export` and
+`subtree_import`.
 
 ## Config
 
@@ -91,6 +92,7 @@ and `token_for`.
 | `AXXIUM_GITHUB_IDENTITY_KEY_FILE` | path to a 32-byte base64 sealing key |
 | `AXXIUM_GITHUB_IDENTITY_LEDGER_FILE` | the append-only EDN ledger |
 | `AXXIUM_GITHUB_IDENTITY_KEY_DIR` | the only directory imported PEMs can be read from |
+| `AXXIUM_IDENTITY_SEED_FILE` | optional secret-free EDN tree applied idempotently at startup |
 
 ## Not yet
 
@@ -100,22 +102,48 @@ and `token_for`.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
 - Nothing has been run against real GitHub.
 
-## Host agents (yoga, stealth)
+## Seed files
 
-The seed `resources/identity/foresight-tree.edn` holds no secrets. It lists actor
-paths, which `resolve-seed` turns into `did:web:<host>:actors:<path>`. The
-seeded tree looks like this:
+A deployment can describe its tree in a secret-free EDN resource file and
+point `AXXIUM_IDENTITY_SEED_FILE` at it. See
+[`resources/identity/example-tree.edn`](../resources/identity/example-tree.edn):
 
 ```
-err (:human)
-├─ err:grokbots (:group) ─ grok-bot, pr-review-bot, <repo>-bot ×25 (:bot)
-├─ err:hosts:yoga (:host)    ─ opencode, codex, claude-code (:agent)
-└─ err:hosts:stealth (:host) ─ opencode, codex, claude-code (:agent)
+alice (:human)
+├─ alice:bots (:group) ─ review-bot (:bot)
+└─ alice:laptop (:host) ─ coding-agent (:agent)
 ```
 
-Host agents get the shared fork policy: write access to the 25 forks, with
-`:approve-own`, `:merge-own` and `:force-push` forbidden. Each repo bot is
-limited to its own repo. Suspending a host suspends its agents (G3).
+- `:policies` names reusable policies; a node's `:policy` is a map or one of
+  those names.
+- Ids are actor paths, resolved to `did:web:<axxium host>:actors:<path>`, or
+  full DIDs.
+- At startup the root registers itself if absent, then each node is created
+  through the normal provision op as its parent (G1 applies). Existing actors
+  are left untouched, so restarts are no-ops; nothing is ever deleted or
+  changed by a seed. Credentials are never in seeds; add them in the portal.
+
+Host agents (`:host` → `:agent`) let each coding tool on a machine hold its
+own keys. Suspending a host suspends its agents (G3).
+
+## Admin interface (portal)
+
+`/portal/index.html` shows `<axxium-identity-manager>` under the account
+manager for any signed-in actor that has an identity node. It talks only to
+`POST /api/identity/admin` (`{op, ...}` JSON, contract in
+`axxium.law.identity-admin`), which runs the same policy-checked tools and
+ledger as MCP. The signed-in actor sees itself and its descendants and can:
+
+- create child actors (kind, slug, name; policy prefilled from its own and
+  only narrowable, G1);
+- suspend, resume or revoke a descendant (G2, G3);
+- provision, rotate or revoke credentials. Secret fields are write-only:
+  they are cleared on submit, sealed server-side (G5), and no response ever
+  contains them;
+- issue a bootstrap key, displayed once with copy/dismiss;
+- start the GitHub App manifest flow for a descendant;
+- export its subtree as EDN (actors and policies, no credentials) and import
+  such EDN idempotently (`created` / `unchanged` / `refused`).
 
 ### Credential kinds
 
@@ -129,7 +157,7 @@ limited to its own repo. Suspending a host suspends its agents (G3).
 
 ### Bootstrap: an agent authenticates as itself
 
-1. A managing ancestor (Err or the host) calls `bootstrap_issue {:actor/did
+1. A managing ancestor (the root or the host) calls `bootstrap_issue {:actor/did
    <agent>}`. The key (`axb_…`) is returned once and only its digest is stored.
    Calling `bootstrap_issue` again rotates the key, and the old one stops
    working right away.

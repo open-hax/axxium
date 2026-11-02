@@ -115,6 +115,7 @@
      :github-identity/ledger-file (env "AXXIUM_GITHUB_IDENTITY_LEDGER_FILE" "")
      ;; Directory imported App PEMs may be read from in place (never copied).
      :github-identity/key-dir (env "AXXIUM_GITHUB_IDENTITY_KEY_DIR" "")
+     :identity/seed-file (env "AXXIUM_IDENTITY_SEED_FILE" "")
      :oauth/bootstrap-admin-email (env "AXXIUM_BOOTSTRAP_ADMIN_EMAIL" "")
 
      ;; Session

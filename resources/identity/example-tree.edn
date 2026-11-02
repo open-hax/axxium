@@ -1,0 +1,22 @@
+;; Example identity seed for Axxium (AXXIUM_IDENTITY_SEED_FILE).
+;; Secret-free: actors and policies only. Credentials are provisioned
+;; afterwards through the portal or the identity MCP tools.
+;; Ids are actor paths, resolved to did:web:<axxium host>:actors:<path>.
+{:policies
+ {:team {:policy/repos #{"example-org/website" "example-org/widgets"}
+         :policy/permissions {"contents" "write" "pull_requests" "write" "issues" "write"
+                              "checks" "read"}
+         :policy/actions #{:read :comment :review :push}
+         :policy/forbid #{:force-push :approve-own :merge-own}}}
+ :root {:id "alice" :name "Alice"
+        :policy {:policy/repos #{"*"}
+                 :policy/permissions {"contents" "write" "pull_requests" "write" "issues" "write"
+                                      "checks" "read"}
+                 :policy/actions #{:read :comment :review :approve :push :merge}
+                 :policy/forbid #{:force-push}}}
+ :nodes
+ [{:id "alice:bots" :parent "alice" :kind :group :name "Bots" :policy :team}
+  {:id "alice:bots:review-bot" :parent "alice:bots" :kind :bot :name "Review Bot" :policy :team}
+  {:id "alice:laptop" :parent "alice" :kind :host :name "laptop" :policy :team}
+  {:id "alice:laptop:coding-agent" :parent "alice:laptop" :kind :agent
+   :name "coding-agent" :policy :team}]}

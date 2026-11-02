@@ -218,29 +218,67 @@
     []))
 
 ;; ------------------------------------------------------------------ seed
+;;
+;; A seed is a secret-free EDN resource file describing a tree:
+;;   {:policies {<kw> <Policy>}             ; optional named policies
+;;    :root  {:id <path> :name <str> :policy <Policy|kw>}
+;;    :nodes [{:id <path> :parent <path> :kind <kind> :name <str>
+;;             :policy <Policy|kw>} ...]}  ; parents before children
+;; Ids are actor paths ("alice:hosts:laptop") resolved on a host to
+;; did:web:<host>:actors:<path>, or full DIDs used as-is.
+
+(defn- path->did [host id]
+  (if (re-find #"^did:" id) id (str "did:web:" host ":actors:" id)))
 
 (defn resolve-seed
-  "Turn a seed file (actor paths, :policy/forks shorthand) into DIDs on
-   `host`: path \"err:hosts:yoga\" -> did:web:<host>:actors:err:hosts:yoga."
-  [{:keys [forks root nodes]} host]
-  (let [did #(str "did:web:" host ":actors:" %)
-        pol #(if (= :policy/forks %) forks %)]
-    {:root {:did (did (:id root)) :name (:name root) :policy (pol (:policy root))}
+  "Resolve paths to DIDs and named policies to Policy maps."
+  [{:keys [policies root nodes]} host]
+  (let [did #(when % (path->did host %))
+        pol #(if (keyword? %) (get policies %) %)]
+    {:root (when root {:did (did (:id root)) :name (:name root) :policy (pol (:policy root))})
      :nodes (mapv (fn [n] {:did (did (:id n)) :parent (did (:parent n)) :name (:name n)
                            :kind (:kind n) :policy (pol (:policy n))})
                   nodes)}))
 
-(defn seed-ledger
-  "Build the tree described by a secret-free seed:
-   {:root {:did :name :policy} :nodes [{:did :parent :name :kind :policy}]}
-   in order (parents before children). Returns {:ledger :refused [dids]}."
-  [seed ids]
-  (let [{:keys [root nodes]} seed
-        lg0 (:ledger (register-root ledger/empty-ledger (state/fold ledger/empty-ledger)
-                                    (:did root) (:name root) (:policy root) (ids)))]
+(defn apply-seed
+  "Idempotently apply resolved `nodes` as `operator`, through the same
+   policy-checked provision op (G1 against each node's parent; G2: the
+   operator must be that parent or manage it). Existing actors are left as they are
+   (:unchanged); anything the operator may not create is :refused.
+   With `root` and an empty slot, the root registers itself first.
+   Returns {:ledger :created [] :unchanged [] :refused []}."
+  [lg operator {:keys [root nodes]} ids]
+  (let [lg (if (and root (= operator (:did root)) (nil? (actor-node (state/fold lg) (:did root))))
+             (:ledger (register-root lg (state/fold lg) (:did root) (:name root) (:policy root) (ids)))
+             lg)]
     (reduce (fn [{lg :ledger :as acc} {:keys [did parent name kind policy]}]
-              (let [out (provision-actor lg (state/fold lg) parent did name policy kind (ids))]
-                (cond-> (assoc acc :ledger (:ledger out))
-                  (nil? (:effect out)) (update :refused conj did))))
-            {:ledger lg0 :refused []}
+              (let [st (state/fold lg)]
+                (cond
+                  (actor-node st did) (update acc :unchanged conj did)
+                  ;; G2: the operator must be the parent or manage it
+                  (not (or (and (= operator parent) (effective? st parent))
+                           (may-manage? st operator parent)))
+                  (update acc :refused conj did)
+                  :else
+                  (let [out (provision-actor lg st parent did name policy (or kind :bot) (ids))]
+                    (-> (assoc acc :ledger (:ledger out))
+                        (update (if (:effect out) :created :refused) conj did))))))
+            {:ledger lg :created [] :unchanged [] :refused []}
             nodes)))
+
+(defn seed-ledger
+  "A fresh ledger from a resolved seed, applied as its root."
+  [seed ids]
+  (apply-seed ledger/empty-ledger (get-in seed [:root :did]) seed ids))
+
+(defn export-subtree
+  "The caller's descendants as a resolved, secret-free seed (full DIDs,
+   parents before children). Credentials are never exported."
+  [state did]
+  {:nodes (->> (actors-under state did)
+               (remove #(= did (:actor/did %)))
+               (sort-by #(count (ancestors-of state (:actor/did %))))
+               (mapv (fn [{d :actor/did}]
+                       (let [m (:resource/metadata (actor-node state d))]
+                         {:id d :parent (:actor/parent m) :kind (:actor/kind m)
+                          :name (:actor/name m) :policy (:actor/policy m)}))))})

@@ -6,10 +6,12 @@
    actor_suspend/resume  an ancestor pauses a subtree (cascades, G3)
    actor_revoke          terminal
    credential_provision  attach a credential: sealed PEM, or an imported
-                         key file left in place (e.g. grokbot-foresight)
+                         key file left in place (an existing App)
    credential_rotate     new secret / installation id, generation + 1
    credential_revoke     terminal
    token_for             mint a scoped installation token (in-memory cache)
+   subtree_export        the caller's descendants as secret-free seed EDN
+   subtree_import        idempotently create missing actors from seed EDN
    bootstrap_issue       ancestor issues/rotates an agent's device key;
                          the plaintext is returned once, only a digest kept
    credentials_self      the caller's own unsealed :api-key / :ssh-key /
@@ -27,6 +29,7 @@
             [axxium.extern.github-app :as gh]
             [axxium.extern.token-crypto :as tc]
             [axxium.law.github-identity :as law]
+            [axxium.law.identity-admin :as admin]
             ["node:crypto" :as crypto]))
 
 (defn digest [key] (.digest (.update (crypto/createHash "sha256") key "utf8") "hex"))
@@ -42,7 +45,7 @@
 
 (def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke"
              "credential_provision" "credential_rotate" "credential_revoke" "token_for"
-             "bootstrap_issue" "credentials_self"})
+             "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"})
 
 (def agent-tools
   "What a bootstrap-authenticated host agent may call."
@@ -92,7 +95,8 @@
     (case tool
       "actor_list" (js/Promise.resolve {:result {:actors (gi/actors-under st caller)}})
       "actor_provision" (js/Promise.resolve
-                         (effect-out (gi/provision-actor lg st caller did (:actor/name a) (:actor/policy a) (ids))))
+                         (effect-out (gi/provision-actor lg st caller did (:actor/name a) (:actor/policy a)
+                                                           (or (:actor/kind a) :bot) (ids))))
       "actor_suspend" (js/Promise.resolve (effect-out (gi/suspend lg st caller did (ids))))
       "actor_resume" (js/Promise.resolve (effect-out (gi/resume lg st caller did (ids))))
       "actor_revoke" (js/Promise.resolve (effect-out (gi/revoke-actor lg st caller did (ids))))
@@ -119,6 +123,12 @@
          (if (:effect out)
            {:ledger (:ledger out) :result {:actor/did did :bootstrap/key key}}
            {:ledger (:ledger out) :error :forbidden})))
+      "subtree_export" (js/Promise.resolve {:result {:seed (gi/export-subtree st caller)}})
+      "subtree_import"
+      (let [{:keys [ledger created unchanged refused]}
+            (gi/apply-seed lg caller (dissoc (gi/resolve-seed (:seed a) (:host a)) :root) ids)]
+        (js/Promise.resolve {:ledger ledger :result {:created created :unchanged unchanged
+                                                     :refused refused}}))
       "credentials_self"
       (js/Promise.resolve
        {:result {:actor/did caller
@@ -132,7 +142,8 @@
 
 (defn- valid? [tool a]
   (and (map? a)
-       (or (#{"actor_list" "credentials_self"} tool) (string? (:actor/did a)))
+       (or (#{"actor_list" "credentials_self" "subtree_export"} tool)
+           (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a))) (string? (:actor/did a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))
 
@@ -143,3 +154,22 @@
               (not (valid? tool args)) (refuse :invalid)
               :else (run deps ledger st actor tool args))
         (.catch (fn [e] {:error (or (:axxium/error (ex-data e)) :github-unavailable)})))))
+
+(defn admin
+  "The portal's identity manager: one JSON request from `caller` through
+   the same policy-checked tools. Resolves {:status :body :ledger}."
+  [deps caller req {:keys [read-edn host]}]
+  (let [call-spec (admin/request->call caller req read-edn host)]
+    (if (map? call-spec)
+      (js/Promise.resolve {:status 400 :body {:error (:error call-spec)}})
+      (let [[tool args] call-spec]
+        (.then (call deps {:actor caller} tool args)
+               (fn [out]
+                 (if-let [e (:error out)]
+                   {:status (if (#{:forbidden :unauthenticated} e) 403 400)
+                    :body {:error (name e)} :ledger (:ledger out)}
+                   (let [st (state/fold (or (:ledger out) (:ledger deps)))
+                         pols (into {} (map (fn [a] [(:actor/did a) (gi/policy-of st (:actor/did a))]))
+                                    (get-in out [:result :actors]))]
+                     {:status 200 :ledger (:ledger out)
+                      :body (admin/result->view (:op req) (:result out) pr-str pols)}))))))))
