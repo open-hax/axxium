@@ -35,7 +35,7 @@
   [fetch {:keys [client-id client-secret refresh-token]}]
   (-> (token-request fetch {"grant_type" "refresh_token" "refresh_token" refresh-token
                             "client_id" client-id "client_secret" client-secret})
-      (.then :access_token)))
+      (.then #(:access_token %))))
 
 (defn- auth [access-token] #js {"authorization" (str "Bearer " access-token)})
 
@@ -83,3 +83,8 @@
                      (.then (fn [r] (if (.-ok r) (.text r)
                                         (throw (ex-info "google drive download failed" {:status (.-status r)})))))
                      (.then (fn [text] (assoc (->file f) :drive/content text)))))))))
+
+(defn authorize-url
+  "Google consent URL for `axxium.law.google-drive/authorization-params`."
+  [authorization-endpoint params]
+  (str authorization-endpoint "?" (form params)))

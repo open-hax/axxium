@@ -77,3 +77,53 @@
      :drive/reason :exists
      :drive/existing (mapv :drive/file-id existing)}
     {:drive/outcome :create :drive/request request}))
+
+;; ---------------------------------------------------------------- resources
+
+(def credential-kind :resource/google-drive-credential)
+(def file-kind :resource/google-drive-file)
+
+(defn credential-resource-id
+  "One Drive credential per owner DID."
+  [owner]
+  (str "google-drive-credential:" owner))
+
+(defn file-resource-id
+  "A Drive file is addressed by its Drive id, which Drive never reuses."
+  [file-id]
+  (str "google-drive:" file-id))
+
+(defn actor-did
+  "did:web for a Google-signed-in Axxium actor on this instance:
+   did:web:<host>:actors:<actor-id>. The port, if any, is %3A-encoded."
+  [public-base-url actor-id]
+  (let [host (-> public-base-url
+                 (str/replace #"^https?://" "")
+                 (str/replace #"/.*$" "")
+                 str/lower-case
+                 (str/replace ":" "%3A"))]
+    (str "did:web:" host ":actors:" actor-id)))
+
+(def EventRef
+  "An event a Drive file refers to: a clio/Mongo event id."
+  [:string {:min 1 :max 256}])
+
+(def PutValueRequest
+  "An MCP put: any EDN value, stored losslessly as EDN text."
+  [:map {:closed true}
+   [:drive/name FileName]
+   [:drive/folder-id {:optional true} [:string {:min 1}]]
+   [:drive/refs {:optional true} [:vector EventRef]]
+   [:drive/value :any]])
+
+(def GetValueRequest
+  [:map {:closed true} [:resource/id [:string {:min 1}]]])
+
+(def ListValueRequest
+  [:map {:closed true} [:drive/ref {:optional true} EventRef]])
+
+(defn valid-put-value? [r] (m/validate PutValueRequest r))
+(defn valid-get-value? [r] (m/validate GetValueRequest r))
+(defn valid-list-value? [r] (m/validate ListValueRequest r))
+
+(def edn-mime-type "application/edn")

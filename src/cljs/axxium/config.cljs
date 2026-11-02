@@ -105,6 +105,11 @@
      ;; Google Drive resource: same Cloud OAuth client, drive.file scope.
      ;; The refresh-token encryption key is a 32-byte base64 file, never committed.
      :drive/token-key-file (env "AXXIUM_DRIVE_TOKEN_KEY_FILE" "")
+     ;; Optional explicit client; empty falls back to GOOGLE_OAUTH_CLIENT_FILE.
+     :drive/client-id (env "GOOGLE_DRIVE_CLIENT_ID" "")
+     :drive/client-secret (env "GOOGLE_DRIVE_CLIENT_SECRET" "")
+     ;; Append-only EDN ledger holding Drive credential and file resources.
+     :drive/ledger-file (env "AXXIUM_DRIVE_LEDGER_FILE" "")
      :oauth/bootstrap-admin-email (env "AXXIUM_BOOTSTRAP_ADMIN_EMAIL" "")
 
      ;; Session

@@ -90,3 +90,21 @@
         {:subject (.-sub payload)
          :email (.-email payload)
          :display-name (or (.-name payload) (.-email payload))}))))
+
+(defn drive-client
+  "{:client-id :client-secret} for the Drive resource: explicit
+   GOOGLE_DRIVE_CLIENT_ID/SECRET when set, else the sign-in client file.
+   nil when neither is configured. Never logged."
+  []
+  (let [id (cfg/get-in-config [:drive/client-id])
+        secret (cfg/get-in-config [:drive/client-secret])]
+    (if (and (seq id) (seq secret))
+      {:client-id id :client-secret secret}
+      (try
+        (when-let [web (client)]
+          (when (and (seq (.-client_id web)) (seq (.-client_secret web)))
+            {:client-id (.-client_id web) :client-secret (.-client_secret web)}))
+        (catch :default _ nil)))))
+
+(defn pkce-challenge [verifier]
+  (-> (.createHash crypto "sha256") (.update verifier) (.digest "base64url")))
