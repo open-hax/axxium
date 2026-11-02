@@ -12,6 +12,7 @@
             [axxium.routes.atproto :as atproto-routes]
             [axxium.routes.atproto-oauth :as atproto-oauth-routes]
             [axxium.routes.drive :as drive-routes]
+            [axxium.routes.github-identity :as github-identity-routes]
             [axxium.routes.google :as google-routes]
             [axxium.routes.health :as health-routes]
             [axxium.routes.well-known :as well-known-routes]
@@ -40,6 +41,7 @@
   (auth-routes/register-auth-routes! app)
   (google-routes/register-google-routes! app)
   (drive-routes/register-drive-routes! app)
+  (github-identity-routes/register-github-identity-routes! app)
   (actor-routes/register-actor-routes! app)
   (agent-routes/register-agent-routes! app)
   (atproto-routes/register-atproto-routes! app)
