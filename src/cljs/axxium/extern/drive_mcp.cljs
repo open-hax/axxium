@@ -25,7 +25,11 @@
   "Open the owner's sealed refresh token and trade it for an access token."
   [{:keys [fetch token-key client]} st owner]
   (if-let [refresh (some->> (drive/sealed-credential st owner) (tc/open-sealed token-key owner))]
-    (gd/refresh-access-token fetch (assoc client :refresh-token refresh))
+    (-> (gd/refresh-access-token fetch (assoc client :refresh-token refresh))
+        (.catch (fn [error]
+                  (if (= "invalid_grant" (:oauth-error (ex-data error)))
+                    (throw (ex-info "drive not connected" {:axxium/error :not-connected}))
+                    (throw error)))))
     (js/Promise.reject (ex-info "drive not connected" {:axxium/error :not-connected}))))
 
 (defn- create! [{:keys [fetch ledger ids]} st owner at args]

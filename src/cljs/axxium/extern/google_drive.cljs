@@ -28,12 +28,15 @@
   (str/join "&" (for [[k v] m] (str (js/encodeURIComponent k) "=" (js/encodeURIComponent v)))))
 
 (defn- json-body [resp]
-  (-> (.json resp)
-      (.then (fn [body]
-               (if (.-ok resp)
-                 (js->clj body :keywordize-keys true)
-                 (throw (ex-info "google drive request failed"
-                                 {:status (.-status resp)})))))))
+  (if (.-ok resp)
+    (-> (.json resp) (.then #(js->clj % :keywordize-keys true)))
+    (-> (.json resp)
+        (.catch (fn [_] nil))
+        (.then (fn [body]
+                 (let [oauth-error (some-> body (aget "error"))]
+                   (throw (ex-info "google drive request failed"
+                                   (cond-> {:status (.-status resp)}
+                                     (string? oauth-error) (assoc :oauth-error oauth-error))))))))))
 
 (defn- token-request [fetch params]
   (-> (fetch token-endpoint

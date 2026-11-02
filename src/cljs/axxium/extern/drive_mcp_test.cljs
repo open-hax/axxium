@@ -185,3 +185,18 @@
     (-> (rejected-registration*)
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
+
+(defn- ^:async refresh-error-classification* []
+  (let [key (crypto/randomBytes 32)
+        deps {:token-key key :client {} :ids (counter-ids) :ledger (ctx-ledger key)}
+        call-with (fn [body]
+                    (mcp/call (assoc deps :fetch (fn [_ _] (js/Promise.resolve (respond 400 body))))
+                              {:owner fx/alice} "drive_put" {:drive/name "a" :drive/value 1}))]
+    (is (= :not-connected (:error (await (call-with {:error "invalid_grant"})))))
+    (is (= :drive-unavailable (:error (await (call-with {:error "server_error"})))))))
+
+(deftest refresh-errors-distinguish-reconnection-from-outage
+  (async done
+    (-> (refresh-error-classification*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))

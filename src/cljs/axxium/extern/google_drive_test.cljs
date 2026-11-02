@@ -87,3 +87,18 @@
     (-> (timeout-options*)
         (.catch (fn [error] (is false (pr-str error))))
         (.finally done))))
+
+(defn- ^:async provider-error-details* []
+  (doseq [[body expected] [[(fn [] (js/Promise.reject (js/Error. "invalid JSON"))) {:status 503}]
+                           [(fn [] (js/Promise.resolve #js {:error "invalid_grant"}))
+                            {:status 400 :oauth-error "invalid_grant"}]]]
+    (let [fetch (fn [_ _] (js/Promise.resolve #js {:ok false :status (:status expected) :json body}))
+          data (try (await (gd/refresh-access-token fetch {})) nil
+                    (catch :default e (ex-data e)))]
+      (is (= expected data)))))
+
+(deftest provider-errors-preserve-status
+  (async done
+    (-> (provider-error-details*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))
