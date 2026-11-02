@@ -61,7 +61,8 @@
         [lg2 r2] (ok (send lg1 (ctx alice a) "k1" {:text "hi"}))
         changed (send lg2 (ctx alice a) "k1" {:text "bye"})]
     (is (= (:message/id r1) (:message/id r2)))
-    (is (= (:receipt r1) (:receipt r2)))
+    (is (seq (:message/receipt r1)))
+    (is (= (:message/receipt r1) (:message/receipt r2)))
     (is (= 1 (count (mm/messages lg2 fx/bob))))
     (is (= :idempotency-conflict (:error changed)))
     (testing "the receipt is stored with the message, key, owner and recipient"
@@ -161,9 +162,15 @@
         [lg s] (open lg alice)
         _ (is (= :poll (:delivery/mode s)) "alice's client declared no push capability")
         [lg _] (ok (mm/call lg (ctx alice (:session/id s)) :grant_send {:to fx/bob}))
-        [lg _] (ok (mm/call lg (ctx bob b) :send_message {:to fx/alice :idempotency-key "k" :body {:x 1}}))
+        [lg sent] (ok (mm/call lg (ctx bob b) :send_message {:to fx/alice :idempotency-key "k" :body {:x 1}}))
         d (mm/dispatch lg fx/t0)]
     (is (empty? (:notifications d)) "no push claimed for a polling client")
+    (let [confirmed (mm/confirm-delivery (:ledger d) (:message/id sent) {:at fx/t0})
+          [_ delivery] (ok (mm/call (:ledger confirmed) (ctx alice (:session/id s))
+                                   :get_delivery {:message-id (:message/id sent)}))]
+      (is (= :not-planned (:error confirmed)))
+      (is (= (:ledger d) (:ledger confirmed)))
+      (is (= :pending (:delivery/notification delivery))))
     (let [[_ r] (ok (mm/call (:ledger d) (ctx alice (:session/id s)) :read_inbox {}))]
       (is (= [{:x 1}] (mapv :message/body (:messages r)))))
     (testing "a subscribed client gets message.available"
@@ -172,3 +179,33 @@
             n (first (:notifications (mm/dispatch lg fx/t0)))]
         (is (= {:event "message.available" :recipient fx/bob} (select-keys n [:event :recipient])))
         (is (not (contains? n :message/body)) "notifications carry no payload")))))
+
+(deftest notifications-are-silent-and-preserve-effects
+  (let [{:keys [lg a]} (world)
+        c (ctx alice a)]
+    (doseq [method ["initialize" "tools/list" "notifications/initialized" "unknown"]]
+      (let [out (mm/handle-rpc lg c {"jsonrpc" "2.0" "method" method})]
+        (is (nil? (:response out)) (str method " notification has no response"))
+        (is (= lg (:ledger out)))))
+    (let [out (mm/handle-rpc lg c {"jsonrpc" "2.0" "method" "tools/call"
+                                  "params" {"name" "send_message" "arguments"
+                                            {"to" fx/bob "idempotency_key" "notification" "body" {"n" 1}}}})]
+      (is (nil? (:response out)))
+      (is (= 1 (count (mm/messages (:ledger out) fx/bob)))))
+    (is (= -32601 (get-in (mm/handle-rpc lg c {"jsonrpc" "2.0" "id" 0 "method" "unknown"})
+                          [:response "error" "code"])))
+    (is (nil? (:response (mm/handle-rpc lg {} {"jsonrpc" "2.0" "method" "unknown"}))))))
+
+(deftest tool-hints-and-actionable-errors
+  (let [descriptors (into {} (map (juxt #(get % "name") identity)) mm/tool-descriptors)
+        {:keys [lg a]} (world)
+        out (mm/handle-rpc lg (ctx alice a)
+                           {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
+                            "params" {"name" "unknown" "arguments" {}}})]
+    (doseq [name ["whoami" "resolve_address" "get_delivery"]]
+      (is (true? (get-in descriptors [name "annotations" "readOnlyHint"]))))
+    (is (true? (get-in descriptors ["send_message" "annotations" "idempotentHint"])))
+    (doseq [name ["grant_send" "revoke_send"]]
+      (is (false? (get-in descriptors [name "annotations" "readOnlyHint"])))
+      (is (true? (get-in descriptors [name "annotations" "destructiveHint"]))))
+    (is (re-find #"tools/list" (get-in out [:response "result" "content" 0 "text"])))))

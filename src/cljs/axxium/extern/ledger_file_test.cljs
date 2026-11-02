@@ -10,9 +10,23 @@
   (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-ledger-"))
         p (path/join dir "ledger.edn")
         r (mm/call [] {:principal {:auth/did "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa" :auth/method :atproto}
-                       :audience "a" :now #inst "2026-11-01"} :open_session {:audience "a" :ttl-ms 1000})
+                       :audience "héllo ∑" :now #inst "2026-11-01"} :open_session {:audience "héllo ∑" :ttl-ms 1000})
         lg (lf/append-batch! p [] (:ledger r))]
     (is (= lg (lf/load-ledger p)))
     (fs/appendFileSync p "{:event/id \"torn")
     (is (= lg (lf/load-ledger p)) "a torn trailing write is not admitted")
+    (let [next (:ledger (mm/call lg {:principal {:auth/did "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa" :auth/method :atproto}
+                                   :audience "héllo ∑" :now #inst "2026-11-01"}
+                               :open_session {:audience "héllo ∑" :ttl-ms 2000}))]
+      (lf/append-batch! p lg next)
+      (is (= next (lf/load-ledger p)) "append after recovery preserves every event and UTF-8 byte"))
     (fs/rmSync dir #js {:recursive true})))
+
+(deftest entirely-torn-file-is-repaired-before-append
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-ledger-"))
+        p (path/join dir "ledger.edn")]
+    (try
+      (fs/writeFileSync p "{:event/id \"torn ∑")
+      (is (= [] (lf/load-ledger p)))
+      (is (zero? (.-size (fs/statSync p))) "no complete line means no admitted bytes")
+      (finally (fs/rmSync dir #js {:recursive true})))))
