@@ -5,6 +5,7 @@
             [axxium.db :as db]
             [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
+            [axxium.extern.signing-key :as signing-key]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
             [axxium.routes.agents :as agent-routes]
@@ -12,6 +13,7 @@
             [axxium.routes.atproto-oauth :as atproto-oauth-routes]
             [axxium.routes.google :as google-routes]
             [axxium.routes.health :as health-routes]
+            [axxium.routes.well-known :as well-known-routes]
             ["@fastify/cors" :default fastifyCors]
             ["@fastify/cookie" :default fastifyCookie]
             ["@fastify/static" :default fastifyStatic]
@@ -33,6 +35,7 @@
   "Register all API routes on the app."
   [app]
   (health-routes/register-health-routes! app)
+  (well-known-routes/register-well-known-routes! app)
   (auth-routes/register-auth-routes! app)
   (google-routes/register-google-routes! app)
   (actor-routes/register-actor-routes! app)
@@ -49,10 +52,14 @@
 
 (defn start!
   "Start the Axxium server.
-   Initializes database schema and starts listening."
+   Loads the signing key, initializes the database schema, and listens.
+   The log line is the kid only."
   []
   (println "Starting Axxium identity kernel...")
-  (-> (db/init-schema!)
+  (-> (signing-key/load!)
+      (.then (fn [loaded]
+               (println (str "Signing key " (:kid loaded)))
+               (db/init-schema!)))
       (.then
         (fn [_]
           (println "Database schema initialized")
@@ -70,5 +77,7 @@
                     app))))))
       (.catch
         (fn [err]
-          (println (str "Failed to start Axxium: " (.-message err)))
+          (let [reason (:reason (ex-data err))]
+            (println (str "Failed to start Axxium: " (.-message err)
+                          (when reason (str " (" (name reason) ")")))))
           (js/process.exit 1)))))

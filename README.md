@@ -88,6 +88,8 @@ administrator privileges only when Google verifies it on first sign-in.
 
 ### System
 - `GET /health` — Health check
+- `GET /.well-known/jwks.json` — This instance's public Ed25519 signing key
+- `GET /.well-known/did.json` — did:web document for `AXXIUM_PUBLIC_BASE_URL`
 - `GET /` — Portal redirect
 - `GET /portal/index.html` — Axxium portal
 
@@ -104,7 +106,8 @@ All configuration is via environment variables:
 | `DB_NAME` | axxium | Database name |
 | `DB_USER` | axxium | Database user |
 | `DB_PASSWORD` | | Database password |
-| `JWT_SECRET` | change-me | HMAC secret for HS256 actor tokens and Google OAuth state |
+| `AXXIUM_SIGNING_KEY_FILE` | required | PKCS#8 PEM of this instance's Ed25519 key. See [signing-key migration](docs/signing-key-migration.md). There is no default |
+| `AXXIUM_SIGNING_KID` | thumbprint | Optional kid. Unset uses the RFC 7638 SHA-256 thumbprint of the public JWK `{kty,crv,x}` |
 | `AXXIUM_ISS` | `JWT_ISSUER`, else `axxium` | Instance identifier sealed as the JWT `iss` |
 | `AXXIUM_SERVICE` | `promethean` | Service component of the audience |
 | `AXXIUM_ENV` | `NODE_ENV`, else `development` | Environment component of the audience and the `env` claim |
@@ -116,7 +119,7 @@ All configuration is via environment variables:
 | `JWT_ISSUER` | axxium | Fallback instance identifier when `AXXIUM_ISS` is unset |
 | `BCRYPT_SALT_ROUNDS` | 12 | Password hashing rounds |
 
-Actor tokens are admitted only when `iss` is this instance, `aud` is `service+env`, and the `env` claim is that same environment. Each token carries `cred_id`, the session or agent credential that acted. Tokens issued before those claims existed are rejected.
+Actor tokens and Google OAuth state are EdDSA (Ed25519), signed by `AXXIUM_SIGNING_KEY_FILE`, with this instance's `kid` in the header. They are admitted only when `iss` is this instance, `aud` is `service+env`, the `env` claim is that same environment, and the header `kid` is this instance's kid. Each actor token carries `cred_id`, the session or agent credential that acted. `JWT_SECRET` is not read. Every JWT signed before this change is rejected, including an in-flight Google state cookie; `axx_` agent credentials are not JWTs and keep working. Provision the key before startup, as described in [docs/signing-key-migration.md](docs/signing-key-migration.md).
 
 ## Architecture
 

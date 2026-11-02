@@ -6,6 +6,7 @@
             [axxium.extern.google :as google]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
+            [axxium.extern.signing-key :as signing-key]
             [axxium.routes.agents :as agents]
             [axxium.routes.atproto :as atproto]
             [axxium.routes.auth :as auth]
@@ -56,13 +57,22 @@
     {:pool #js {:query (.-query direct) :connect #(js/Promise.resolve (client))}
      :committed committed :commands commands :released released}))
 
+(defn- state-opts [material]
+  {:private-key (:private-key material)
+   :public-key (:public-key material)
+   :kid (:kid material)
+   :issuer "axxium"})
+
 (defn- ^:async google-callback!
   [fixture & [{:keys [query-state] :or {query-state "fixture-state"}}]]
-  (let [responses (atom []) actors (atom []) jar (atom nil)
+  (let [material (await (signing-key/generate-ephemeral!))
+        responses (atom []) actors (atom []) jar (atom nil)
         callback (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/callback"])
         start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])]
-    (with-redefs [db/pool (delay (:pool fixture))
-                  cfg/get-in-config (fn [path] (case path [:jwt/secret] "fixture-secret" [:jwt/issuer] "axxium" "https://fixture.test"))
+    (signing-key/install! material)
+    (try
+      (with-redefs [db/pool (delay (:pool fixture))
+                    cfg/get-in-config (fn [path] (case path [:jwt/issuer] "axxium" "https://fixture.test"))
                   google/configured? (fn [] true)
                   google/random-secret (fn [] "fixture-state")
                   google/authorize-url (fn [& _] "https://google.test")
@@ -78,7 +88,9 @@
       (await (start {} nil))
       (reset! responses [])
       (await (callback {} nil))
-      {:responses @responses :actors @actors})))
+      {:responses @responses :actors @actors})
+      (finally
+        (signing-key/unload!)))))
 
 (defn- ^:async google-binding-failure-rolls-back-entity-and-actor* []
   (let [fixture (google-db {:fail-binding? true})
@@ -97,35 +109,42 @@
     (is (empty? @(:committed fixture)))))
 
 (defn- ^:async google-state-is-stateless-and-tamper-evident* []
-  (let [keys {:secret "fixture-secret" :issuer "axxium"}
+  (let [material (await (signing-key/generate-ephemeral!))
+        other (await (signing-key/generate-ephemeral!))
+        keys (state-opts material)
         sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))]
     (is (= {:state "s" :nonce "n" :verifier "v"} (await (jose/verify-google-state! sealed keys))))
     (is (nil? (await (jose/verify-google-state! (str sealed "x") keys))))
-    (is (nil? (await (jose/verify-google-state! sealed (assoc keys :secret "other")))))))
+    (is (nil? (await (jose/verify-google-state! sealed (assoc keys :public-key (:public-key other))))))))
 
 (defn- ^:async sign-raw-google-state!
   "Sign an arbitrary payload exactly as the state sealer does, bypassing its input contract."
-  [payload secret]
+  [payload private-key kid]
   (-> (new jose/SignJWT (clj->js payload))
-      (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
+      (.setProtectedHeader #js {"alg" "EdDSA" "kid" kid "typ" "JWT"})
       (.setIssuedAt)
       (.setIssuer "axxium")
       (.setAudience "axxium-google-oauth-state")
       (.setExpirationTime "5m")
-      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (.sign private-key)
       (await)))
 
 (defn- ^:async google-state-rejects-signed-payloads-outside-the-contract* []
-  (let [keys {:secret "fixture-secret" :issuer "axxium"}]
+  (let [material (await (signing-key/generate-ephemeral!))
+        keys (state-opts material)
+        sealed-outside (fn [payload]
+                         (sign-raw-google-state! payload (:private-key material) (:kid material)))]
     (doseq [payload [{:state "s" :nonce "n"}
                      {:state "s" :nonce "n" :verifier 42}
                      {:state "" :nonce "n" :verifier "v"}
                      {:nonce "n" :verifier "v"}
                      {:state "s" :nonce nil :verifier "v"}]]
-      (is (nil? (await (jose/verify-google-state! (await (sign-raw-google-state! payload "fixture-secret")) keys)))
+      (is (nil? (await (jose/verify-google-state! (await (sealed-outside payload)) keys)))
           (str "signed payload outside the Google-state contract was admitted: " (pr-str payload))))
     (is (= {:state "s" :nonce "n" :verifier "v"}
-           (await (jose/verify-google-state! (await (sign-raw-google-state! {:state "s" :nonce "n" :verifier "v" :extra 1} "fixture-secret")) keys))))
+           (await (jose/verify-google-state!
+                   (await (sealed-outside {:state "s" :nonce "n" :verifier "v" :extra 1}))
+                   keys))))
     (is (= :refused
            (try (await (jose/sign-google-state! {:state "s" :nonce "n"} keys))
                 :sealed
@@ -134,9 +153,12 @@
 
 (defn- ^:async google-start!
   [configured?]
-  (let [start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])
+  (let [material (await (signing-key/generate-ephemeral!))
+        start (get (routes google-routes/register-google-routes!) [:get "/api/auth/google/start"])
         responses (atom []) cookies (atom []) redirects (atom [])]
-    (with-redefs [cfg/get-in-config (fn [path] (case path [:jwt/secret] "fixture-secret" [:jwt/issuer] "axxium" "https://fixture.test"))
+    (signing-key/install! material)
+    (try
+      (with-redefs [cfg/get-in-config (fn [path] (case path [:jwt/issuer] "axxium" "https://fixture.test"))
                   google/configured? (fn [] configured?)
                   google/random-secret (fn [] "fixture-state")
                   google/authorize-url (fn [& _] "https://google.test")
@@ -145,7 +167,9 @@
                   http/redirect! (fn [_ path] (swap! redirects conj path))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
       (await (start {} nil))
-      {:responses @responses :cookies @cookies :redirects @redirects})))
+      {:responses @responses :cookies @cookies :redirects @redirects :material material})
+      (finally
+        (signing-key/unload!)))))
 
 (defn- ^:async check-google-start-route!
   []
@@ -161,7 +185,7 @@
     (is (= 1 (count (:cookies started))))
     (is (true? secure?))
     (is (= {:state "fixture-state" :nonce "fixture-state" :verifier "fixture-state"}
-           (await (jose/verify-google-state! sealed {:secret "fixture-secret" :issuer "axxium"}))))))
+           (await (jose/verify-google-state! sealed (state-opts (:material started))))))))
 
 ;; cljs.test does not await a Promise returned by a deftest, so this one uses
 ;; `async`/`done` to keep its assertions inside the reported run.
@@ -177,40 +201,48 @@
     (is (= [{:status 400 :body {:error "Invalid or expired Google sign-in state"}}] (:responses outcome)))))
 
 (defn- ^:async sign-raw-google-state-without-exp!
-  "Sign state claims with HS256 but omit exp, for verifying requiredClaims."
-  [payload secret]
+  "Sign state claims with EdDSA but omit exp, for verifying requiredClaims."
+  [payload private-key kid]
   (-> (new jose/SignJWT (clj->js payload))
-      (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
+      (.setProtectedHeader #js {"alg" "EdDSA" "kid" kid "typ" "JWT"})
       (.setIssuedAt)
       (.setIssuer "axxium")
       (.setAudience "axxium-google-oauth-state")
-      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (.sign private-key)
       (await)))
 
-(defn- ^:async google-state-rejects-empty-secret-and-missing-exp* []
-  (let [keys {:secret "fixture-secret" :issuer "axxium"}
-        sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))]
+(defn- ^:async google-state-rejects-a-missing-key-and-missing-exp* []
+  (let [material (await (signing-key/generate-ephemeral!))
+        keys (state-opts material)
+        sealed (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} keys))
+        missing {:private-key nil :public-key nil :kid (:kid material) :issuer "axxium"}]
     (is (= :refused
-           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} {:secret "" :issuer "axxium"}))
+           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} missing))
                 :sealed
                 (catch :default _ :refused)))
-        "empty secret must not seal Google OAuth state")
+        "a missing key must not seal Google OAuth state")
     (is (= :refused
-           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"} {:secret nil :issuer "axxium"}))
+           (try (await (jose/sign-google-state! {:state "s" :nonce "n" :verifier "v"}
+                                                (assoc missing :private-key "")))
                 :sealed
                 (catch :default _ :refused)))
-        "nil secret must not seal Google OAuth state")
-    (is (nil? (await (jose/verify-google-state! sealed {:secret "" :issuer "axxium"})))
-        "empty secret must not verify")
-    (is (nil? (await (jose/verify-google-state! sealed {:secret nil :issuer "axxium"})))
-        "nil secret must not verify")
+        "a blank key must not seal Google OAuth state")
+    (is (nil? (await (jose/verify-google-state! sealed missing)))
+        "a missing key must not verify")
+    (is (nil? (await (jose/verify-google-state! sealed (assoc missing :public-key ""))))
+        "a blank key must not verify")
     (is (nil? (await (jose/verify-google-state!
-                      (await (sign-raw-google-state-without-exp! {:state "s" :nonce "n" :verifier "v"} "fixture-secret"))
+                      (await (sign-raw-google-state-without-exp!
+                              {:state "s" :nonce "n" :verifier "v"}
+                              (:private-key material)
+                              (:kid material)))
                       keys)))
         "state tokens without exp must not verify")))
 
-(deftest google-state-rejects-empty-secret-and-missing-exp
-  (async done (-> (google-state-rejects-empty-secret-and-missing-exp*) (.catch (fn [e] (is false (str "google-state-rejects-empty-secret-and-missing-exp threw: " (pr-str e))))) (.finally done))))
+(deftest google-state-rejects-a-missing-key-and-missing-exp
+  (async done (-> (google-state-rejects-a-missing-key-and-missing-exp*)
+                  (.catch (fn [e] (is false (str "google-state-rejects-a-missing-key-and-missing-exp threw: " (ex-message e)))))
+                  (.finally done))))
 
 (deftest agent-creation-contract
   (let [admit (fn [body] (let [r (agent-shape/creation-request body)]

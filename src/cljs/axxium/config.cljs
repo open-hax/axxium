@@ -3,6 +3,7 @@
   (:require [axxium.domain.token :as token-domain]
             [axxium.extern.env :as environment]
             [axxium.law.atproto :as atproto-law]
+            [axxium.law.signing :as signing-law]
             [axxium.law.token :as token-law]
             [clojure.string :as str]))
 
@@ -48,6 +49,16 @@
                        :expected (token-domain/audience service environment)})))
     instance))
 
+(defn- signing-kid
+  "Optional AXXIUM_SIGNING_KID. A value that is not a kid is a startup failure
+   and the value is not copied into the failure."
+  []
+  (when-let [kid (present (env "AXXIUM_SIGNING_KID"))]
+    (if (signing-law/kid? kid)
+      kid
+      (throw (ex-info "AXXIUM_SIGNING_KID is outside the signing law"
+                      {:reason :invalid-kid})))))
+
 (defn trust-proxy-option
   "Fastify trustProxy from AXXIUM_TRUST_PROXY, admitted by
    `axxium.law.atproto/trust-proxy-admission`; a refusal is a configuration
@@ -80,7 +91,8 @@
      :instance/iss (:iss instance)
      :instance/service (:service instance)
      :instance/env (:env instance)
-     :jwt/secret (env "JWT_SECRET" "axxium-dev-secret-change-me")
+     :signing/key-file (present (env "AXXIUM_SIGNING_KEY_FILE"))
+     :signing/kid (signing-kid)
      :jwt/issuer (:iss instance)
      :jwt/audience (token-domain/audience (:service instance) (:env instance))
      :jwt/expiry-hours (env-int "JWT_EXPIRY_HOURS" 168) ;; 7 days

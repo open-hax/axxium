@@ -6,13 +6,17 @@
             [axxium.extern.google :as google]
             [axxium.extern.jose :as jose]
             [axxium.extern.http :as http]
+            [axxium.extern.signing-key :as signing-key]
             [clojure.string :as str]))
 
 (def ^:private state-cookie "axxium_google_state")
 
 (defn- state-keys []
-  {:secret (cfg/get-in-config [:jwt/secret])
-   :issuer (cfg/get-in-config [:jwt/issuer])})
+  (let [material (signing-key/current!)]
+    {:private-key (:private-key material)
+     :public-key (:public-key material)
+     :kid (:kid material)
+     :issuer (cfg/get-in-config [:jwt/issuer])}))
 
 (defn- ^:async start!
   "Begin Google sign-in with stateless, signed browser state (no server-side store)."

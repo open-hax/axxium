@@ -19,6 +19,9 @@
 (defn send! [reply status data]
   (.send (.code reply status) (clj->js data)))
 
+(defn set-header! [reply name value]
+  (.header reply name value))
+
 (defn send-secret! [reply status data]
   (.header reply "Cache-Control" "no-store")
   (.header reply "Pragma" "no-cache")

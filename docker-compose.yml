@@ -13,13 +13,15 @@ services:
       - DB_NAME=axxium
       - DB_USER=axxium
       - DB_PASSWORD=${DB_PASSWORD:-axxium_password}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - JWT_ISSUER=axxium
+      - AXXIUM_SIGNING_KEY_FILE=/run/axxium/signing-key.pem
       # aud is AXXIUM_SERVICE+AXXIUM_ENV. JWT_AUDIENCE is unset: the bare
       # value promethean is not that audience and startup refuses it.
       - AXXIUM_SERVICE=promethean
       - AXXIUM_ENV=production
       - BCRYPT_SALT_ROUNDS=12
+    volumes:
+      - ${AXXIUM_SIGNING_KEY_FILE_HOST:-./signing-key.pem}:/run/axxium/signing-key.pem:ro
     depends_on:
       - axxium-db
     restart: unless-stopped
