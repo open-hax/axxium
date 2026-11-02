@@ -2,7 +2,8 @@
  :deps {org.clojure/clojurescript {:mvn/version "1.12.145"}
         org.clojure/test.check {:mvn/version "1.1.1"}
         metosin/malli {:mvn/version "0.16.4"}
-        funcool/promesa {:mvn/version "11.0.678"}}
+        funcool/promesa {:mvn/version "11.0.678"}
+        borkdude/edamame {:mvn/version "1.6.42"}}
  :aliases
  {:dev {:extra-deps {thheller/shadow-cljs {:mvn/version "2.28.22"}}}
   :test {:extra-deps {thheller/shadow-cljs {:mvn/version "2.28.22"}}}}}

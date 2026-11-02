@@ -1,8 +1,8 @@
 name: CI
 
 on:
+  # Every PR runs CI, including PRs stacked on another PR's branch.
   pull_request:
-    branches: [main, staging]
   push:
     branches: [main, staging]
 
