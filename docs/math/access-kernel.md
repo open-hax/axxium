@@ -78,3 +78,33 @@ flowchart LR
   effect `:axxium.resource/moved`. Moving to Drive or back is this morphism.
 - Local kinds: `:resource/file` (`file:<path>`), `:resource/process` (`process:<pid>`), `:resource/program` (`program:<path>`).
 - Registry state = `fold` of `resources` events; metadata only, never file contents.
+
+## PR 5 — Addressable mailbox MCP (contract: docs/addressable-mailbox-mcp-mvp.md)
+
+Objects: Session `(id, did, method, aud, expires, push?)`, Message `(id, from, to, body, key, owner, receipt)`, OutboxEntry `(message-id, recipient)`, Dispatch `(message-id, channel ∈ {push, poll})`, Ack `(message-id, seq)`.
+
+Morphisms (all `Ledger × Ctx × Args → Ledger × (Result + Error)`): open_session, register_mailbox, grant_send, revoke_send, send_message, read_inbox, acknowledge_message, get_delivery, whoami, resolve_address; and `dispatch : Ledger × Instant → Ledger × [Notification]`.
+
+Laws:
+- M1 (fail closed): no principal, unknown session, session/principal mismatch, wrong audience, expired session, forged `from`, or missing/revoked grant ⇒ Error, and the ledger gains at most a refusal decision.
+- M2 (idempotence): `send(k, b)` twice ⇒ same message and receipt, one event; `send(k, b')` with b' ≠ b ⇒ `:idempotency-conflict`.
+- M3 (atomic batch): decision, message+receipt, and outbox entry are one ledger transition; persistence writes that batch in one fsynced write.
+- M4 (exactly-once dispatch): `dispatch ∘ dispatch = dispatch` on pending entries; replay after a crash neither loses nor duplicates.
+- M5 (cursor): `read_inbox` defaults to the last acknowledged seq, so a reconnecting worker resumes there.
+- M6 (no false claims): notification ⇏ execution (`:delivery/execution :unknown`); push only to sessions that declared push; others are `:poll`.
+- M7 (no secrets): bodies with credential-like keys or values are refused; notifications carry no payload.
+
+```mermaid
+flowchart LR
+  P[principal + session] -->|authenticate| G{grant?}
+  G -->|no| D0[decision: deny]
+  G -->|yes| D1[decision: allow]
+  D1 --> M[mbox/&lt;did&gt; accepted + receipt]
+  M --> O[outbox pending]
+  O -->|dispatch| X{subscribed?}
+  X -->|push| N[message.available]
+  X -->|no| Poll[poll]
+  M -->|read_inbox / ack| C[cursor]
+```
+
+Not covered here: acceptance test 8's "real ChatGPT client" half and test 7 against a deployed endpoint need the staging environment that open-hax/services owns. The in-process JSON-RPC test covers discovery, send and receipt; the HTTP transport mount is a follow-up.
