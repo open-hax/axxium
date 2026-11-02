@@ -12,7 +12,9 @@ Axxium owns actor authorization, mailbox admission, session bindings, and receip
 - Register a mailbox under an authenticated Axxium actor and issue a distinct, revocable mailbox grant.
 - Provide MCP tools whoami, open_session, resolve_address, send_message, read_inbox, acknowledge_message and get_delivery.
 - Persist message, idempotency key, owner, recipient and acceptance receipt atomically.
+- Scope idempotency keys to the authenticated sender and mailbox; concurrent retries must resolve to one logical message and receipt. Compare the complete accepted payload and recipient when deciding whether a retry matches.
 - Allow a registered worker to read and acknowledge a message. Provide cursor-based recovery.
+- Keep unacknowledged messages recoverable across reconnects and cursor advancement; acknowledgment must apply only to the authorized recipient's message.
 - Publish message.available to explicitly subscribed recipients; use a durable outbox, not a connection as the source of truth.
 - Keep credentials, cookies, callbacks and secrets out of message payloads and receipts.
 
@@ -25,6 +27,8 @@ Axxium owns actor authorization, mailbox admission, session bindings, and receip
 6. Revoked grants, wrong audience, expired sessions, and forged sender IDs fail closed.
 7. A live authenticated MCP client can discover tools, send a message, and read a receipt.
 8. A real subscribed ChatGPT client can receive an event; unsupported clients use polling without a false push claim.
+9. Concurrent identical sends with the same scoped key produce one logical message and receipt; a changed recipient or payload is rejected without another message.
+10. Reading or advancing a cursor without acknowledgment does not lose an unread message, including after a crash or reconnect. Another actor cannot acknowledge it.
 
 ## Deployment gates
 - Preserve the current production Axxium and Services topology.
