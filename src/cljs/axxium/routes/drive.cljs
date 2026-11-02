@@ -1,6 +1,6 @@
 (ns axxium.routes.drive
   "Connect a signed-in actor's own Google Drive (drive.file, offline) and
-   expose the Drive MCP tools over HTTP.
+   expose Drive tool names through an application-specific EDN RPC.
 
    GET  /api/drive/connect   session required; redirects to Google
    GET  /api/drive/callback  session required; seals the refresh token
@@ -92,7 +92,7 @@
     (if-not (and bound? (seq code) (configured?))
       (http/send! reply 400 {:error "Invalid or expired Drive connect state"})
       (try
-        (let [tokens (await (gd/exchange-code js/fetch (assoc (google/drive-client)
+        (let [tokens (await (gd/exchange-code gd/timed-fetch (assoc (google/drive-client)
                                                               :redirect-uri (redirect-uri)
                                                               :code code
                                                               :verifier (:verifier opened))))
@@ -121,13 +121,13 @@
   (if-not (configured?)
     (http/send! reply 503 {:error "Google Drive is not configured on this Axxium"})
     (let [body (http/body req)
-          tool (some-> body .-tool)
-          args (try (edn/read-one (or (some-> body .-arguments) "{}")) (catch :default _ ::bad))]
+          tool (:tool body)
+          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (if (= ::bad args)
         (http/send! reply 400 {:error "arguments must be one EDN map"})
         (let [out (await (serialized
                           (fn [lg]
-                            (drive-mcp/call {:fetch js/fetch :token-key (token-key)
+                            (drive-mcp/call {:fetch gd/timed-fetch :token-key (token-key)
                                              :client (google/drive-client)
                                              :ledger lg :ids ids}
                                             {:owner (owner context)} tool args))))]

@@ -40,7 +40,7 @@
                   jose/verify-google-state! (fn [& _] (js/Promise.resolve {:state "alice.state" :verifier "v"}))
                   http/query-param (fn [_ k] (if (= k "state") "alice.state" "code"))
                   http/cookie (fn [& _] "signed-state")
-                  http/clear-state-cookie! (fn [& _] nil)
+                  http/clear-state-cookie! (fn ([_ _] nil) ([_ _ _] nil))
                   http/redirect! (fn [_ target] (reset! response {:redirect target}))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))
                   disk/load-ledger (fn [_] @durable)

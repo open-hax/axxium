@@ -61,3 +61,12 @@
         (filter #(or (nil? ref) (some #{ref} (get-in % [:resource/metadata :drive/refs]))))
         (sort-by :resource/id)
         vec)))
+
+(defn put-plan
+  "Refuse same-name files; distinguish files missing from the owner's registry.
+   A matching name alone cannot authorize adopting an external file."
+  [state owner existing request]
+  (let [plan (law/put-plan existing request)]
+    (if (some #(nil? (owned-file state owner (law/file-resource-id (:drive/file-id %)))) existing)
+      (assoc plan :drive/reason :exists-untracked)
+      plan)))

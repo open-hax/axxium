@@ -38,7 +38,8 @@
                      (drive/record-put ledger st owner file (:drive/refs args []) (ids))]
                  (if effect
                    {:ledger lg :result (:event/body effect)}
-                   {:error :forbidden}))))))
+                   {:error :created-untracked :drive/reason :forbidden
+                    :drive/existing [(:drive/file-id file)]}))))))
 
 (defn- put! [{:keys [fetch] :as deps} st owner args]
   (let [request (select-keys args [:drive/name :drive/folder-id])]
@@ -46,9 +47,9 @@
         (.then (fn [at]
                  (-> (gd/list-files fetch at {:q (law/same-name-query request)})
                      (.then (fn [{:drive/keys [files]}]
-                              (let [plan (law/put-plan files request)]
+                              (let [plan (drive/put-plan st owner files request)]
                                 (if (= :refused (:drive/outcome plan))
-                                  {:error :exists :drive/existing (:drive/existing plan)}
+                                  {:error (:drive/reason plan) :drive/existing (:drive/existing plan)}
                                   (create! deps st owner at args)))))))))))
 
 (defn- get! [{:keys [fetch] :as deps} st owner {:resource/keys [id]}]

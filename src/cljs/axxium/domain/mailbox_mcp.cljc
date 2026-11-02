@@ -3,16 +3,15 @@
    from open-hax/axxium#47) on clio mailbox streams.
 
    Every tool is a pure (ledger, ctx, args) -> {:ledger :result | :error}.
-   A call either appends its whole batch of events (decision, message,
-   outbox entry) or nothing, so persisting the returned ledger value is one
-   atomic write. The PDS is never used as a mailbox: messages live only on
+   A pure call appends its whole batch of events (decision, message,
+   outbox entry) or nothing. Durable batch atomicity is a separate store
+   obligation. The PDS is never used as a mailbox: messages live only on
    `mbox/<did>` streams here.
 
    ctx = {:principal (law.principal) :session/id :audience :now}. The
    principal comes from a verified AT Protocol sign-in or service token;
    nil means anonymous and every tool refuses."
-  (:require [axxium.domain.authority :as authority]
-            [axxium.domain.ledger :as ledger]
+  (:require [axxium.domain.ledger :as ledger]
             [axxium.domain.mailbox :as mailbox]
             [axxium.domain.policy :as policy]
             [axxium.domain.resource :as resource]
@@ -254,7 +253,7 @@
                          :body {:ack/message-id message-id :ack/seq (:event/seq e)}}
                         {:decision-id (nid lg) :effect-id (nid lg 1) :at now})]
         (if eff
-          {:ledger lg' :result {:ack/message-id message-id :cursor (:event/seq e)}}
+          {:ledger lg' :result {:ack/message-id message-id :cursor (ack-cursor lg' me)}}
           (refuse lg' :forbidden))))))
 
 (defn- outbox-body [lg type message-id]
@@ -313,8 +312,9 @@
         (of-type lg sessions :axxium.session/opened)))
 
 (defn dispatch
-  "Drain the durable outbox. Each pending entry is dispatched exactly once:
-   replaying after a crash re-sends only what has no :dispatched record.
+  "Plan each pending entry once per persisted ledger. Push is at-most-once:
+   a persisted plan suppresses replay even if a crash prevented its send.
+   Planning and external sending are not atomic; durable polling is the fallback.
    Push goes only to explicitly subscribed recipients; everyone else is
    marked :poll and gets no push claim. Notifications carry no payload."
   [lg now]
@@ -339,11 +339,12 @@
 ;; is the only event that moves :delivery/notification off :pending.
 (defn confirm-delivery
   "Append :axxium.outbox/delivered for a planned notification. Idempotent;
-   refuses when nothing was planned."
+   refuses when no push was planned, including polling-only plans."
   [lg message-id {:keys [at transport-receipt]}]
   (cond
     (outbox-body lg :axxium.outbox/delivered message-id) {:ledger lg :replayed? true}
-    (not (outbox-body lg :axxium.outbox/dispatched message-id)) (refuse lg :not-planned)
+    (not= :push (:outbox/channel (outbox-body lg :axxium.outbox/dispatched message-id)))
+    (refuse lg :not-planned)
     :else
     (let [planned (some #(when (= message-id (get-in % [:event/body :outbox/message-id])) %)
                         (of-type lg outbox :axxium.outbox/dispatched))
@@ -357,28 +358,36 @@
 
 (def ^:private str-schema {"type" "string"})
 
-(defn- tool [name desc props required]
+(defn- tool [name desc props required annotations]
   {"name" name "description" desc
    "inputSchema" {"type" "object" "properties" props "required" required
-                  "additionalProperties" false}})
+                  "additionalProperties" false}
+   "annotations" (merge {"readOnlyHint" false "destructiveHint" false
+                          "idempotentHint" false "openWorldHint" false}
+                         annotations)})
+
+(def ^:private read-hints
+  {"readOnlyHint" true "idempotentHint" true})
 
 (def tool-descriptors
-  [(tool "whoami" "The authenticated actor and session." {} [])
+  [(tool "whoami" "The authenticated actor and session." {} [] read-hints)
    (tool "open_session" "Bind a session to this actor and audience; push only if the client declares it."
-         {"audience" str-schema "ttl_ms" {"type" "integer"} "push" {"type" "boolean"}} ["audience" "ttl_ms"])
-   (tool "resolve_address" "Resolve a DID or mbox/<did> to a mailbox." {"address" str-schema} ["address"])
+         {"audience" str-schema "ttl_ms" {"type" "integer"} "push" {"type" "boolean"}} ["audience" "ttl_ms"] {})
+   (tool "resolve_address" "Resolve a DID or mbox/<did> to a mailbox." {"address" str-schema} ["address"] read-hints)
    (tool "send_message" "Send to a mailbox. Repeating an idempotency key with the same body returns the original receipt."
          {"to" str-schema "from" str-schema "idempotency_key" str-schema "body" {"type" "object"}}
-         ["to" "idempotency_key" "body"])
-   (tool "read_inbox" "Read messages after a cursor (default: last acknowledged)."
-         {"mailbox" str-schema "after" {"type" "integer"}} [])
-   (tool "acknowledge_message" "Acknowledge a message; advances the durable cursor."
-         {"message_id" str-schema} ["message_id"])
+         ["to" "idempotency_key" "body"] {"idempotentHint" true})
+   (tool "read_inbox" "Read messages after a cursor (default: contiguous acknowledged prefix)."
+         {"mailbox" str-schema "after" {"type" "integer"}} [] read-hints)
+   (tool "acknowledge_message" "Acknowledge one message; return the contiguous durable cursor."
+         {"message_id" str-schema} ["message_id"] {})
    (tool "get_delivery" "Acceptance, notification and acknowledgement state. Never claims execution."
-         {"message_id" str-schema} ["message_id"])
-   (tool "register_mailbox" "Register your mailbox and its owner grant." {} [])
-   (tool "grant_send" "Allow an actor to send to your mailbox." {"to" str-schema} ["to"])
-   (tool "revoke_send" "Revoke an actor's send grant on your mailbox." {"to" str-schema} ["to"])])
+         {"message_id" str-schema} ["message_id"] read-hints)
+   (tool "register_mailbox" "Register your mailbox and its owner grant." {} [] {})
+   (tool "grant_send" "Change authorization: allow an actor to send to your mailbox."
+         {"to" str-schema} ["to"] {"destructiveHint" true})
+   (tool "revoke_send" "Change authorization: revoke an actor's send grant on your mailbox."
+         {"to" str-schema} ["to"] {"destructiveHint" true})])
 
 (defn- arg-key [k] (keyword (str/replace k "_" "-")))
 
@@ -416,8 +425,24 @@
 (defn- rpc-error [id code message]
   {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
 
-(defn handle-rpc
-  "MCP JSON-RPC over an authenticated transport. Returns {:ledger :response}."
+(def ^:private error-actions
+  {:unauthenticated "Sign in before calling this tool."
+   :no-session "Open a session before calling this tool."
+   :session-mismatch "Use the session bound to the authenticated actor."
+   :wrong-audience "Open a session for this application's audience."
+   :session-expired "Open a new session and retry."
+   :unknown-tool "Use tools/list to select an available tool."
+   :forbidden "Request the mailbox owner's permission before retrying."
+   :not-found "Check the resource id and use its authorized owner."
+   :idempotency-conflict "Use a new idempotency key for changed content."
+   :secret-in-payload "Remove credentials from the message body."
+   :forged-sender "Omit from or use the authenticated actor's DID."})
+
+(defn- tool-error-message [error]
+  (str (name error) ": " (get error-actions error "Check the tool arguments and retry with an authorized session.")))
+
+(defn- rpc-request
+  "Evaluate a request; the public adapter suppresses notification responses."
   [lg ctx {:strs [id method params]}]
   (cond
     (not (principal/authenticated? (:principal ctx)))
@@ -440,10 +465,17 @@
       {:ledger ledger
        :response {"jsonrpc" "2.0" "id" id
                   "result" (if error
-                             {"isError" true "content" [{"type" "text" "text" (name error)}]}
+                             {"isError" true "content" [{"type" "text" "text" (tool-error-message error)}]}
                              (let [sc (->json (cond-> result
                                                 (:message/receipt result) (assoc :accepted (get-in result [:message/receipt :receipt/status]))))]
                                {"structuredContent" sc
                                 "content" [{"type" "text" "text" (js/JSON.stringify (clj->js sc))}]}))}})
 
     :else {:ledger lg :response (rpc-error id -32601 "method not found")}))
+
+(defn handle-rpc
+  "MCP JSON-RPC over an authenticated transport. Notifications retain their
+   ledger result and have nil :response; the transport sends HTTP 202, no body."
+  [lg ctx request]
+  (cond-> (rpc-request lg ctx request)
+    (not (contains? request "id")) (assoc :response nil)))
