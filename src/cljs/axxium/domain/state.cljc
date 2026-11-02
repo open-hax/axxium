@@ -3,11 +3,12 @@
    step over the events. Later PRs add steps; each is a pure (state, event)
    -> state function."
   (:require [axxium.domain.actor :as actor]
-            [axxium.domain.authority :as authority]))
+            [axxium.domain.authority :as authority]
+            [axxium.domain.resource :as resource]))
 
-(def empty-state {:actors {} :grants {}})
+(def empty-state {:actors {} :grants {} :resources {}})
 
-(def ^:private base-steps [actor/step authority/step])
+(def ^:private base-steps [actor/step authority/step resource/step])
 
 (defn step-with [steps]
   (fn [state event] (reduce (fn [s f] (f s event)) state steps)))

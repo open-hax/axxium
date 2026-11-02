@@ -68,3 +68,13 @@ flowchart LR
 - Principals come only from `law.principal`: `:atproto` (OAuth session DID) or
   `:service-token` (Ed25519 instance-signed token with a `did` claim).
   Wiring these into HTTP routes is a follow-up; the kernel refuses anything else.
+
+## Resource registry (PR 4)
+
+- `register : (actor, Resource) → Ledger` is `act` with `(actor, "registry", :register)`;
+  rule: an actor may register a resource it owns. Effect `:axxium.resource/registered` on `resources`.
+- `issue-grant`, `issue-revoke` are `act` with `(granter, resource, :grant)`; rule: the owner may grant.
+- `move : (actor, resource, store, location)` is `act` with `(actor, resource, :move)`;
+  effect `:axxium.resource/moved`. Moving to Drive or back is this morphism.
+- Local kinds: `:resource/file` (`file:<path>`), `:resource/process` (`process:<pid>`), `:resource/program` (`program:<path>`).
+- Registry state = `fold` of `resources` events; metadata only, never file contents.
