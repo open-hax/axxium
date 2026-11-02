@@ -118,6 +118,9 @@
        (str/includes? url "/app-manifests/good/conversions")
        (respond 201 {:id 9001 :slug "widgets-bot" :pem "PEM-FROM-GITHUB" :client_id "Iv1"})
 
+       (re-find #"/app/installations/\d+$" url)
+       (respond 200 {:account {:login (if (str/ends-with? url "/77") "example-org" "other-org")}})
+
        (re-find #"/app/installations/(\d+)/access_tokens" url)
        (let [[h p s] (str/split (aget (.-headers opts) "authorization") #"\.")
              jwt (str/replace h "Bearer " "")
@@ -210,3 +213,18 @@
         (.then (fn [app] (is (= "widgets-bot" (:slug app))) (is (= 9001 (:id app)))))
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
+
+(deftest installation-owner-must-match-requested-repositories
+  (async done
+    (let [calls (atom [])
+          fetch (fn [url opts]
+                  (swap! calls conj [(.-method opts) url])
+                  (js/Promise.resolve
+                   (if (str/ends-with? url "/access_tokens")
+                     (respond 201 {:token "wrong-owner-token" :expires_at "2099-01-01T00:00:00Z"})
+                     (respond 200 {:account {:login "OrgB"}}))))]
+      (-> (gh/mint-installation-token fetch "jwt" 77
+                                      {:scope/repos ["OrgA/repo"] :scope/permissions {}})
+          (.then (fn [_] (is false "a mismatched installation owner must be rejected")))
+          (.catch (fn [_] (is (not-any? #(= "POST" (first %)) @calls))))
+          (.finally done)))))

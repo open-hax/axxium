@@ -98,7 +98,10 @@ The tools are `actor_list`, `actor_provision`, `actor_suspend`, `actor_resume`,
 
 - The ledger supports a single writer process only.
 - There is no proxied review/comment/merge yet. Callers use the minted token and
-  apply `action-allowed?` and the marker themselves.
+  apply `action-allowed?` and the marker themselves. The raw token is governed by
+  GitHub repository and permission scopes, not by `:policy/actions` or
+  `:policy/forbid`: holders can bypass those local checks. In particular,
+  Axxium does not guarantee no self-approval or self-merge for exported tokens.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
 - Nothing has been run against real GitHub.
 

@@ -46,16 +46,27 @@
 (defn- owner-repo-names [repos] (mapv #(second (str/split % #"/" 2)) repos))
 
 (defn mint-installation-token
-  "POST /app/installations/:id/access_tokens narrowed to `scope`."
+  "Verify the installation account before minting for its repositories."
   [fetch jwt installation-id {:scope/keys [repos permissions]}]
-  (-> (fetch (str api "/app/installations/" installation-id "/access_tokens")
-             #js {:method "POST" :headers (doto (headers (str "Bearer " jwt))
-                                            (aset "content-type" "application/json"))
-                  :body (js/JSON.stringify
-                         (clj->js {:repositories (owner-repo-names repos)
-                                   :permissions permissions}))})
-      (.then json)
-      (.then (fn [{:keys [token expires_at]}] {:token token :expires-at expires_at}))))
+  (let [url (str api "/app/installations/" installation-id)
+        auth (str "Bearer " jwt)]
+    (-> (fetch url #js {:method "GET" :headers (headers auth)})
+        (.then json)
+        (.then (fn [installation]
+                 (let [owner (get-in installation [:account :login])]
+                   (when-not (and (string? owner) (seq owner)
+                                  (every? #(= (str/lower-case owner)
+                                              (str/lower-case (first (str/split % #"/" 2))))
+                                          repos))
+                     (throw (ex-info "installation owner mismatch" {})))
+                   (fetch (str url "/access_tokens")
+                          #js {:method "POST" :headers (doto (headers auth)
+                                                        (aset "content-type" "application/json"))
+                               :body (js/JSON.stringify
+                                      (clj->js {:repositories (owner-repo-names repos)
+                                                :permissions permissions}))}))))
+        (.then json)
+        (.then (fn [{:keys [token expires_at]}] {:token token :expires-at expires_at})))))
 
 (defn read-key-file
   "Read an imported PEM in place, only from under `allowed-dir`."
