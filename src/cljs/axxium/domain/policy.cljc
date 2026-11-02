@@ -22,7 +22,7 @@
 (defn act
   "Append the decision, then the effect only when allowed.
    `ids` = {:decision-id :effect-id :at}. `effect` is an event spec without
-   :id, :at or :causes. Returns {:ledger :decision :effect}."
+   :id, :at or :causes, or nil when the decision itself is the record (e.g. a read). Returns {:ledger :decision :effect}."
   ([lg state request effect ids] (act lg state request effect ids (constantly false)))
   ([lg state request effect {:keys [decision-id effect-id at]} extra-allow?]
    (let [decision (decide state request extra-allow?)
@@ -32,7 +32,7 @@
                                         :actor (:actor request)
                                         :at at
                                         :body decision})]
-     (if (:decision/allow? decision)
+     (if (and (:decision/allow? decision) effect)
        (let [[lg'' e-event] (ledger/emit lg' (assoc effect
                                                     :id effect-id
                                                     :at at

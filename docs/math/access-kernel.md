@@ -56,3 +56,15 @@ flowchart LR
     A[actors] --- G[grants] --- R[resources] --- M["mbox/&lt;did&gt;"] --- Q[policy/decisions]
   end
 ```
+
+## Mailboxes (PR 3)
+
+- `send : Ledger × State × Principal × Did × Body → Ledger` is `act` with
+  request `(principal.did, mbox(to), :send)` and effect `:axxium.mbox/sent` on
+  `mbox(to)`. Rule: the owner of `mbox(d)` (actor `d`) may always act on it;
+  everyone else needs a live `:send` grant, directly or through a collective.
+- `read : Ledger × State × Principal → Ledger × [Event]` records a `:read`
+  decision and returns `L|mbox(principal.did)` only when allowed.
+- Principals come only from `law.principal`: `:atproto` (OAuth session DID) or
+  `:service-token` (Ed25519 instance-signed token with a `did` claim).
+  Wiring these into HTTP routes is a follow-up; the kernel refuses anything else.
