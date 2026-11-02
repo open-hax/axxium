@@ -23,7 +23,17 @@
 
 (def actor-kind :resource/bot-actor)
 (def credential-kind :resource/credential)
-(def credential-types #{:github-app :github-pat :ssh-key})
+(def credential-types
+  "Generic over what the secret is. :bootstrap-key is a per-agent device
+   credential stored only as a SHA-256 digest; the others are sealed."
+  #{:github-app :github-pat :ssh-key :api-key :bootstrap-key})
+
+(def actor-kinds
+  "Node kinds in the identity tree: a human root, grouping nodes (e.g. the
+   Grok Bots), machines, coding agents on a machine, and service bots."
+  #{:human :group :host :agent :bot})
+
+(def bootstrap-label "bootstrap")
 (def statuses #{:active :suspended :revoked})
 
 (defn actor-resource-id [did] (str "bot-actor:" did))

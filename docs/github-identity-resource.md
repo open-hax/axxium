@@ -99,3 +99,63 @@ and `token_for`.
   apply `action-allowed?` and the marker themselves.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
 - Nothing has been run against real GitHub.
+
+## Host agents (yoga, stealth)
+
+The seed `resources/identity/foresight-tree.edn` holds no secrets. It lists actor
+paths, which `resolve-seed` turns into `did:web:<host>:actors:<path>`. The
+seeded tree looks like this:
+
+```
+err (:human)
+├─ err:grokbots (:group) ─ grok-bot, pr-review-bot, <repo>-bot ×25 (:bot)
+├─ err:hosts:yoga (:host)    ─ opencode, codex, claude-code (:agent)
+└─ err:hosts:stealth (:host) ─ opencode, codex, claude-code (:agent)
+```
+
+Host agents get the shared fork policy: write access to the 25 forks, with
+`:approve-own`, `:merge-own` and `:force-push` forbidden. Each repo bot is
+limited to its own repo. Suspending a host suspends its agents (G3).
+
+### Credential kinds
+
+| kind | what is stored | typical use |
+| --- | --- | --- |
+| `:github-app` | sealed PEM, or a key-file path; plus app and installation ids | `token_for` |
+| `:api-key` | sealed secret, plus `:credential/provider` and `:credential/env` | model provider keys |
+| `:ssh-key` | sealed private key | git over SSH |
+| `:github-pat` | sealed token | a real user account, later |
+| `:bootstrap-key` | only its SHA-256 digest | the agent's device credential |
+
+### Bootstrap: an agent authenticates as itself
+
+1. A managing ancestor (Err or the host) calls `bootstrap_issue {:actor/did
+   <agent>}`. The key (`axb_…`) is returned once and only its digest is stored.
+   Calling `bootstrap_issue` again rotates the key, and the old one stops
+   working right away.
+2. The key is placed on the host, for example in a mode 0600 file for that
+   agent. Nothing else from the parent goes on the host.
+3. The agent calls `POST /api/identity/agent` with the headers
+   `x-axxium-actor: <its did>` and `authorization: Bearer <key>`. Only
+   `credentials_self`, `token_for` and `actor_list` are open on that route, and
+   every call runs as the agent itself. The agent only ever sees its own
+   credentials. The key stops working if the agent or any ancestor is suspended
+   or revoked.
+
+### How each tool would consume its credentials (wrapper sketch, not shipped)
+
+A small launcher on the host calls `credentials_self` and exports each
+`:api-key` under its `:credential/env`. It then calls `token_for` for a short-lived
+`GH_TOKEN`, and execs the tool.
+
+- **Codex CLI:** gets `OPENAI_API_KEY` and `GH_TOKEN` from the environment. The
+  launcher writes nothing to `~/.codex`.
+- **Claude Code:** gets `ANTHROPIC_API_KEY` and `GH_TOKEN` from the environment.
+- **OpenCode:** gets the provider keys it is configured for (for example
+  `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`) as env vars,
+  referenced from `opencode.json` as `{env:VAR}`, plus `GH_TOKEN`.
+- **git over SSH:** the `:ssh-key` is loaded into a per-process `ssh-agent`
+  (`ssh-add -`) and is never written to disk.
+
+GitHub tokens expire within an hour, and the launcher mints a new one on each
+run.

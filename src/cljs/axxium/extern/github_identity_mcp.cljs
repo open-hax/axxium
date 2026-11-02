@@ -10,6 +10,14 @@
    credential_rotate     new secret / installation id, generation + 1
    credential_revoke     terminal
    token_for             mint a scoped installation token (in-memory cache)
+   bootstrap_issue       ancestor issues/rotates an agent's device key;
+                         the plaintext is returned once, only a digest kept
+   credentials_self      the caller's own unsealed :api-key / :ssh-key /
+                         :github-pat secrets and :github-app metadata
+
+   Host-side agents call with ctx {:actor <own did>} established by
+   `authenticate` (did + bootstrap key), so they never hold a parent's
+   secrets and can only ever read their own.
 
    (call deps ctx tool args) -> Promise<{:ledger :result} | {:error ...}>
    deps = {:fetch :token-key :key-dir :cache (atom {}) :now (fn [] ms)
@@ -18,10 +26,27 @@
             [axxium.domain.state :as state]
             [axxium.extern.github-app :as gh]
             [axxium.extern.token-crypto :as tc]
-            [axxium.law.github-identity :as law]))
+            [axxium.law.github-identity :as law]
+            ["node:crypto" :as crypto]))
+
+(defn digest [key] (.digest (.update (crypto/createHash "sha256") key "utf8") "hex"))
+
+(defn authenticate
+  "The agent DID when `key` matches its current bootstrap digest and the
+   agent and every ancestor are effective; nil otherwise."
+  [st did key]
+  (let [want (some-> (gi/bootstrap-digest st did) (js/Buffer.from "hex"))
+        got (when (string? key) (js/Buffer.from (digest key) "hex"))]
+    (when (and want got (= (.-length want) (.-length got)) (crypto/timingSafeEqual want got))
+      did)))
 
 (def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke"
-             "credential_provision" "credential_rotate" "credential_revoke" "token_for"})
+             "credential_provision" "credential_rotate" "credential_revoke" "token_for"
+             "bootstrap_issue" "credentials_self"})
+
+(def agent-tools
+  "What a bootstrap-authenticated host agent may call."
+  #{"credentials_self" "token_for" "actor_list"})
 
 (defn- refuse [e] (js/Promise.resolve {:error e}))
 
@@ -31,11 +56,13 @@
 
 (defn- secret
   "Seal a PEM to the actor DID, or reference an imported key file."
-  [{:keys [token-key]} did {:credential/keys [pem key-file]}]
-  (cond (and pem token-key) {:credential/sealed (tc/seal token-key did pem)}
+  [{:keys [token-key]} did {:credential/keys [pem secret key-file]}]
+  (cond (and (or pem secret) token-key) {:credential/sealed (tc/seal token-key did (or pem secret))}
         key-file {:credential/key-file key-file}))
 
-(def ^:private public-meta [:github/app-id :github/app-slug :github/installation-id])
+(def ^:private public-meta
+  [:github/app-id :github/app-slug :github/installation-id
+   :credential/provider :credential/env])
 
 (defn- private-key [{:keys [token-key key-dir]} did cred]
   (let [{:credential/keys [sealed key-file]} (:resource/location cred)]
@@ -70,7 +97,7 @@
       "actor_resume" (js/Promise.resolve (effect-out (gi/resume lg st caller did (ids))))
       "actor_revoke" (js/Promise.resolve (effect-out (gi/revoke-actor lg st caller did (ids))))
       "credential_provision"
-      (if-let [s (secret deps did a)]
+      (if-let [s (when-not (= :bootstrap-key (:credential/type a)) (secret deps did a))]
         (js/Promise.resolve
          (effect-out (gi/provision-credential lg st caller did label
                                               (:credential/type a :github-app) s
@@ -84,11 +111,28 @@
                                                           [:credential/sealed :credential/key-file]))
                                          (select-keys a public-meta) (ids))))
       "credential_revoke" (js/Promise.resolve (effect-out (gi/revoke-credential lg st caller did label (ids))))
-      "token_for" (token-for! deps lg st caller a))))
+      "token_for" (token-for! deps lg st caller a)
+      "bootstrap_issue"
+      (let [key (str "axb_" (.toString (crypto/randomBytes 32) "base64url"))
+            out (gi/issue-bootstrap lg st caller did (digest key) (ids))]
+        (js/Promise.resolve
+         (if (:effect out)
+           {:ledger (:ledger out) :result {:actor/did did :bootstrap/key key}}
+           {:ledger (:ledger out) :error :forbidden})))
+      "credentials_self"
+      (js/Promise.resolve
+       {:result {:actor/did caller
+                 :credentials
+                 (mapv (fn [c]
+                         (let [{:credential/keys [type sealed]} (:resource/location c)]
+                           (cond-> (assoc (:resource/metadata c) :credential/type type)
+                             (and sealed (not= type :github-app))
+                             (assoc :credential/secret (tc/open-sealed (:token-key deps) caller sealed)))))
+                       (gi/own-credentials st caller))}}))))
 
 (defn- valid? [tool a]
   (and (map? a)
-       (or (= tool "actor_list") (string? (:actor/did a)))
+       (or (#{"actor_list" "credentials_self"} tool) (string? (:actor/did a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))
 

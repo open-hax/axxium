@@ -33,6 +33,9 @@
 (defn cookie [req name]
   (some-> req (aget "cookies") (aget name)))
 
+(defn header [req name]
+  (some-> req (aget "headers") (aget name)))
+
 (defn authorization [req]
   (some-> req (aget "headers") (aget "authorization")))
 

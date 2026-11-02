@@ -6,6 +6,9 @@
    GET  /api/github/manifest/callback  session = same parent; converts the
         one-time code, seals the App PEM to the child DID, registers it
    POST /api/github/mcp                session; {tool, arguments (EDN)}
+   POST /api/identity/agent            a host agent as itself:
+        x-axxium-actor: <agent did>, authorization: Bearer <bootstrap key>;
+        only credentials_self, token_for, actor_list
 
    The manifest state is a signed 5-minute cookie bound to parent + child,
    so a callback can only attach an App to the child its parent chose."
@@ -126,7 +129,25 @@
         (let [out (await (serialized #(mcp/call (deps %) {:actor (caller context)} tool args)))]
           (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
 
+(defn- ^:async agent! [req reply _context]
+  (if-not (configured?)
+    (http/send! reply 503 {:error "identities are not configured on this Axxium"})
+    (let [did (http/header req "x-axxium-actor")
+          key (some-> (http/authorization req) (str/replace #"^Bearer " ""))
+          self (mcp/authenticate (state/fold (current-ledger)) did key)
+          body (http/body req)
+          tool (some-> body .-tool)
+          args (try (edn/read-one (or (some-> body .-arguments) "{}")) (catch :default _ ::bad))]
+      (cond
+        (nil? self) (http/send! reply 401 {:error "unknown agent or bad bootstrap key"})
+        (not (contains? mcp/agent-tools tool)) (http/send! reply 403 {:error "tool not open to agents"})
+        (= ::bad args) (http/send! reply 400 {:error "arguments must be one EDN map"})
+        :else
+        (let [out (await (serialized #(mcp/call (deps %) {:actor self} tool args)))]
+          (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
+
 (defn register-github-identity-routes! [app]
+  (http/post! app "/api/identity/agent" (fn [req reply] (agent! req reply nil)))
   (http/post! app "/api/github/manifest" (auth-context/with-auth manifest!))
   (http/get! app law/manifest-callback-path (auth-context/with-auth callback!))
   (http/post! app "/api/github/mcp" (auth-context/with-auth mcp!)))

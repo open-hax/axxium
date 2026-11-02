@@ -6,7 +6,9 @@
    The rule for each operation is the hierarchy law in
    `axxium.law.github-identity`; an authority grant cannot bypass it,
    because a structurally invalid operation is decided with no effect."
-  (:require [axxium.domain.policy :as policy]
+  (:require [axxium.domain.ledger :as ledger]
+            [axxium.domain.policy :as policy]
+            [axxium.domain.state :as state]
             [axxium.law.github-identity :as law]))
 
 (defn actor-node [state did]
@@ -37,13 +39,16 @@
   [state operator did]
   (and (ancestor? state operator did) (effective? state operator)))
 
-(defn- node [did parent name pol status]
+(defn kind-of [state did] (get-in (actor-node state did) [:resource/metadata :actor/kind]))
+
+(defn- node [did parent name pol status & [kind]]
   {:resource/id (law/actor-resource-id did)
    :resource/kind law/actor-kind
    :resource/owner did
    :resource/store :axxium
    :resource/metadata {:actor/name name :actor/parent parent
-                       :actor/policy pol :actor/status status}})
+                       :actor/policy pol :actor/status status
+                       :actor/kind (or kind :bot)}})
 
 (defn- act
   "Decide (recorded), then register `r` only when `ok?` and the decision allows."
@@ -58,15 +63,18 @@
 (defn register-root
   "A human root (e.g. did:web:<host>:actors:err) registers itself."
   [lg state did name pol ids]
-  (act lg state did :register (node did nil name pol :active)
+  (act lg state did :register (node did nil name pol :active :human)
        (and (nil? (actor-node state did)) (law/valid-policy? pol)) ids))
 
 (defn provision-actor
-  "Parent creates a child bot actor whose policy is within its own (G1)."
-  [lg state parent did name pol ids]
-  (act lg state parent :provision (node did parent name pol :active)
-       (and (nil? (actor-node state did)) (effective? state parent)
-            (law/policy-within? pol (policy-of state parent))) ids))
+  "Parent creates a child actor whose policy is within its own (G1).
+   `kind` is one of law/actor-kinds other than :human (default :bot)."
+  ([lg state parent did name pol ids] (provision-actor lg state parent did name pol :bot ids))
+  ([lg state parent did name pol kind ids]
+   (act lg state parent :provision (node did parent name pol :active kind)
+        (and (nil? (actor-node state did)) (effective? state parent)
+             (contains? (disj law/actor-kinds :human) kind)
+             (law/policy-within? pol (policy-of state parent))) ids)))
 
 (defn- set-status [lg state operator did status ids]
   (let [n (actor-node state did)]
@@ -175,9 +183,64 @@
        (mapv (fn [d] {:actor/did d
                       :actor/name (get-in (actor-node state d) [:resource/metadata :actor/name])
                       :actor/parent (parent-of state d)
+                      :actor/kind (kind-of state d)
                       :actor/status (status-of state d)
                       :actor/effective? (boolean (effective? state d))
                       :actor/credentials (mapv #(select-keys (:resource/metadata %)
                                                              [:credential/label :credential/status
                                                               :credential/generation :github/app-slug])
                                                (credentials state d))}))))
+
+;; ------------------------------------------------------------ bootstrap
+
+(defn issue-bootstrap
+  "An ancestor issues (or rotates) an agent's device credential. Only its
+   SHA-256 digest is recorded; the plaintext is shown to the issuer once."
+  [lg state operator did digest ids]
+  (if (credential state did law/bootstrap-label)
+    (rotate-credential lg state operator did law/bootstrap-label {:credential/digest digest} {} ids)
+    (provision-credential lg state operator did law/bootstrap-label :bootstrap-key
+                          {:credential/digest digest} {} ids)))
+
+(defn bootstrap-digest
+  "The digest an agent must present, only while agent and ancestors are effective."
+  [state did]
+  (get-in (usable-credential state did law/bootstrap-label) [:resource/location :credential/digest]))
+
+(defn own-credentials
+  "An effective actor's active credentials other than its bootstrap key."
+  [state did]
+  (if (effective? state did)
+    (->> (credentials state did)
+         (filter #(= :active (get-in % [:resource/metadata :credential/status])))
+         (remove #(= :bootstrap-key (get-in % [:resource/location :credential/type])))
+         vec)
+    []))
+
+;; ------------------------------------------------------------------ seed
+
+(defn resolve-seed
+  "Turn a seed file (actor paths, :policy/forks shorthand) into DIDs on
+   `host`: path \"err:hosts:yoga\" -> did:web:<host>:actors:err:hosts:yoga."
+  [{:keys [forks root nodes]} host]
+  (let [did #(str "did:web:" host ":actors:" %)
+        pol #(if (= :policy/forks %) forks %)]
+    {:root {:did (did (:id root)) :name (:name root) :policy (pol (:policy root))}
+     :nodes (mapv (fn [n] {:did (did (:id n)) :parent (did (:parent n)) :name (:name n)
+                           :kind (:kind n) :policy (pol (:policy n))})
+                  nodes)}))
+
+(defn seed-ledger
+  "Build the tree described by a secret-free seed:
+   {:root {:did :name :policy} :nodes [{:did :parent :name :kind :policy}]}
+   in order (parents before children). Returns {:ledger :refused [dids]}."
+  [seed ids]
+  (let [{:keys [root nodes]} seed
+        lg0 (:ledger (register-root ledger/empty-ledger (state/fold ledger/empty-ledger)
+                                    (:did root) (:name root) (:policy root) (ids)))]
+    (reduce (fn [{lg :ledger :as acc} {:keys [did parent name kind policy]}]
+              (let [out (provision-actor lg (state/fold lg) parent did name policy kind (ids))]
+                (cond-> (assoc acc :ledger (:ledger out))
+                  (nil? (:effect out)) (update :refused conj did))))
+            {:ledger lg0 :refused []}
+            nodes)))
