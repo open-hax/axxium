@@ -2,7 +2,8 @@
  :dependencies
  [[metosin/malli "0.16.4"]
   [funcool/promesa "11.0.678"]
-  [com.github.seancorfield/honeysql "2.7.1368"]]
+  [com.github.seancorfield/honeysql "2.7.1368"]
+  [org.clojure/test.check "1.1.1"]]
  :nrepl {:port 4600}
  :js-options {:js-provider :import}
  :builds

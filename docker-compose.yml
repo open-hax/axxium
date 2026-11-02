@@ -15,7 +15,10 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-axxium_password}
       - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
       - JWT_ISSUER=axxium
-      - JWT_AUDIENCE=promethean
+      # aud is AXXIUM_SERVICE+AXXIUM_ENV. JWT_AUDIENCE is unset: the bare
+      # value promethean is not that audience and startup refuses it.
+      - AXXIUM_SERVICE=promethean
+      - AXXIUM_ENV=production
       - BCRYPT_SALT_ROUNDS=12
     depends_on:
       - axxium-db

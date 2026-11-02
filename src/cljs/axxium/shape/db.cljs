@@ -65,8 +65,10 @@
       (h/join [:actors :a] [:= :a.entity_id :e.id])
       (h/where [:= :a.id actor-id])))
 
-(defn select-active-agent-credential [token-hash]
-  (-> (h/select :a.*)
+(defn select-active-agent-credential
+  "Active agent actor for a bearer hash, keeping the credential id that acted."
+  [token-hash]
+  (-> (h/select :a.* [:c.id :credential_id])
       (h/from [:agent_credentials :c])
       (h/join [:actors :a] [:= :a.id :c.actor_id])
       (h/join [:entities :e] [:= :e.id :a.entity_id])
@@ -139,21 +141,26 @@
 ;; ---------------------------------------------------------------------------
 
 (defn insert-session
-  [{:keys [actor-id token-hash expires-at]}]
+  "Insert a session whose id is the cred_id already sealed into the token."
+  [{:keys [id actor-id token-hash expires-at]}]
   (-> (h/insert-into :sessions)
-      (h/values [{:actor_id actor-id
+      (h/values [{:id [:cast id :uuid]
+                  :actor_id actor-id
                   :token_hash token-hash
                   :expires_at expires-at}])
       (h/returning :*)))
 
 (defn select-actor-by-session
-  [actor-id token-hash]
-  (-> (h/select :a.*)
+  "Active actor for a session token, keeping the session id as credential_id.
+   The session id must be the cred_id the token carried."
+  [actor-id token-hash cred-id]
+  (-> (h/select :a.* [:s.id :credential_id])
       (h/from [:actors :a])
       (h/join [:sessions :s] [:= :a.id :s.actor_id])
       (h/where [:and
                 [:= :a.id actor-id]
                 [:= :s.token_hash token-hash]
+                [:= :s.id [:cast cred-id :uuid]]
                 [:= :a.status "active"]
                 [:> :s.expires_at [:now]]])))
 

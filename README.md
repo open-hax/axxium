@@ -104,14 +104,19 @@ All configuration is via environment variables:
 | `DB_NAME` | axxium | Database name |
 | `DB_USER` | axxium | Database user |
 | `DB_PASSWORD` | | Database password |
-| `JWT_SECRET` | change-me | JWT signing secret |
+| `JWT_SECRET` | change-me | HMAC secret for HS256 actor tokens and Google OAuth state |
+| `AXXIUM_ISS` | `JWT_ISSUER`, else `axxium` | Instance identifier sealed as the JWT `iss` |
+| `AXXIUM_SERVICE` | `promethean` | Service component of the audience |
+| `AXXIUM_ENV` | `NODE_ENV`, else `development` | Environment component of the audience and the `env` claim |
+| `JWT_AUDIENCE` | unset | Optional check only: must equal `AXXIUM_SERVICE+AXXIUM_ENV` (for example `promethean+development`). Leave it unset. `docker-compose.yml` and `.env.example` do not set it; a bare `promethean` is rejected at startup |
 | `AXXIUM_PUBLIC_BASE_URL` | http://127.0.0.1:8787 | Exact public origin for callbacks and CORS; AT OAuth requires a loopback IP for local redirects |
 | `AXXIUM_TRUST_PROXY` | unset | Fastify `trustProxy` behind a reverse proxy, so the per-client AT Protocol sign-in start limit (10/min; IPv6 clients keyed by /64) keys by the real client address. Set the trusted proxy addresses/CIDRs that match the proxy chain (`false` disables). Bare `true` is refused because it trusts every hop, so a client that reaches the port directly could spoof `X-Forwarded-For` and bypass the limit. Hop counts are refused because Fastify 5 trusts no proxy for them |
 | `GOOGLE_OAUTH_CLIENT_FILE` | | Private Google web OAuth client JSON path |
 | `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` | | Verified Google email granted admin on first actor creation |
-| `JWT_ISSUER` | axxium | JWT issuer |
-| `JWT_AUDIENCE` | promethean | JWT audience |
+| `JWT_ISSUER` | axxium | Fallback instance identifier when `AXXIUM_ISS` is unset |
 | `BCRYPT_SALT_ROUNDS` | 12 | Password hashing rounds |
+
+Actor tokens are admitted only when `iss` is this instance, `aud` is `service+env`, and the `env` claim is that same environment. Each token carries `cred_id`, the session or agent credential that acted. Tokens issued before those claims existed are rejected.
 
 ## Architecture
 
