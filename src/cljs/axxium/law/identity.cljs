@@ -4,6 +4,8 @@
 (def credentials
   [:map [:email [:re #"^[^\s@]+@[^\s@]+\.[^\s@]+$"]]
    [:password [:string {:min 12 :max 72}]]])
+(def login-credentials
+  [:map [:email [:string {:min 1}]] [:password [:string {:min 1 :max 72}]]])
 (def transfer-claims
   [:map [:sub [:string {:min 1 :max 128}]]
    [:entity_id [:string {:min 1 :max 128}]]
