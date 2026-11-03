@@ -29,8 +29,10 @@
         persisted (await (store/register! actor (cfg/get-in-config [:axxium/public-base-url]) nil))]
     (await (session-response! persisted))))
 (defn ^:async login! "Authenticate against this recipient's persisted password and account." [request]
-  (let [{:keys [email password]} (credentials! request)
-        actor (await (db/query-one-sql (db/q-select-actor-by-email-active email)))]
+  (let [{:keys [email password] :as body} (identity/normalize-credentials (:body request))
+        _ (law/require-valid! law/login-credentials body)
+        actor (when (bcrypt/within-limit? password)
+                (await (db/query-one-sql (db/q-select-actor-by-email-active email))))]
     (when-not (and actor (await (bcrypt/compare password (:password_hash actor))))
       (throw (ex-info "Invalid email or password" {:status 401 :code "invalid_credentials"})))
     (await (session-response! actor))))
