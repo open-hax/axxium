@@ -2,7 +2,7 @@
   (:require [axxium.domain.identity :as identity]
             [axxium.law.identity :as law]
             [axxium.shape.db :as queries]
-            [cljs.test :refer [deftest is testing]]
+            [cljs.test :refer [deftest is]]
             [honey.sql :as sql]))
 (def sample-claims
   {:sub "actor_one" :entity_id "entity_one" :email "person@example.test"
