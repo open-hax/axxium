@@ -31,8 +31,9 @@
 (defn ^:async login! "Authenticate against this recipient's persisted password and account." [request]
   (let [{:keys [email password] :as body} (identity/normalize-credentials (:body request))
         _ (law/require-valid! law/login-credentials body)
-        actor (when (bcrypt/within-limit? password)
-                (await (db/query-one-sql (db/q-select-actor-by-email-active email))))]
+        _ (when-not (bcrypt/within-limit? password)
+            (throw (ex-info "Password exceeds the supported byte length" {:status 400 :code "invalid_request"})))
+        actor (await (db/query-one-sql (db/q-select-actor-by-email-active email)))]
     (when-not (and actor (await (bcrypt/compare password (:password_hash actor))))
       (throw (ex-info "Invalid email or password" {:status 401 :code "invalid_credentials"})))
     (await (session-response! actor))))

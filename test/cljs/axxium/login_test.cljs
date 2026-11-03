@@ -27,8 +27,12 @@
            (doseq [password [(str password72 "x") (apply str (repeat 37 "é"))]]
              (let [before (count @calls)
                    error (try (await (auth/login! {:body {:email "legacy-user" :password password}}))
-                              nil (catch :default e (ex-data e)))]
-               (is (= {:status 401 :code "invalid_credentials"} error))
+                              nil (catch :default e {:data (ex-data e) :message (ex-message e)}))]
+               (is (= {:status 400 :code "invalid_request"} (:data error)))
+               (is (= (if (= password (str password72 "x"))
+                        "Invalid identity request"
+                        "Password exceeds the supported byte length")
+                      (:message error)))
                (is (= before (count @calls)))))
            (reset! actor (assoc @actor :password_hash multibyte-hash))
            (is (true? (get-in (await (auth/login! {:body {:email " LEGACY-USER " :password multibyte72}})) [:body :ok])))
