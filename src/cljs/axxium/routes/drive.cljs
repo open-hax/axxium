@@ -1,6 +1,6 @@
 (ns axxium.routes.drive
   "Connect a signed-in actor's own Google Drive (drive.file, offline) and
-   expose the Drive MCP tools over HTTP.
+   expose Drive tool names through an application-specific EDN RPC.
 
    GET  /api/drive/connect   session required; redirects to Google
    GET  /api/drive/callback  session required; seals the refresh token
@@ -17,7 +17,7 @@
             [axxium.extern.google-drive :as gd]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
-            [axxium.extern.ledger-file :as ledger-file]
+            [axxium.extern.ledger-queue :as ledger-queue]
             [axxium.extern.signing-key :as signing-key]
             [axxium.extern.token-crypto :as tc]
             [axxium.law.google-drive :as law]
@@ -42,27 +42,11 @@
     {:private-key (:private-key material) :public-key (:public-key material)
      :kid (:kid material) :issuer (cfg/get-in-config [:jwt/issuer])}))
 
-;; One in-process writer: every ledger change is chained, appended as one
-;; fsynced batch, then becomes the current value.
-(defonce ^:private ledger (atom nil))
-(defonce ^:private queue (atom (js/Promise.resolve nil)))
+;; One in-process writer; the adapter reloads after uncertain disk writes.
+(defonce ^:private ledger-writer (ledger-queue/create))
 
-(defn- current-ledger []
-  (or @ledger (reset! ledger (ledger-file/load-ledger (ledger-path)))))
-
-(defn- serialized
-  "Run (f ledger) -> Promise<{:ledger ...}> exclusively and persist its ledger."
-  [f]
-  (let [run (.then @queue
-                   (fn [_]
-                     (let [before (current-ledger)]
-                       (.then (f before)
-                              (fn [out]
-                                (when-let [after (:ledger out)]
-                                  (reset! ledger (ledger-file/append-batch! (ledger-path) before after)))
-                                out)))))]
-    (reset! queue (.catch run (fn [_] nil)))
-    run))
+(defn- serialized [f]
+  (ledger-queue/submit! ledger-writer (ledger-path) f))
 
 (defn- ids []
   {:decision-id (str (random-uuid)) :effect-id (str (random-uuid)) :at (js/Date.)})
@@ -92,7 +76,7 @@
     (if-not (and bound? (seq code) (configured?))
       (http/send! reply 400 {:error "Invalid or expired Drive connect state"})
       (try
-        (let [tokens (await (gd/exchange-code js/fetch (assoc (google/drive-client)
+        (let [tokens (await (gd/exchange-code gd/timed-fetch (assoc (google/drive-client)
                                                               :redirect-uri (redirect-uri)
                                                               :code code
                                                               :verifier (:verifier opened))))
@@ -108,8 +92,7 @@
             (let [sealed-token (tc/seal (token-key) did (:refresh_token tokens))
                   out (await (serialized
                               (fn [lg]
-                                (js/Promise.resolve
-                                 (drive/connect lg (state/fold lg) did sealed-token (ids))))))]
+                                (drive/connect lg (state/fold lg) did sealed-token (ids)))))]
               (if (:effect out)
                 (http/redirect! reply "/portal/index.html?drive=connected")
                 (http/send! reply 403 {:error "Drive credential registration refused"})))))
@@ -121,13 +104,13 @@
   (if-not (configured?)
     (http/send! reply 503 {:error "Google Drive is not configured on this Axxium"})
     (let [body (http/body req)
-          tool (some-> body .-tool)
-          args (try (edn/read-one (or (some-> body .-arguments) "{}")) (catch :default _ ::bad))]
+          tool (:tool body)
+          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (if (= ::bad args)
         (http/send! reply 400 {:error "arguments must be one EDN map"})
         (let [out (await (serialized
                           (fn [lg]
-                            (drive-mcp/call {:fetch js/fetch :token-key (token-key)
+                            (drive-mcp/call {:fetch gd/timed-fetch :token-key (token-key)
                                              :client (google/drive-client)
                                              :ledger lg :ids ids}
                                             {:owner (owner context)} tool args))))]

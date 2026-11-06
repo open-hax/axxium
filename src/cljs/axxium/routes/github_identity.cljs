@@ -23,6 +23,7 @@
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
             [axxium.extern.ledger-file :as ledger-file]
+            [axxium.extern.ledger-queue :as ledger-queue]
             [axxium.extern.signing-key :as signing-key]
             [axxium.extern.token-crypto :as tc]
             [axxium.law.github-identity :as law]
@@ -45,24 +46,14 @@
     {:private-key (:private-key m) :public-key (:public-key m)
      :kid (:kid m) :issuer (cfg/get-in-config [:jwt/issuer])}))
 
-(defonce ^:private ledger (atom nil))
-(defonce ^:private queue (atom (js/Promise.resolve nil)))
+(defonce ^:private ledger-writer (ledger-queue/create))
 (defonce ^:private token-cache (atom {}))
 
 (defn- current-ledger []
-  (or @ledger (reset! ledger (ledger-file/load-ledger (ledger-path)))))
+  (ledger-queue/current-ledger ledger-writer (ledger-path)))
 
 (defn- serialized [f]
-  (let [run (.then @queue
-                   (fn [_]
-                     (let [before (current-ledger)]
-                       (.then (f before)
-                              (fn [out]
-                                (when-let [after (:ledger out)]
-                                  (reset! ledger (ledger-file/append-batch! (ledger-path) before after)))
-                                out)))))]
-    (reset! queue (.catch run (fn [_] nil)))
-    run))
+  (ledger-queue/submit! ledger-writer (ledger-path) f))
 
 (defn- ids [] {:decision-id (str (random-uuid)) :effect-id (str (random-uuid)) :at (js/Date.)})
 
@@ -107,12 +98,11 @@
               app (await (gh/convert-manifest js/fetch code))
               out (await (serialized
                           (fn [lg]
-                            (js/Promise.resolve
-                             (gi/provision-credential
+                            (gi/provision-credential
                               lg (state/fold lg) parent child "github-app" :github-app
                               {:credential/sealed (tc/seal (token-key) child (:pem app))}
                               {:github/app-id (:id app) :github/app-slug (:slug app)}
-                              (ids))))))]
+                              (ids)))))]
           (if (:effect out)
             (http/redirect! reply (str "https://github.com/apps/" (:slug app) "/installations/new"))
             (http/send! reply 403 {:error "credential registration refused"})))
@@ -131,22 +121,30 @@
         (let [out (await (serialized #(mcp/call (deps %) {:actor (caller context)} tool args)))]
           (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
 
+(defn ^:async agent-operation
+  "Authenticate and execute an agent tool against one serialized ledger snapshot."
+  [lg did key tool args]
+  (let [self (mcp/authenticate (state/fold lg) did key)]
+    (cond
+      (nil? self) {:agent/status 401 :agent/error "unknown agent or bad bootstrap key"}
+      (not (contains? mcp/agent-tools tool)) {:agent/status 403 :agent/error "tool not open to agents"}
+      (= ::bad args) {:agent/status 400 :agent/error "arguments must be one EDN map"}
+      :else (let [out (await (mcp/call (deps lg) {:actor self} tool args))]
+              (assoc out :agent/status (if (:error out) 400 200))))))
+
 (defn- ^:async agent! [req reply _context]
   (if-not (configured?)
     (http/send! reply 503 {:error "identities are not configured on this Axxium"})
     (let [did (http/header req "x-axxium-actor")
           key (some-> (http/authorization req) (str/replace #"^Bearer " ""))
-          self (mcp/authenticate (state/fold (current-ledger)) did key)
           body (http/body req)
           tool (:tool body)
-          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
-      (cond
-        (nil? self) (http/send! reply 401 {:error "unknown agent or bad bootstrap key"})
-        (not (contains? mcp/agent-tools tool)) (http/send! reply 403 {:error "tool not open to agents"})
-        (= ::bad args) (http/send! reply 400 {:error "arguments must be one EDN map"})
-        :else
-        (let [out (await (serialized #(mcp/call (deps %) {:actor self} tool args)))]
-          (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
+          args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))
+          out (await (serialized #(agent-operation % did key tool args)))
+          status (:agent/status out)]
+      (if-let [error (:agent/error out)]
+        (http/send! reply status {:error error})
+        (http/send-secret! reply status {:edn (pr-str (dissoc out :ledger :agent/status))})))))
 
 (defn- host [] (str/replace (base-url) #"^https?://" ""))
 
@@ -166,16 +164,22 @@
     (when (configured?)
       (let [seed (gi/resolve-seed (edn/read-one (ledger-file/read-text path)) (host))
             out (await (serialized
-                        #(js/Promise.resolve
-                          (gi/apply-seed % (get-in seed [:root :did]) seed ids))))]
+                        #(gi/apply-seed % (get-in seed [:root :did]) seed ids)))]
         (println "Identity seed:" (count (:created out)) "created,"
                  (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
         out))))
 
+(defn- ^:async apply-seed-safely! []
+  (try
+    (await (apply-seed-file!))
+    (catch :default e
+      (println "Identity seed failed:" (ex-message e)))))
+
 (defn register-github-identity-routes! [app]
   (http/post! app "/api/identity/admin" (auth-context/with-auth admin!))
-  (.catch (apply-seed-file!) (fn [e] (println "Identity seed failed:" (ex-message e))))
+  (apply-seed-safely!)
   (http/post! app "/api/identity/agent" (fn [req reply] (agent! req reply nil)))
   (http/post! app "/api/github/manifest" (auth-context/with-auth manifest!))
   (http/get! app law/manifest-callback-path (auth-context/with-auth callback!))
   (http/post! app "/api/github/mcp" (auth-context/with-auth mcp!)))
+

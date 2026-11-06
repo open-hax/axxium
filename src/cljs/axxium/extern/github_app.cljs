@@ -74,3 +74,4 @@
       (.then (mint!) (fn [t] (swap! cache assoc k t) t)))))
 
 (defn manifest-json [manifest] (js/JSON.stringify (clj->js manifest)))
+

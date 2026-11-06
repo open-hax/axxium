@@ -1,8 +1,10 @@
 # Google Drive resource
 
 Any Axxium user signs in with Google and links **their own** Drive. Axxium
-holds a sealed refresh token per identity and exposes put/get/list as MCP
-tools. OpenPlanner and agents address Drive files by **resource id**.
+holds a sealed refresh token per identity and exposes put/get/list through a
+Drive-specific EDN RPC that reuses MCP tool names. `/api/drive/mcp` is not a
+standard MCP JSON-RPC endpoint: it does not implement `initialize`, `tools/list`
+or `tools/call`. OpenPlanner and agents address Drive files by **resource id**.
 
 ## Model
 
@@ -53,9 +55,9 @@ Unconfigured, the routes answer 503.
 |---|---|
 | `GET /api/drive/connect` | session required; signed 5-minute state cookie (actor-bound) + PKCE; redirects to Google with `access_type=offline prompt=consent` |
 | `GET /api/drive/callback` | session must match the state's actor; exchanges the code, checks the scope, seals and registers the credential |
-| `POST /api/drive/mcp` | session required; body `{"tool": "drive_put", "arguments": "<EDN map>"}`; reply `{"edn": "<EDN>"}` |
+| `POST /api/drive/mcp` | Drive-specific EDN RPC, session required; body `{"tool": "drive_put", "arguments": "<EDN map>"}`; reply `{"edn": "<EDN>"}`; not standard MCP JSON-RPC |
 
-## MCP tools (`axxium.extern.drive-mcp/call`)
+## Drive RPC tool names (`axxium.extern.drive-mcp/call`)
 
 ```clojure
 (call deps {:owner did} "drive_put"  {:drive/name "x.edn" :drive/folder-id "F"
@@ -70,9 +72,22 @@ Unconfigured, the routes answer 503.
 The caller persists `:ledger`; the HTTP route serializes calls in-process
 and appends each batch as one fsynced write.
 
+Every Google request has a 15-second timeout, including OAuth exchange and
+refresh. Caller cancellation is preserved.
+
+Reconciliation: a same-name file already registered to this owner returns
+`:exists`. A matching Google file absent from the owner's registry returns
+`:exists-untracked` with `:drive/existing` file ids. A create followed by refused
+registration returns `:created-untracked`, `:drive/reason :forbidden` and its
+file id. A local append failure returns no success; retrying then exposes the
+untracked file. These states require explicit reconciliation: names alone do
+not authorize adoption, replacement or a duplicate upload.
+
 ## Open
 
 - Ledger writes are single-process; multi-instance needs a shared store.
+- Recovery repairs incomplete final lines, but does not prove multi-event
+  batch atomicity after a crash.
 - Listing reads Axxium's registry, not Drive; files created outside Axxium are invisible (by design under `drive.file`).
 - Large blobs use multipart upload (≤5 MB); resumable upload is a follow-up.
 - Clio EDN↔JSON tagged mapping (clio#7) is not used; the HTTP body carries EDN text.

@@ -210,3 +210,4 @@
         (.then (fn [app] (is (= "widgets-bot" (:slug app))) (is (= 9001 (:id app)))))
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
+

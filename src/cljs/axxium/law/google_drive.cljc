@@ -15,6 +15,8 @@
 
 (def callback-path "/api/drive/callback")
 
+(def request-timeout-ms 15000)
+
 (defn authorization-params
   "Query parameters for the connect redirect. `challenge` is the S256 PKCE
    challenge; `state` binds the callback to the connecting actor."

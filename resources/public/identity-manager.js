@@ -192,3 +192,4 @@ class AxxiumIdentityManager extends HTMLElement {
 }
 
 customElements.define('axxium-identity-manager', AxxiumIdentityManager);
+

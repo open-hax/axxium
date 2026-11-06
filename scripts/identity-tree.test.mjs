@@ -15,3 +15,4 @@ test('policy fields round-trip', () => {
   assert.deepEqual(policyFromFields(fieldsFromPolicy(p)), p);
   assert.deepEqual(parsePermissions('contents=write,, bad, issues=read'), { contents: 'write', issues: 'read' });
 });
+

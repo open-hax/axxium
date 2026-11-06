@@ -1,7 +1,24 @@
 (ns axxium.extern.google-drive
   "Google Drive REST boundary. `fetch` is injected so tests never touch the
    network. Deliberately exposes no delete, trash or overwrite call."
-  (:require [clojure.string :as str]))
+  (:require [axxium.law.google-drive :as law]
+            [clojure.string :as str]))
+
+(defn with-timeout
+  "Bound each fetch while preserving options and any caller cancellation."
+  [fetch timeout-ms]
+  (fn [url opts]
+    (let [deadline (js/AbortSignal.timeout timeout-ms)
+          prior (some-> opts .-signal)
+          signal (if prior (js/AbortSignal.any #js [prior deadline]) deadline)
+          options (js/Object.assign #js {} opts)]
+      (set! (.-signal options) signal)
+      (fetch url options))))
+
+(defn timed-fetch
+  "Google requests have a bounded wait even without a caller cancellation."
+  [url opts]
+  ((with-timeout js/fetch law/request-timeout-ms) url opts))
 
 (def token-endpoint "https://oauth2.googleapis.com/token")
 (def files-endpoint "https://www.googleapis.com/drive/v3/files")
@@ -11,12 +28,15 @@
   (str/join "&" (for [[k v] m] (str (js/encodeURIComponent k) "=" (js/encodeURIComponent v)))))
 
 (defn- json-body [resp]
-  (-> (.json resp)
-      (.then (fn [body]
-               (if (.-ok resp)
-                 (js->clj body :keywordize-keys true)
-                 (throw (ex-info "google drive request failed"
-                                 {:status (.-status resp)})))))))
+  (if (.-ok resp)
+    (-> (.json resp) (.then #(js->clj % :keywordize-keys true)))
+    (-> (.json resp)
+        (.catch (fn [_] nil))
+        (.then (fn [body]
+                 (let [oauth-error (some-> body (aget "error"))]
+                   (throw (ex-info "google drive request failed"
+                                   (cond-> {:status (.-status resp)}
+                                     (string? oauth-error) (assoc :oauth-error oauth-error))))))))))
 
 (defn- token-request [fetch params]
   (-> (fetch token-endpoint

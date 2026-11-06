@@ -282,3 +282,4 @@
                        (let [m (:resource/metadata (actor-node state d))]
                          {:id d :parent (:actor/parent m) :kind (:actor/kind m)
                           :name (:actor/name m) :policy (:actor/policy m)}))))})
+

@@ -141,3 +141,4 @@
     (str "postgresql://" user 
          (when (seq password) (str ":" password))
          "@" host ":" port "/" name)))
+

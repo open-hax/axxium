@@ -89,10 +89,15 @@ Laws:
 - M1 (fail closed): no principal, unknown session, session/principal mismatch, wrong audience, expired session, forged `from`, or missing/revoked grant ⇒ Error, and the ledger gains at most a refusal decision.
 - M2 (idempotence): `send(k, b)` twice ⇒ same message and receipt, one event; `send(k, b')` with b' ≠ b ⇒ `:idempotency-conflict`.
 - M3 (atomic batch): decision, message+receipt, and outbox entry are one ledger transition; persistence writes that batch in one fsynced write.
-- M4 (exactly-once dispatch): `dispatch ∘ dispatch = dispatch` on pending entries; replay after a crash neither loses nor duplicates.
-- M5 (cursor): `read_inbox` defaults to the last acknowledged seq, so a reconnecting worker resumes there.
+- M4 (at-most-once push planning): `dispatch ∘ dispatch = dispatch` on pending entries. A persisted plan suppresses replay; recording the plan and sending externally are not atomic, so a crash can prevent push delivery. Durable polling is the fallback; exactly-once delivery is not claimed.
+- M5 (cursor): `read_inbox` defaults to the highest sequence in the contiguous acknowledged prefix. Acknowledgments are per message, so acknowledging a later message cannot skip earlier unacknowledged messages; `acknowledge_message` returns this same durable cursor.
 - M6 (no false claims): notification ⇏ execution (`:delivery/execution :unknown`); push only to sessions that declared push; others are `:poll`.
 - M7 (no secrets): bodies with credential-like keys or values are refused; notifications carry no payload.
+
+Persistence qualification: the current line-append adapter fsyncs before success
+and repairs an incomplete final line. It does not prove crash-atomic admission
+of a multi-event batch; M3's durable all-or-nothing requirement remains a store
+qualification gap.
 
 ```mermaid
 flowchart LR

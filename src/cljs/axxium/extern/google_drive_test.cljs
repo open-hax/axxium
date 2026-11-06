@@ -56,3 +56,49 @@
                    (is (every? #(contains? #{nil "POST"} (second %)) @calls))))
           (.catch (fn [e] (is false (pr-str e))))
           (.finally done)))))
+
+(defn- ^:async timeout-options* []
+  (let [controller (js/AbortController.)
+        headers #js {:authorization "Bearer fixture"}
+        opts #js {:method "POST" :body "fixture" :headers headers :signal (.-signal controller)}
+        seen (atom nil)
+        fetch (fn [url options] (reset! seen [url options]) (js/Promise.resolve :ok))
+        bounded (gd/with-timeout fetch 5)]
+    (is (= :ok (await (bounded "https://fixture.invalid" opts))))
+    (let [[url actual] @seen]
+      (is (= "https://fixture.invalid" url))
+      (is (= "POST" (.-method actual)))
+      (is (= "fixture" (.-body actual)))
+      (is (identical? headers (.-headers actual)))
+      (is (identical? (.-signal controller) (.-signal opts)) "input options are not mutated")
+      (is (not (identical? (.-signal controller) (.-signal actual))) "caller signal cannot override the timeout")
+      (await (js/Promise. (fn [resolve _] (js/setTimeout resolve 20))))
+      (is (true? (.-aborted (.-signal actual))) "the timeout aborts even while the caller remains live")
+      (is (false? (.-aborted (.-signal controller))))))
+  (let [controller (js/AbortController.)
+        seen (atom nil)
+        bounded (gd/with-timeout (fn [_ opts] (reset! seen (.-signal opts))) 10000)]
+    (bounded "https://fixture.invalid" #js {:signal (.-signal controller)})
+    (.abort controller)
+    (is (true? (.-aborted @seen)) "earlier caller cancellation also propagates")))
+
+(deftest timeout-preserves-options-and-caller-cancellation
+  (async done
+    (-> (timeout-options*)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
+(defn- ^:async provider-error-details* []
+  (doseq [[body expected] [[(fn [] (js/Promise.reject (js/Error. "invalid JSON"))) {:status 503}]
+                           [(fn [] (js/Promise.resolve #js {:error "invalid_grant"}))
+                            {:status 400 :oauth-error "invalid_grant"}]]]
+    (let [fetch (fn [_ _] (js/Promise.resolve #js {:ok false :status (:status expected) :json body}))
+          data (try (await (gd/refresh-access-token fetch {})) nil
+                    (catch :default e (ex-data e)))]
+      (is (= expected data)))))
+
+(deftest provider-errors-preserve-status
+  (async done
+    (-> (provider-error-details*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))

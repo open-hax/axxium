@@ -161,4 +161,42 @@
 (deftest actor-did-is-admitted
   (is (= "did:web:axxium.example:actors:actor_1" (law/actor-did "https://axxium.example" "actor_1")))
   (is (= "did:web:localhost%3A8787:actors:actor_1" (law/actor-did "http://localhost:8787/" "actor_1")))
-  (is (drive/owned-files (state/fold ledger/empty-ledger) fx/alice) []))
+  (is (= [] (drive/owned-files (state/fold ledger/empty-ledger) fx/alice))))
+
+(defn- ^:async rejected-registration* []
+  (let [key (crypto/randomBytes 32) files (atom {}) calls (atom [])
+        lg (ctx-ledger key)
+        deps {:fetch (fake-drive files calls "1//refresh-alice") :token-key key
+              :client {:client-id "c" :client-secret "s"} :ids (counter-ids) :ledger lg}
+        args {:drive/name "orphan.edn" :drive/value {:synthetic true}}
+        first (with-redefs [drive/record-put (fn [ledger & _] {:ledger ledger})]
+                (await (mcp/call deps {:owner fx/alice} "drive_put" args)))
+        retried (await (mcp/call deps {:owner fx/alice} "drive_put" args))]
+    (is (= :created-untracked (:error first)))
+    (is (= :forbidden (:drive/reason first)))
+    (is (= ["file1"] (:drive/existing first)))
+    (is (= :exists-untracked (:error retried)))
+    (is (= ["file1"] (:drive/existing retried)))
+    (is (= 1 (count @files)))
+    (is (= [] (drive/owned-files (state/fold lg) fx/alice)))))
+
+(deftest rejected-registration-is-an-explicit-reconciliation-state
+  (async done
+    (-> (rejected-registration*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))
+
+(defn- ^:async refresh-error-classification* []
+  (let [key (crypto/randomBytes 32)
+        deps {:token-key key :client {} :ids (counter-ids) :ledger (ctx-ledger key)}
+        call-with (fn [body]
+                    (mcp/call (assoc deps :fetch (fn [_ _] (js/Promise.resolve (respond 400 body))))
+                              {:owner fx/alice} "drive_put" {:drive/name "a" :drive/value 1}))]
+    (is (= :not-connected (:error (await (call-with {:error "invalid_grant"})))))
+    (is (= :drive-unavailable (:error (await (call-with {:error "server_error"})))))))
+
+(deftest refresh-errors-distinguish-reconnection-from-outage
+  (async done
+    (-> (refresh-error-classification*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))
