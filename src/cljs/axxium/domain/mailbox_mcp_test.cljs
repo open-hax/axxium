@@ -205,7 +205,10 @@
     (doseq [name ["whoami" "resolve_address" "get_delivery"]]
       (is (true? (get-in descriptors [name "annotations" "readOnlyHint"]))))
     (is (true? (get-in descriptors ["send_message" "annotations" "idempotentHint"])))
+    (is (true? (get-in descriptors ["send_message" "annotations" "openWorldHint"]))
+        "sending to another DID interacts with an external actor")
     (doseq [name ["grant_send" "revoke_send"]]
       (is (false? (get-in descriptors [name "annotations" "readOnlyHint"])))
       (is (true? (get-in descriptors [name "annotations" "destructiveHint"]))))
     (is (re-find #"tools/list" (get-in out [:response "result" "content" 0 "text"])))))
+

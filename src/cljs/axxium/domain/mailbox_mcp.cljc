@@ -376,7 +376,7 @@
    (tool "resolve_address" "Resolve a DID or mbox/<did> to a mailbox." {"address" str-schema} ["address"] read-hints)
    (tool "send_message" "Send to a mailbox. Repeating an idempotency key with the same body returns the original receipt."
          {"to" str-schema "from" str-schema "idempotency_key" str-schema "body" {"type" "object"}}
-         ["to" "idempotency_key" "body"] {"idempotentHint" true})
+         ["to" "idempotency_key" "body"] {"idempotentHint" true "openWorldHint" true})
    (tool "read_inbox" "Read messages after a cursor (default: contiguous acknowledged prefix)."
          {"mailbox" str-schema "after" {"type" "integer"}} [] read-hints)
    (tool "acknowledge_message" "Acknowledge one message; return the contiguous durable cursor."
@@ -479,3 +479,4 @@
   [lg ctx request]
   (cond-> (rpc-request lg ctx request)
     (not (contains? request "id")) (assoc :response nil)))
+
