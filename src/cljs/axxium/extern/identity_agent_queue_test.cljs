@@ -14,7 +14,7 @@
         called (atom 0)]
     (with-redefs [disk/load-ledger (fn [_] @durable)
                   disk/append-batch! (fn [_ _ after] (reset! durable after))
-                  state/fold identity
+                  state/fold (fn ([ledger] ledger) ([_ ledger] ledger))
                   cfg/get-in-config (fn [_] nil)
                   tc/read-key-file (fn [_] nil)
                   mcp/authenticate (fn [st did key]
