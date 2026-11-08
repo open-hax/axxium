@@ -50,6 +50,35 @@
   (is (= {:bootstrapKey "axb_x" :shownOnce true}
          (admin/result->view "bootstrap-issue" {:actor/did agent :bootstrap/key "axb_x"} pr-str {}))))
 
+(defn- ^:async selected-parent-creation []
+  (let [ids (counter-ids)
+        lg (seeded ids)
+        bots (did "alice:bots")
+        create {:op "create" :parent laptop :slug "helper" :kind "agent" :policy team-json}
+        admin! (fn [ledger caller request]
+                 (mcp/admin {:ledger ledger :ids ids} caller request {:read-edn edn/read-one :host host}))
+        outside (await (admin! lg laptop (assoc create :parent bots)))
+        wider (await (admin! lg alice (assoc-in create [:policy :actions] ["read" "merge"])))
+        {:keys [status ledger]} (await (admin! lg alice create))
+        st (state/fold ledger)
+        child (str laptop ":helper")]
+    (is (= 403 (:status outside)) "a caller cannot create under a sibling")
+    (is (= 403 (:status wider)) "selected parent limits the child's policy")
+    (is (= 200 status))
+    (is (= laptop (gi/parent-of st child)))
+    (is (= alice (:event/actor (peek ledger))))
+    (is (nil? (gi/actor-node st (str alice ":helper"))))
+    (let [suspended (await (admin! ledger alice {:op "suspend" :did laptop}))
+          under-suspended (await (admin! (:ledger suspended) alice (assoc create :slug "other")))]
+      (is (not (gi/effective? (state/fold (:ledger suspended)) child)))
+      (is (= 403 (:status under-suspended))))))
+
+(deftest portal-creates-beneath-the-authorized-selected-parent
+  (async done
+    (-> (selected-parent-creation)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
 (deftest admin-handler-end-to-end
   (async done
     (let [ids (counter-ids)

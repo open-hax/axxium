@@ -28,6 +28,11 @@
      :tail-bytes (when (< end (count text)) (.-length (js/Buffer.from complete "utf8")))}))
 
 (def ^:private mailbox-batch-tag :axxium.mailbox/batch-v1)
+(def ^:private mailbox-capacity-bytes (* 2 1024 1024))
+
+(defn- require-mailbox-capacity! [size]
+  (when (> size mailbox-capacity-bytes)
+    (throw (ex-info "Mailbox ledger capacity exceeded" {:reason :mailbox-ledger-capacity}))))
 
 (defn- mailbox-frame-events [frame]
   (let [events (cond
@@ -88,7 +93,7 @@
       (let [stat (fs/fstatSync fd)]
         (when-not (and (private-stat? stat) (same-file? stat expected))
           (throw (private-file-error)))
-        (f fd))
+        (f fd stat))
       (finally (fs/closeSync fd)))))
 
 (defn private-ledger-storage
@@ -107,7 +112,8 @@
     {:load! (fn [path]
               (with-private-file
                 path expected (.-O_RDWR fs/constants)
-                (fn [fd]
+                (fn [fd stat]
+                  (require-mailbox-capacity! (.-size stat))
                   (let [{:keys [events tail-bytes]} (decode-mailbox-ledger (fs/readFileSync fd))]
                     (when (some? tail-bytes) (fs/ftruncateSync fd tail-bytes))
                     events))))
@@ -115,7 +121,10 @@
                 (let [batch (subvec (vec after) (count before))]
                   (with-private-file
                     path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants))
-                    (fn [fd]
+                    (fn [fd stat]
                       (when (seq batch)
-                        (append-text! fd (str (pr-str (into [mailbox-batch-tag] batch)) "\n")))
+                        (let [frame (str (pr-str (into [mailbox-batch-tag] batch)) "\n")]
+                          (require-mailbox-capacity!
+                            (+ (.-size stat) (js/Buffer.byteLength frame "utf8")))
+                          (append-text! fd frame)))
                       after))))}))

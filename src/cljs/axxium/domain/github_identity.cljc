@@ -76,12 +76,15 @@
        (and (nil? (actor-node state did)) (law/valid-policy? pol)) ids))
 
 (defn provision-actor
-  "Parent creates a child actor whose policy is within its own (G1).
+  "An active parent or managing ancestor creates a child within the parent's policy.
    `kind` is one of law/actor-kinds other than :human (default :bot)."
   ([lg state parent did name pol ids] (provision-actor lg state parent did name pol :bot ids))
   ([lg state parent did name pol kind ids]
-   (act lg state parent :provision (node did parent name pol :active kind)
+   (provision-actor lg state parent parent did name pol kind ids))
+  ([lg state operator parent did name pol kind ids]
+   (act lg state operator :provision (node did parent name pol :active kind)
         (and (nil? (actor-node state did)) (effective? state parent)
+             (or (= operator parent) (may-manage? state operator parent))
              (contains? (disj law/actor-kinds :human) kind)
              (law/policy-within? pol (policy-of state parent))) ids)))
 

@@ -52,18 +52,22 @@
   "Translate a portal request (keywordized JSON) made by `caller` into
    [tool args], or {:error ...}. `read-edn` parses import text;
    `host` resolves seed paths."
-  [caller {:keys [op did label kind slug name policy type secret env provider seed appId installationId]} read-edn host]
+  [caller {:keys [op did label kind slug name policy type secret env provider seed appId installationId] :as request}
+   read-edn host]
   (let [tool (get ops op)]
     (case (when tool op)
       nil {:error "unknown op"}
       "list" [tool {}]
       "export" [tool {}]
       "create"
-      (let [d (child-did caller slug)]
-        (cond (nil? d) {:error "slug must be lower-case letters, digits and dashes"}
+      (let [parent (get request :parent caller)
+            d (child-did parent slug)]
+        (cond (not (string? parent)) {:error "parent must be an actor DID"}
+              (nil? d) {:error "slug must be lower-case letters, digits and dashes"}
               (not (creatable-kinds kind)) {:error "kind must be group, host, agent or bot"}
-              :else [tool {:actor/did d :actor/name (or (not-empty name) slug)
-                           :actor/kind (keyword kind) :actor/policy (json->policy policy)}]))
+              :else [tool (cond-> {:actor/did d :actor/name (or (not-empty name) slug)
+                                   :actor/kind (keyword kind) :actor/policy (json->policy policy)}
+                            (contains? request :parent) (assoc :actor/parent parent))]))
       ("suspend" "resume" "revoke" "bootstrap-issue")
       (if (string? did) [tool {:actor/did did}] {:error "did required"})
       "credential-provision"

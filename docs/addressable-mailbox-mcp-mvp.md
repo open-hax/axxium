@@ -61,6 +61,9 @@ The polling ledger writes each operation as a single newline-terminated
 frame and reads older complete event lines. Retrying registration completes
 an interrupted legacy owner grant while preserving recorded revocations.
 Once a ledger receives framed writes, use a polling build that reads v1 frames.
+The polling pilot limits the file to 2 MiB. A load above that limit or an
+append that would exceed it fails without deleting stored events. Preserve the
+ledger and pause pilot traffic if the limit is reached.
 
 The polling profile uses MCP Streamable HTTP version 2025-06-18 and JSON
 POST responses. Initialize with a live Axxium session issued by the verified

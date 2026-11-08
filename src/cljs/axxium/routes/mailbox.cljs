@@ -7,11 +7,11 @@
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.ledger-queue :as queue]
+            [axxium.extern.mailbox-mcp :as rpc]
             [axxium.law.actor :as actor-law]
             [clojure.string :as str]))
 
 (def ^:private endpoint "/api/mailbox/mcp")
-(def ^:private protocol-version "2025-06-18")
 
 (defn- admitted-origin? [req {:keys [host origin]}]
   (let [incoming (http/header req "origin")]
@@ -77,14 +77,14 @@
   (if (= "initialize" (get body "method"))
     (let [opened (mailbox/call lg ctx :open_session
                               {:audience (:audience ctx) :ttl-ms 3600000})]
-      (assoc (mailbox/handle-rpc (:ledger opened) ctx body)
+      (assoc (rpc/handle-rpc (:ledger opened) ctx body)
              :transport-session (get-in opened [:result :session/id])))
     (if-let [error (mailbox/session-error lg ctx)]
       {:session-error error}
       (case (get body "method")
         ("notifications/initialized" "notifications/cancelled") {:ledger lg}
         "ping" {:ledger lg :response {"jsonrpc" "2.0" "id" (get body "id") "result" {}}}
-        (mailbox/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
+        (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
 (defn- ^:async post-mailbox! [writer path resource req reply {:keys [principal cred-id] :as proof}]
   (let [body (http/json-body req)
@@ -98,7 +98,7 @@
       (not (and (rpc-request? body) (supported-message? body)))
       (rpc-error reply 400 nil -32600 "Invalid request")
 
-      (and (some? version) (not= version protocol-version))
+      (and (some? version) (not= version rpc/protocol-version))
       (rpc-error reply 400 (get body "id") -32600 "Unsupported MCP protocol version")
 
       (and initialize? (some? sid))

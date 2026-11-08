@@ -44,6 +44,11 @@ class AxxiumAccountManager extends HTMLElement {
     return result;
   }
 
+  async changeSession(path, body) {
+    await this.request(path, 'POST', body);
+    window.dispatchEvent(new Event('axxium-session-changed'));
+  }
+
   async refresh() {
     try {
       const config = await this.request('/api/auth/config');
@@ -141,7 +146,7 @@ class AxxiumAccountManager extends HTMLElement {
         event.preventDefault();
         const form = event.currentTarget;
         this.run(async () => {
-          await this.request('/api/auth/login', 'POST', {
+          await this.changeSession('/api/auth/login', {
             email: form.elements.email.value,
             password: form.elements.password.value,
           });
@@ -177,7 +182,7 @@ class AxxiumAccountManager extends HTMLElement {
     logout.className = 'secondary';
     logout.textContent = 'Sign out';
     logout.addEventListener('click', () => this.run(async () => {
-      await this.request('/api/auth/logout', 'POST', {});
+      await this.changeSession('/api/auth/logout', {});
       this.issuedToken = '';
     }));
     identity.append(title, detail, logout);
