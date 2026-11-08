@@ -165,5 +165,6 @@
   (q/update-actor-capabilities id (json/encode capabilities)))
 (def q-insert-session q/insert-session)
 (def q-select-actor-by-session q/select-actor-by-session)
+(def q-select-active-human-session q/select-active-human-session)
 (def q-delete-session-by-hash q/delete-session-by-hash)
 (def q-health-check q/health-check)

@@ -164,6 +164,13 @@
                 [:= :a.status "active"]
                 [:> :s.expires_at [:now]]])))
 
+(defn select-active-human-session
+  "The same live session bound to an active actor with a human entity."
+  [actor-id token-hash cred-id]
+  (-> (select-actor-by-session actor-id token-hash cred-id)
+      (h/join [:entities :e] [:= :e.id :a.entity_id])
+      (h/where [:= :e.kind "human"])))
+
 (defn delete-session-by-hash
   [token-hash]
   (-> (h/delete-from :sessions)

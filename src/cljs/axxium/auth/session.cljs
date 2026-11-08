@@ -92,3 +92,14 @@
   (when-let [actor (await (verify-session (extract-auth-token req)))]
     (when-let [cred-id (acting-credential-id actor)]
       (token-domain/auth-context actor cred-id))))
+
+(defn ^:async active-human-session?
+  "Recheck the exact credential from a verified context at an authority boundary."
+  [req {:auth/keys [actor-id cred-id]}]
+  (let [value (extract-auth-token req)]
+    (when (and (seq value)
+               (not (str/starts-with? value "axx_"))
+               (actor-law/valid-credential-id? cred-id))
+      (some? (await (db/query-one-sql
+                     (db/q-select-active-human-session
+                      actor-id (secrets/token-hash value) cred-id)))))))

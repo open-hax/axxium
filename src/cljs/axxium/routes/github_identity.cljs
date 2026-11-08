@@ -14,7 +14,8 @@
 
    The manifest state is a signed 5-minute cookie bound to parent + child,
    so a callback can only attach an App to the child its parent chose."
-  (:require [axxium.config :as cfg]
+  (:require [axxium.auth.session :as session]
+            [axxium.config :as cfg]
             [axxium.domain.github-identity :as gi]
             [axxium.domain.state :as state]
             [axxium.extern.github-app :as gh]
@@ -36,7 +37,20 @@
 
 (defn- base-url [] (cfg/get-in-config [:axxium/public-base-url]))
 (defn- secure? [] (str/starts-with? (base-url) "https://"))
-(defn- caller [context] (did-law/actor-did (base-url) (:auth/actor-id context)))
+(defn- root-binding [] (cfg/get-in-config [:identity/root-operator-binding]))
+
+(defn- ^:async caller [req context st]
+  (let [account (:auth/actor-id context)
+        canonical (did-law/actor-did (base-url) account)
+        {:keys [actor-id root-did]} (root-binding)]
+    (cond
+      (= actor-id account)
+      (when (and (gi/active-human-root? st root-did)
+                 (await (session/active-human-session? req context)))
+        root-did)
+
+      (not= canonical root-did) canonical)))
+
 (defn- token-key [] (tc/read-key-file (cfg/get-in-config [:github-identity/token-key-file])))
 (defn- ledger-path [] (cfg/get-in-config [:github-identity/ledger-file]))
 (defn- configured? [] (and (token-key) (seq (ledger-path))))
@@ -64,10 +78,10 @@
 (defn- esc [s] (-> s (str/replace "&" "&amp;") (str/replace "\"" "&quot;") (str/replace "<" "&lt;")))
 
 (defn- ^:async manifest! [req reply context]
-  (let [parent (caller context)
-        child (:did (http/body req))
-        st (state/fold (current-ledger))]
-    (if-not (and (configured?) (string? child) (gi/may-manage? st parent child))
+  (let [st (when (configured?) (state/fold (current-ledger)))
+        parent (when st (await (caller req context st)))
+        child (:did (http/body req))]
+    (if-not (and parent (string? child) (gi/may-manage? st parent child))
       (http/send! reply 403 {:error "not a managing ancestor of that actor"})
       (let [state (str (:auth/actor-id context) "." (google/random-secret))
             sealed (await (jose/sign-google-state! {:state state :nonce child :verifier parent}
@@ -88,21 +102,26 @@
         code (http/query-param req "code")
         sealed (http/cookie req state-cookie)
         opened (when (seq sealed) (await (jose/verify-google-state! sealed (state-keys))))
-        parent (caller context)
-        bound? (and opened (= state (:state opened)) (= parent (:verifier opened)))]
+        st (when (and opened (configured?)) (state/fold (current-ledger)))
+        parent (when st (await (caller req context st)))
+        child (:nonce opened)
+        bound? (and parent (= state (:state opened)) (string? state)
+                    (str/starts-with? state (str (:auth/actor-id context) "."))
+                    (= parent (:verifier opened)) (gi/may-manage? st parent child))]
     (http/clear-state-cookie! reply state-cookie law/manifest-callback-path)
-    (if-not (and bound? (seq code) (configured?))
+    (if-not (and bound? (seq code))
       (http/send! reply 400 {:error "Invalid or expired manifest state"})
       (try
-        (let [child (:nonce opened)
-              app (await (gh/convert-manifest js/fetch code))
+        (let [app (await (gh/convert-manifest js/fetch code))
               out (await (serialized
-                          (fn [lg]
-                            (gi/provision-credential
-                              lg (state/fold lg) parent child "github-app" :github-app
-                              {:credential/sealed (tc/seal (token-key) child (:pem app))}
-                              {:github/app-id (:id app) :github/app-slug (:slug app)}
-                              (ids)))))]
+                          (fn ^:async register-app-credential [lg]
+                            (let [st (state/fold lg)]
+                              (when (= parent (await (caller req context st)))
+                                (gi/provision-credential
+                                  lg st parent child "github-app" :github-app
+                                  {:credential/sealed (tc/seal (token-key) child (:pem app))}
+                                  {:github/app-id (:id app) :github/app-slug (:slug app)}
+                                  (ids)))))))]
           (if (:effect out)
             (http/redirect! reply (str "https://github.com/apps/" (:slug app) "/installations/new"))
             (http/send! reply 403 {:error "credential registration refused"})))
@@ -118,13 +137,29 @@
           args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (if (= ::bad args)
         (http/send! reply 400 {:error "arguments must be one EDN map"})
-        (let [out (await (serialized #(mcp/call (deps %) {:actor (caller context)} tool args)))]
-          (http/send-secret! reply (if (:error out) 400 200) {:edn (pr-str (dissoc out :ledger))}))))))
+        (let [out (await (serialized
+                          (fn ^:async call-identity-tool [lg]
+                            (let [st (state/fold lg)
+                                  actor (await (caller req context st))
+                                  out (await (mcp/call (deps lg) {:actor actor} tool args))
+                                  delivery-error
+                                  (when (and (:result out) (= "token_for" tool)
+                                             (= actor (:root-did (root-binding))))
+                                    (try
+                                      (when (not= actor (await (caller req context st)))
+                                        :unauthenticated)
+                                      (catch :default _ :session-unavailable)))]
+                              (if delivery-error
+                                (-> out (dissoc :result) (assoc :error delivery-error))
+                                out)))))
+              status (case (:error out) :unauthenticated 403 :session-unavailable 503 nil 200 400)]
+          (http/send-secret! reply status {:edn (pr-str (dissoc out :ledger))}))))))
 
 (defn ^:async agent-operation
   "Authenticate and execute an agent tool against one serialized ledger snapshot."
   [lg did key tool args]
-  (let [self (mcp/authenticate (state/fold lg) did key)]
+  (let [self (when (not= did (:root-did (root-binding)))
+               (mcp/authenticate (state/fold lg) did key))]
     (cond
       (nil? self) {:agent/status 401 :agent/error "unknown agent or bad bootstrap key"}
       (not (contains? mcp/agent-tools tool)) {:agent/status 403 :agent/error "tool not open to agents"}
@@ -151,8 +186,12 @@
 (defn- ^:async admin! [req reply context]
   (if-not (configured?)
     (http/send! reply 503 {:error "identities are not configured on this Axxium"})
-    (let [out (await (serialized #(mcp/admin (deps %) (caller context) (http/body req)
-                                             {:read-edn edn/read-one :host (host)})))]
+    (let [out (await (serialized
+                      (fn ^:async administer-identity [lg]
+                        (if-let [actor (await (caller req context (state/fold lg)))]
+                          (await (mcp/admin (deps lg) actor (http/body req)
+                                            {:read-edn edn/read-one :host (host)}))
+                          {:status 403 :body {:error "Identity root requires its configured human operator"}}))))]
       (http/send-secret! reply (:status out) (:body out)))))
 
 (defn ^:async apply-seed-file!

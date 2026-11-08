@@ -41,6 +41,15 @@
 
 (defn kind-of [state did] (get-in (actor-node state did) [:resource/metadata :actor/kind]))
 
+(defn active-human-root?
+  "An admitted, effective human node that owns its DID and has no parent."
+  [state did]
+  (and (= :human (kind-of state did))
+       (= did (:resource/owner (actor-node state did)))
+       (nil? (parent-of state did))
+       (effective? state did)
+       (law/valid-policy? (policy-of state did))))
+
 (defn- node [did parent name pol status & [kind]]
   {:resource/id (law/actor-resource-id did)
    :resource/kind law/actor-kind

@@ -93,6 +93,15 @@ The tools are `actor_list`, `actor_provision`, `actor_suspend`, `actor_resume`,
 | `AXXIUM_GITHUB_IDENTITY_LEDGER_FILE` | the append-only EDN ledger |
 | `AXXIUM_GITHUB_IDENTITY_KEY_DIR` | the only directory imported PEMs can be read from |
 | `AXXIUM_IDENTITY_SEED_FILE` | optional secret-free EDN tree applied idempotently at startup |
+| `AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID` | optional exact Axxium account ID (`actor_<UUID>`) of the human operator |
+| `AXXIUM_IDENTITY_ROOT_DID` | full resolved DID of the seed root, required with the operator ID |
+
+Set the two root-operator values together in the deployment's host-local
+configuration. The binding uses the operator's live human session and requires
+an active human root already admitted to the identity ledger. The configured
+root is reserved to that operator even when another account's default DID
+matches it. Other callers retain their usual account DIDs. Bootstrap agent
+credentials retain their own DIDs and cannot act as the configured root.
 
 ## Not yet
 
