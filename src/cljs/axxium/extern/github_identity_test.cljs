@@ -88,6 +88,24 @@
     (testing "an actor cannot suspend itself out from under its parent's control"
       (let [[_ _ self] (step ids [lg st] gi/resume review review)] (is (nil? (:effect self)))))))
 
+(deftest credential-id-collision-cannot-replace-another-owners-credential
+  (let [{:keys [ids lg st]} (tree)
+        victim (str sub ":build")
+        [lg st] (step ids [lg st] gi/provision-actor widgets sub "Widgets Helper" widgets-policy)
+        [lg st] (step ids [lg st] gi/provision-actor review victim "Review Helper" review-policy)
+        [lg st original] (step ids [lg st] gi/provision-credential review victim "github-app" :github-app
+                               {:credential/sealed "victim-secret"} {})
+        [_ after attempted] (step ids [lg st] gi/provision-credential widgets sub "build:github-app" :github-app
+                                  {:credential/sealed "replacement-secret"} {})]
+    (is (some? (:effect original)))
+    (is (not (gi/may-manage? st widgets victim)))
+    (is (= (law/credential-resource-id victim "github-app")
+           (law/credential-resource-id sub "build:github-app")))
+    (is (nil? (:effect attempted)))
+    (is (false? (get-in attempted [:decision :event/body :decision/allow?])))
+    (is (= (gi/credential st victim "github-app") (gi/credential after victim "github-app")))
+    (is (nil? (gi/credential after sub "build:github-app")))))
+
 (deftest suspended-parent-cascades
   (let [{:keys [ids lg st]} (tree)
         [lg st] (step ids [lg st] gi/provision-actor widgets sub "helper" (assoc widgets-policy :policy/actions #{:read}))
