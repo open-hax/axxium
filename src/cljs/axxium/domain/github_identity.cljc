@@ -125,12 +125,13 @@
                              :credential/status :active :credential/generation generation)})
 
 (defn provision-credential
-  "An ancestor attaches a new credential to an actor (never plaintext)."
+  "An ancestor attaches a new credential at an unoccupied resource ID."
   [lg state operator did label type secret metadata ids]
-  (act lg state operator :provision (credential-resource did label type secret metadata 1)
-       (and (contains? law/credential-types type)
-            (nil? (credential state did label))
-            (effective? state did) (may-manage? state operator did)) ids))
+  (let [resource (credential-resource did label type secret metadata 1)]
+    (act lg state operator :provision resource
+         (and (contains? law/credential-types type)
+              (not (contains? (:resources state) (:resource/id resource)))
+              (effective? state did) (may-manage? state operator did)) ids)))
 
 (defn rotate-credential
   "Replace the secret (and optionally metadata); generation increments."

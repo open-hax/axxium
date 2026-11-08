@@ -1,8 +1,8 @@
 (ns axxium.extern.ledger-file
-  "Single-writer ledger persistence. Batches append canonical EDN lines and
-   fsync before success. Recovery truncates an incomplete final line; it
-   does not guarantee crash atomicity across several complete event lines."
+  "Single-writer EDN ledger persistence with fsync before success.
+   The private mailbox format commits one operation per complete line."
   (:require ["node:fs" :as fs]
+            [axxium.law.event :as event]
             [axxium.shape.ledger-edn :as edn-lines]
             [clojure.string :as str]))
 
@@ -27,6 +27,23 @@
     {:events (edn-lines/import-lines (str/join "\n" (remove str/blank? (str/split-lines complete))))
      :tail-bytes (when (< end (count text)) (.-length (js/Buffer.from complete "utf8")))}))
 
+(def ^:private mailbox-batch-tag :axxium.mailbox/batch-v1)
+
+(defn- mailbox-frame-events [frame]
+  (let [events (cond
+                 (map? frame) [frame]
+                 (and (vector? frame) (= mailbox-batch-tag (first frame))) (subvec frame 1))]
+    (when-not (and (seq events) (every? event/valid-event? events))
+      (throw (ex-info "Invalid complete mailbox ledger frame" {:reason :mailbox-ledger-frame})))
+    events))
+
+(defn- decode-mailbox-ledger [buffer]
+  (let [end (inc (.lastIndexOf buffer 0x0a))
+        decoder (js/TextDecoder. "utf-8" #js {:fatal true})
+        complete (.decode decoder (.subarray buffer 0 end))]
+    {:events (into [] (mapcat mailbox-frame-events) (edn-lines/import-lines complete))
+     :tail-bytes (when (< end (.-length buffer)) end)}))
+
 (defn load-ledger [path]
   (if (fs/existsSync path)
     (let [{:keys [events tail-bytes]} (decode-ledger (fs/readFileSync path "utf8"))]
@@ -48,12 +65,11 @@
             (throw (js/Error. "ledger write made invalid progress")))
           (recur (+ offset written)))))))
 
-(defn- append-lines! [fd batch]
-  (when (seq batch)
-    (write-all! (js/Buffer.from (edn-lines/export-lines batch) "utf8")
-                (fn [buffer offset length]
-                  (fs/writeSync fd buffer offset length nil)))
-    (fs/fsyncSync fd)))
+(defn- append-text! [fd text]
+  (write-all! (js/Buffer.from text "utf8")
+              (fn [buffer offset length]
+                (fs/writeSync fd buffer offset length nil)))
+  (fs/fsyncSync fd))
 
 (defn append-batch!
   "Persist events of `after` that `before` lacks. Returns `after`."
@@ -62,7 +78,7 @@
     (when (seq batch)
       (let [fd (fs/openSync path "a")]
         (try
-          (append-lines! fd batch)
+          (append-text! fd (edn-lines/export-lines batch))
           (finally (fs/closeSync fd)))))
     after))
 
@@ -77,7 +93,8 @@
 
 (defn private-ledger-storage
   "Pin an existing private mailbox file. Every load and append checks the
-   opened descriptor and refuses missing files, symlinks, and replacements."
+   opened descriptor and refuses missing files, symlinks, and replacements.
+   Read legacy event lines and write each new operation as one EDN frame."
   [path other-paths]
   (let [expected (try (fs/lstatSync path) (catch :default _ nil))]
     (when-not (private-stat? expected)
@@ -91,12 +108,14 @@
               (with-private-file
                 path expected (.-O_RDWR fs/constants)
                 (fn [fd]
-                  (let [{:keys [events tail-bytes]} (decode-ledger (fs/readFileSync fd "utf8"))]
+                  (let [{:keys [events tail-bytes]} (decode-mailbox-ledger (fs/readFileSync fd))]
                     (when (some? tail-bytes) (fs/ftruncateSync fd tail-bytes))
                     events))))
      :append! (fn [path before after]
-                (with-private-file
-                  path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants))
-                  (fn [fd]
-                    (append-lines! fd (subvec (vec after) (count before)))
-                    after)))}))
+                (let [batch (subvec (vec after) (count before))]
+                  (with-private-file
+                    path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants))
+                    (fn [fd]
+                      (when (seq batch)
+                        (append-text! fd (str (pr-str (into [mailbox-batch-tag] batch)) "\n")))
+                      after))))}))

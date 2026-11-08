@@ -56,6 +56,12 @@ and its directory separate from the Drive and GitHub identity ledgers.
 Leave the setting absent in deployments without a mailbox. The route
 `/api/mailbox/mcp` uses its configured public URL as the mailbox audience.
 
+The polling ledger writes each operation as a single newline-terminated
+`:axxium.mailbox/batch-v1` EDN frame. Recovery drops an incomplete final
+frame and reads older complete event lines. Retrying registration completes
+an interrupted legacy owner grant while preserving recorded revocations.
+Once a ledger receives framed writes, use a polling build that reads v1 frames.
+
 The polling profile uses MCP Streamable HTTP version 2025-06-18 and JSON
 POST responses. Initialize with a live Axxium session issued by the verified
 AT Protocol callback. Programmatic callers can present it as a bearer.
@@ -69,5 +75,6 @@ Echo the returned `Mcp-Session-Id` on subsequent requests. Use `tools/list`
 and the mailbox tools to register mailboxes, authorize senders, send, poll,
 and acknowledge. GET and DELETE return 405. The `open_session` tool reports
 the current polling session. Only HTTP initialization opens a transport
-session. MCP OAuth discovery, SSE, cross-origin browser access, and actual
+session. Payloads require valid Unicode, finite numbers, and safe integers.
+MCP OAuth discovery, SSE, cross-origin browser access, and actual
 subscribed ChatGPT delivery remain separate from this polling pilot.

@@ -10,6 +10,7 @@
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.signing-key :as signing]
             [axxium.routes.mailbox :as routes]
+            [clojure.string :as str]
             [cljs.test :refer [async deftest is]]
             ["@fastify/cookie" :default fastify-cookie]
             ["node:fs" :as fs]
@@ -35,7 +36,7 @@
                                (when token {"authorization" (str "Bearer " token)})
                                (when sid {"mcp-session-id" sid "mcp-protocol-version" "2025-06-18"})
                                overrides)
-        payload (when (some? body) (js/JSON.stringify (clj->js body)))]
+        payload (if (string? body) body (when (some? body) (js/JSON.stringify (clj->js body))))]
     (js/Promise.
      (fn [resolve reject]
        (let [req (node-http/request
@@ -89,7 +90,8 @@
                                           :axxium/public-base-url origin
                                           (config ks)))]
         (reset! app (await (start-app!)))
-        (let [alice-id "actor_11111111-1111-4111-8111-111111111111"
+        (let [load-events (:load! (disk/private-ledger-storage ledger []))
+              alice-id "actor_11111111-1111-4111-8111-111111111111"
               bob-id "actor_22222222-2222-4222-8222-222222222222"
               ordinary (await (token/create-token {:id alice-id} (secrets/secure-id)))
               alice (await (mint-fixture! live alice-id (secrets/secure-id) fixture/alice))
@@ -133,10 +135,23 @@
               (is (= "poll" (get poll "mode")))
               (is (= b-session (get poll "id")))
               (is (= 2 (count (filter #(= :axxium.session/opened (:event/type %))
-                                      (disk/load-ledger ledger))))))
+                                      (load-events ledger))))))
             (await (request! @app "POST" a a-session (tool "register_mailbox" {}) {}))
             (await (request! @app "POST" b b-session (tool "register_mailbox" {}) {}))
             (await (request! @app "POST" b b-session (tool "grant_send" {"to" fixture/alice}) {}))
+            (let [candidate (tool "send_message" {"to" fixture/bob "idempotency_key" "invalid-value"
+                                                 "body" {"nested" ["number-placeholder"]}})
+                  encoded (js/JSON.stringify (clj->js candidate))]
+              (doseq [invalid [(str/replace encoded "\"number-placeholder\"" "1e400")
+                               (str/replace encoded "\"number-placeholder\"" "9007199254740993")
+                               (assoc-in candidate ["params" "arguments" "body" "nested"]
+                                         [(js/String.fromCharCode 0xD800)])
+                               (assoc-in candidate ["params" "arguments" "idempotency_key"]
+                                         (js/String.fromCharCode 0xD800))]]
+                (is (true? (get-in (await (request! @app "POST" a a-session invalid {}))
+                                   [:data "result" "isError"]))))
+              (is (empty? (filter #(= :axxium.mailbox/accepted (:event/type %))
+                                  (load-events ledger)))))
             (let [send (tool "send_message" {"to" fixture/bob "idempotency_key" "wire"
                                              "body" {"payload_key" {"nested" "durable"}}})
                   rejected (await (request! @app "POST" a a-session (-> send
@@ -167,7 +182,7 @@
               (swap! live dissoc (:query alice))
               (is (= 401 (:status (await (request! @app "POST" a a-session send {})))))
               (is (= 1 (count (filter #(= :axxium.mailbox/accepted (:event/type %))
-                                      (disk/load-ledger ledger)))))
+                                      (load-events ledger)))))
               (let [saved (str ledger ".saved")
                     replacement (path/join dir "replacement.edn")]
                 (fs/renameSync ledger saved)
