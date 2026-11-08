@@ -160,11 +160,14 @@
                                                     {}))
                   sent (result (await (request! @app "POST" a a-session send {})))
                   replay (result (await (request! @app "POST" a a-session send {})))
-                  before (result (await (request! @app "POST" b b-session (tool "read_inbox" {}) {})))]
+                  before-response (await (request! @app "POST" b b-session (tool "read_inbox" {}) {}))
+                  before (result before-response)
+                  text-content (get-in before-response [:data "result" "content" 0 "text"])]
               (is (= 400 (:status rejected)))
               (is (= "accepted" (get sent "accepted")))
               (is (= sent replay))
               (is (= 1 (count (get before "messages"))))
+              (is (= before (js->clj (js/JSON.parse text-content))))
               (is (= {"payload_key" {"nested" "durable"}}
                      (get-in before ["messages" 0 "message_body"])))
               (await (.close (:app @app)))

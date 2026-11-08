@@ -73,6 +73,42 @@
             (is (.equals before (fs/readFileSync p)) "a malformed complete frame leaves the file intact"))))
       (finally (fs/rmSync dir #js {:recursive true})))))
 
+(deftest private-mailbox-refuses-capacity-overrun
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-capacity-"))
+        p (path/join dir "ledger.edn")
+        limit (* 2 1024 1024)
+        {:keys [ledger]} (mm/call [] {:principal mailbox-fixture/alice
+                                    :audience "héllo" :now fx/t0}
+                                  :open_session {:audience "héllo" :ttl-ms 3600000})]
+    (try
+      (fs/writeFileSync p "" #js {:mode 8r600})
+      (let [{:keys [load! append!]} (lf/private-ledger-storage p [])]
+        (append! p [] ledger)
+        (let [frame (fs/readFileSync p)
+              padding (js/Buffer.alloc (inc (- limit (.-length frame))) 0x20)
+              final-index (dec (.-length padding))]
+          ;; The audience's é needs two bytes, so counting code units would
+          ;; incorrectly admit an append one byte above the cap.
+          (.writeUInt8 padding 0x0a final-index)
+          (fs/writeFileSync p padding)
+          (is (thrown-with-msg? js/Error #"Mailbox ledger capacity exceeded"
+                                (append! p [] ledger)))
+          (is (.equals padding (fs/readFileSync p)))
+          (.writeUInt8 padding 0x0a (dec final-index))
+          (fs/writeFileSync p (.subarray padding 0 final-index))
+          (append! p [] ledger)
+          (is (= limit (.-size (fs/statSync p))))
+          (is (= ledger (load! p)))
+          (let [before (fs/readFileSync p)]
+            (is (thrown-with-msg? js/Error #"Mailbox ledger capacity exceeded"
+                                  (append! p [] ledger)))
+            (is (.equals before (fs/readFileSync p))))
+          (fs/appendFileSync p "x")
+          (is (thrown-with-msg? js/Error #"Mailbox ledger capacity exceeded" (load! p)))
+          (is (= (inc limit) (.-size (fs/statSync p)))
+              "an oversized existing file is preserved for operator recovery")))
+      (finally (fs/rmSync dir #js {:recursive true})))))
+
 (defn- send-mailbox
   [lg ctx to key body]
   (mm/call lg ctx :send_message {:to to :idempotency-key key :body body}))

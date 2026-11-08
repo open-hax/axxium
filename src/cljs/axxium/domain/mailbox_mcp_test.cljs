@@ -4,6 +4,7 @@
   (:require [axxium.domain.kernel-fixture :as fx]
             [axxium.domain.mailbox-mcp :as mm]
             [axxium.domain.policy :as policy]
+            [axxium.extern.mailbox-mcp :as rpc]
             [axxium.shape.ledger-edn :as edn-lines]
             [cljs.test :refer [deftest is testing]]))
 
@@ -159,21 +160,21 @@
 ;; 7
 (deftest live-mcp-roundtrip
   (let [{:keys [lg a]} (world)
-        rpc (fn [lg id method params]
-              (mm/handle-rpc lg (ctx alice a) {"jsonrpc" "2.0" "id" id "method" method "params" params}))
-        {lg :ledger listed :response} (rpc lg 1 "tools/list" {})
+        invoke (fn [lg id method params]
+              (rpc/handle-rpc lg (ctx alice a) {"jsonrpc" "2.0" "id" id "method" method "params" params}))
+        {lg :ledger listed :response} (invoke lg 1 "tools/list" {})
         names (set (map #(get % "name") (get-in listed ["result" "tools"])))
-        {lg :ledger sent :response} (rpc lg 2 "tools/call" {"name" "send_message"
+        {lg :ledger sent :response} (invoke lg 2 "tools/call" {"name" "send_message"
                                                             "arguments" {"to" fx/bob "idempotency_key" "k" "body" {"text" "hi"}}})
         msg-id (get-in sent ["result" "structuredContent" "message_id"])
-        {got :response} (rpc lg 3 "tools/call" {"name" "get_delivery" "arguments" {"message_id" msg-id}})]
+        {got :response} (invoke lg 3 "tools/call" {"name" "get_delivery" "arguments" {"message_id" msg-id}})]
     (is (= #{"whoami" "open_session" "resolve_address" "send_message" "read_inbox"
              "acknowledge_message" "get_delivery"}
            (set (filter mm/spec-tools names))))
     (is (string? msg-id))
     (is (= "accepted" (get-in got ["result" "structuredContent" "accepted"])))
     (is (= {"error" {"code" -32001 "message" "unauthenticated"} "id" 4 "jsonrpc" "2.0"}
-           (:response (mm/handle-rpc lg {:audience aud :now fx/t0}
+           (:response (rpc/handle-rpc lg {:audience aud :now fx/t0}
                                      {"jsonrpc" "2.0" "id" 4 "method" "tools/list"}))))))
 
 ;; 8
@@ -204,22 +205,22 @@
   (let [{:keys [lg a]} (world)
         c (ctx alice a)]
     (doseq [method ["initialize" "tools/list" "notifications/initialized" "unknown"]]
-      (let [out (mm/handle-rpc lg c {"jsonrpc" "2.0" "method" method})]
+      (let [out (rpc/handle-rpc lg c {"jsonrpc" "2.0" "method" method})]
         (is (nil? (:response out)) (str method " notification has no response"))
         (is (= lg (:ledger out)))))
-    (let [out (mm/handle-rpc lg c {"jsonrpc" "2.0" "method" "tools/call"
+    (let [out (rpc/handle-rpc lg c {"jsonrpc" "2.0" "method" "tools/call"
                                   "params" {"name" "send_message" "arguments"
                                             {"to" fx/bob "idempotency_key" "notification" "body" {"n" 1}}}})]
       (is (nil? (:response out)))
       (is (= 1 (count (mm/messages (:ledger out) fx/bob)))))
-    (is (= -32601 (get-in (mm/handle-rpc lg c {"jsonrpc" "2.0" "id" 0 "method" "unknown"})
+    (is (= -32601 (get-in (rpc/handle-rpc lg c {"jsonrpc" "2.0" "id" 0 "method" "unknown"})
                           [:response "error" "code"])))
-    (is (nil? (:response (mm/handle-rpc lg {} {"jsonrpc" "2.0" "method" "unknown"}))))))
+    (is (nil? (:response (rpc/handle-rpc lg {} {"jsonrpc" "2.0" "method" "unknown"}))))))
 
 (deftest tool-hints-and-actionable-errors
-  (let [descriptors (into {} (map (juxt #(get % "name") identity)) mm/tool-descriptors)
+  (let [descriptors (into {} (map (juxt #(get % "name") identity)) rpc/tool-descriptors)
         {:keys [lg a]} (world)
-        out (mm/handle-rpc lg (ctx alice a)
+        out (rpc/handle-rpc lg (ctx alice a)
                            {"jsonrpc" "2.0" "id" 1 "method" "tools/call"
                             "params" {"name" "unknown" "arguments" {}}})]
     (doseq [name ["whoami" "resolve_address" "get_delivery"]]

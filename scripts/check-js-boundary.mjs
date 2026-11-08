@@ -14,6 +14,7 @@ const FORBIDDEN_PATTERNS = [
   /\baset\b/,
   /\bjs->clj\b/,
   /\bclj->js\b/,
+  /\bjs\/JSON\b/,
 ];
 
 const EXCLUDED_FILES = [
@@ -26,7 +27,7 @@ function walkDir(dir, callback) {
     const stat = statSync(path);
     if (stat.isDirectory()) {
       walkDir(path, callback);
-    } else if (extname(path) === ".cljs") {
+    } else if ([".cljs", ".cljc"].includes(extname(path))) {
       callback(path);
     }
   }

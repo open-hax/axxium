@@ -2,6 +2,7 @@
   "Cross-repository acceptance probes; see docs/mailbox-integration-regressions.md."
   (:require [axxium.domain.kernel-fixture :as fixture]
             [axxium.domain.mailbox-mcp :as mailbox]
+            [axxium.extern.mailbox-mcp :as rpc]
             [cljs.test :refer [deftest is]]))
 
 (def ^:private audience "promethean+testing")
@@ -49,9 +50,9 @@
 (defn- rpc-tool
   "Exercise the public wire adapter with JSON-compatible string-keyed data."
   [ledger ctx id tool arguments]
-  (mailbox/handle-rpc ledger ctx
-                      {"jsonrpc" "2.0" "id" id "method" "tools/call"
-                       "params" {"name" tool "arguments" arguments}}))
+  (rpc/handle-rpc ledger ctx
+                  {"jsonrpc" "2.0" "id" id "method" "tools/call"
+                   "params" {"name" tool "arguments" arguments}}))
 
 (deftest acknowledgment-of-second-message-preserves-first
   (let [{initial :ledger ctx-a :alice ctx-b :bob} (world)
