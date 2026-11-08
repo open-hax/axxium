@@ -145,7 +145,7 @@
                   http/request-url (fn [_] "https://fixture.test/callback")
                   oauth/callback! (fn [_] (js/Promise.resolve {:did "did:plc:abcdefghijklmnopqrstuvwx" :state "fixture-state" :session nil}))
                   oauth/revoke! (fn [s] (swap! events conj :revoke) (revoke! s))
-                  session/create-session! (fn [actor] (swap! events conj :session) (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
+                  session/create-atproto-session! (fn [actor did] (is (= "did:plc:abcdefghijklmnopqrstuvwx" did)) (swap! events conj :session) (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
                   session/set-session-cookie (fn [& _] nil)
                   http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]
@@ -270,7 +270,7 @@
                   http/request-url (fn [_] "https://fixture.test/callback")
                   oauth/callback! (fn [_] (js/Promise.resolve {:did "did:plc:abcdefghijklmnopqrstuvwx" :state state :session nil}))
                   oauth/revoke! (fn [_] (js/Promise.resolve nil))
-                  session/create-session! (fn [actor] (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
+                  session/create-atproto-session! (fn [actor did] (is (= "did:plc:abcdefghijklmnopqrstuvwx" did)) (swap! actors conj (:id actor)) (js/Promise.resolve {:token "fixture-token"}))
                   session/set-session-cookie (fn [& _] nil)
                   http/redirect! (fn [_ path] (swap! responses conj {:redirect path}))
                   http/send! (fn [_ status body] (swap! responses conj {:status status :body body}))]

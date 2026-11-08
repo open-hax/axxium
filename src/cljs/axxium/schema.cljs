@@ -1,7 +1,8 @@
 (ns axxium.schema
   "Malli schemas for Axxium identity and auth kernel.
    These are the canonical data shapes that proxx, knoxx, and openplanner consume."
-  (:require [malli.core :as m]
+  (:require [axxium.law.actor :as actor-law]
+            [malli.core :as m]
             [malli.registry :as mr]))
 
 ;; ─── Core Primitives ───────────────────────────────────────────────
@@ -75,10 +76,13 @@
 
 (def AuthContext
   "The auth context that gets attached to requests after verification.
-   This is what downstream services (proxx, knoxx, openplanner) receive."
+   This is what downstream services (proxx, knoxx, openplanner) receive.
+   :auth/cred-id is the session or agent credential that acted."
   [:map
    [:auth/actor-id ActorId]
    [:auth/entity-id EntityId]
+   [:auth/cred-id [:fn {:error/message "cred_id must be a uuid"}
+                   actor-law/valid-credential-id?]]
    [:auth/capabilities [:vector Capability]]
    [:auth/roles {:optional true} [:vector :keyword]]
    [:auth/email {:optional true} Email]

@@ -1,29 +1,55 @@
 (ns axxium.auth.token
   "JWT token creation and verification using jose.
-   Tokens carry the auth context that downstream services consume."
+   Issued tokens are EdDSA signed by this instance's key and carry cred_id
+   plus iss, aud, and env. Claim shape is axxium.domain.token; admission is
+   axxium.law.token; the header kid is axxium.law.signing."
   (:require [axxium.config :as cfg]
-            [axxium.extern.jose :as jose]))
+            [axxium.domain.token :as domain]
+            [axxium.extern.jose :as jose]
+            [axxium.extern.signing-key :as signing-key]
+            [axxium.law.principal :as principal]
+            [axxium.law.token :as law]))
 
-(defn- jwt-options []
-  {:secret (cfg/get-in-config [:jwt/secret])
-   :issuer (cfg/get-in-config [:jwt/issuer])
-   :audience (cfg/get-in-config [:jwt/audience])
+(defn- jwt-options [instance material]
+  {:private-key (:private-key material)
+   :public-key (:public-key material)
+   :kid (:kid material)
+   :issuer (:iss instance)
+   :audience (domain/audience (:service instance) (:env instance))
    :expiry-hours (cfg/get-in-config [:jwt/expiry-hours])})
 
-(defn create-token
-  "Create a JWT for an actor with their capabilities.
-   Returns promise of token string."
-  [actor]
-  (let [claims {:sub (:id actor)
-                :entity-id (:entity_id actor)
-                :email (:email actor)
-                :capabilities (:capabilities actor)
-                :roles (:roles actor)
-                :status (:status actor)}]
-    (jose/sign-actor! claims (jwt-options))))
+(defn- refuse-claims! []
+  (throw (ex-info "actor token claims are outside the token law"
+                  {:contract :axxium.law.token/valid-token-claims?})))
 
-(defn verify-token
-  "Verify a JWT and return the claims.
-   Returns promise of verified payload or throws."
+(defn- ^:async issue-token!
+  [actor cred-id extra-claims]
+  (let [instance (cfg/instance)
+        material (signing-key/current!)
+        claims (merge (domain/actor-claims actor cred-id instance) extra-claims)]
+    (when-not (law/valid-token-claims? claims instance)
+      (refuse-claims!))
+    (await (jose/sign-actor! claims (jwt-options instance material)))))
+
+(defn create-token
+  "Create an actor JWT without an AT Protocol proof."
+  [actor cred-id]
+  (issue-token! actor cred-id nil))
+
+(defn create-atproto-token!
+  "Issue an actor JWT for a DID already verified by the AT Protocol callback."
+  [actor cred-id did]
+  (when-not (principal/from-atproto-session did)
+    (throw (ex-info "Invalid AT Protocol session DID" {})))
+  (issue-token! actor cred-id {:atproto_did did}))
+
+(defn ^:async verify-token
+  "Verify a JWT and return its claims.
+   Rejects a bad signature, the wrong issuer, or claims outside the token law,
+   including an env that does not match aud."
   [token]
-  (jose/verify-actor! token (jwt-options)))
+  (let [instance (cfg/instance)
+        claims (await (jose/verify-actor! token (jwt-options instance (signing-key/current!))))]
+    (if (law/valid-token-claims? claims instance)
+      claims
+      (refuse-claims!))))
