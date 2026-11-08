@@ -64,10 +64,16 @@ permissions at level `read` are `checks`, `contents`, `issues`, `metadata`,
 permission. Axxium refuses write, empty, and unrecognized permission requests
 before contacting GitHub.
 
-Axxium signs an app JWT locally (RS256, 9-minute lifetime) and uses it to request
-a token scoped to the requested repositories and permissions. Tokens are
-cached in memory with the credential generation and scope and stop being reused
-60 seconds before expiration.
+Axxium signs an app JWT locally (RS256, 9-minute lifetime) and verifies the
+GitHub installation's account and current permission grants before requesting a
+token. It uses an internal metadata-read token limited to the requested names
+to verify their full names, owner, and immutable repository IDs. The final token
+request uses those IDs, and Axxium checks the returned scope before serving the
+token. This flow supports user and organization installations.
+
+The cache key includes the credential generation, verified installation and
+repository IDs, and requested permissions. Axxium rechecks the scope before
+serving a cached token and stops reusing it 60 seconds before expiration.
 
 GitHub permission levels group multiple actions together. For example,
 `pull_requests:write` grants review submission with any supported review event.

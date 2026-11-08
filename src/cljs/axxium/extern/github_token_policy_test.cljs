@@ -51,6 +51,7 @@
                                         :repositories #js [#js {:id 456 :full_name "example/widgets"
                                                                 :owner #js {:id 123 :login "example"}}]}
                                    #js {:id 99 :app_id 42 :target_id 123 :target_type "Organization"
+                                        :permissions #js {:contents "read" :metadata "read"}
                                         :account #js {:id 123 :login "example"}})))})))
         mint (fn [caller target requested]
                (mcp/call {:ledger ledger :token-key token-key :fetch fetch
@@ -69,10 +70,12 @@
           (is (nil? (:result out)))))
       (is (empty? @calls) "no refused export reaches GitHub")
       (let [out (await (mint reader reader {"contents" "read"}))
-            [_ _ body] (last @calls)]
+            [_ _ body] (last @calls)
+            scope (js->clj (js/JSON.parse body))]
         (is (= "synthetic-token" (get-in out [:result :token])))
+        (is (= [456] (get scope "repository_ids")))
         (is (= {"contents" "read"}
-               (dissoc (get (js->clj (js/JSON.parse body)) "permissions") "metadata"))
+               (dissoc (get scope "permissions") "metadata"))
             "explicitly narrowed permissions accompany the accepted mint")))))
 
 (deftest exported-installation-tokens-require-safe-read-authority
