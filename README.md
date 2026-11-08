@@ -29,6 +29,7 @@ npm install
 # Set up environment
 cp .env.example .env
 # Edit .env with your database credentials
+node scripts/provision-signing-key.mjs ./signing-key.pem
 
 # Development
 npm run watch
@@ -88,6 +89,8 @@ administrator privileges only when Google verifies it on first sign-in.
 
 ### System
 - `GET /health` — Health check
+- `GET /.well-known/jwks.json` — This instance's public Ed25519 signing key
+- `GET /.well-known/did.json` — did:web document for `AXXIUM_PUBLIC_BASE_URL`
 - `GET /` — Portal redirect
 - `GET /portal/index.html` — Axxium portal
 
@@ -105,18 +108,32 @@ All configuration is via environment variables:
 | `DB_USER` | axxium | Database user |
 | `DB_PASSWORD` | | Database password |
 | `AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS` | 20000 | Per-statement and idle-in-transaction timeout for the dedicated schema-initialization pool, from 1000 to 300000 ms. A longer migration statement fails startup unless this value is raised. It does not change the application pool or global database settings. |
-| `JWT_SECRET` | change-me | JWT signing secret |
+| `AXXIUM_SIGNING_KEY_FILE` | required | PKCS#8 PEM of this instance's Ed25519 key. See [signing-key migration](docs/signing-key-migration.md) |
+| `AXXIUM_SIGNING_KID` | thumbprint | Optional kid. Unset uses the RFC 7638 SHA-256 thumbprint of the public JWK `{kty,crv,x}` |
+| `AXXIUM_ISS` | `JWT_ISSUER`, else `axxium` | Instance identifier sealed as the JWT `iss` |
+| `AXXIUM_SERVICE` | `promethean` | Service component of the audience |
+| `AXXIUM_ENV` | `NODE_ENV`, else `development` | Environment component of the audience and the `env` claim |
+| `JWT_AUDIENCE` | unset | Optional check. When set, it must equal `AXXIUM_SERVICE+AXXIUM_ENV` (for example `promethean+development`). A bare `promethean` is rejected at startup |
 | `AXXIUM_PUBLIC_BASE_URL` | http://127.0.0.1:8787 | Exact public origin for callbacks and CORS; AT OAuth requires a loopback IP for local redirects |
 | `AXXIUM_TRUST_PROXY` | unset | Fastify `trustProxy` behind a reverse proxy, so the per-client AT Protocol sign-in start limit (10/min; IPv6 clients keyed by /64) keys by the real client address. Set the trusted proxy addresses/CIDRs that match the proxy chain (`false` disables). Bare `true` is refused because it trusts every hop, so a client that reaches the port directly could spoof `X-Forwarded-For` and bypass the limit. Hop counts are refused because Fastify 5 trusts no proxy for them |
 | `GOOGLE_OAUTH_CLIENT_FILE` | | Private Google web OAuth client JSON path |
 | `AXXIUM_BOOTSTRAP_ADMIN_EMAIL` | | Verified Google email granted admin on first actor creation |
-| `JWT_ISSUER` | axxium | JWT issuer |
-| `JWT_AUDIENCE` | promethean | JWT audience |
+| `JWT_ISSUER` | axxium | Fallback instance identifier when `AXXIUM_ISS` is unset |
 | `BCRYPT_SALT_ROUNDS` | 12 | Password hashing rounds |
 
 Container stop grace must exceed `max(25000, 2 * AXXIUM_SCHEMA_STATEMENT_TIMEOUT_MS + 5000)` milliseconds (45 seconds at the default). This allows time for the current schema statement and a rollback before the startup shutdown deadline. Choose a larger schema timeout and matching stop grace when a reviewed migration needs longer than the default. A timed-out schema statement fails startup; transactional migrations roll back. A statement already issued before shutdown may still finish, and a commit already in flight cannot be undone by the signal. Connection failures can still make the outcome uncertain and require database-side inspection.
 
 The repository `docker-compose.yml` forwards the schema timeout and sets the Axxium service's stop grace to 610 seconds. That covers the maximum admitted 300,000 ms timeout and a five-second margin; a clean shutdown does not wait for the grace period. External Compose files and command-line stop-timeout overrides must provide their own matching grace.
+
+Actor tokens and Google OAuth state use Ed25519 signatures from
+`AXXIUM_SIGNING_KEY_FILE` and require this instance's issuer and key ID.
+Actor tokens additionally bind the `service+env` audience, the `env` claim,
+and the acting session or agent credential ID in `cred_id`. Google OAuth
+state uses the dedicated `axxium-google-oauth-state` audience.
+During migration from `JWT_SECRET`, sign in again to replace
+legacy actor JWTs and restart any in-flight Google sign-in. Existing `axx_`
+agent credentials continue to work. Provision the key before startup.
+See the [signing-key migration](docs/signing-key-migration.md).
 
 ## Architecture
 

@@ -133,7 +133,7 @@
       (let [actor (await (if (str/starts-with? state "link|")
                            (link-actor! req did (second (str/split state #"\|")))
                            (bound-actor! did)))
-            {:keys [token]} (await (session/create-session! actor))]
+            {:keys [token]} (await (session/create-atproto-session! actor did))]
         (session/set-session-cookie reply token)
         (http/redirect! reply "/portal/index.html"))
       (http/send! reply 400 {:error "AT Protocol identity or browser state mismatch"}))

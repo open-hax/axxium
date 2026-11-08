@@ -6,14 +6,19 @@
             [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
             [axxium.extern.lifecycle :as lifecycle]
+            [axxium.extern.signing-key :as signing-key]
             [axxium.infra.oidc :as oidc]
             [axxium.routes.auth :as auth-routes]
             [axxium.routes.actor :as actor-routes]
             [axxium.routes.agents :as agent-routes]
             [axxium.routes.atproto :as atproto-routes]
             [axxium.routes.atproto-oauth :as atproto-oauth-routes]
+            [axxium.routes.drive :as drive-routes]
+            [axxium.routes.github-identity :as github-identity-routes]
             [axxium.routes.google :as google-routes]
             [axxium.routes.health :as health-routes]
+            [axxium.routes.mailbox :as mailbox-routes]
+            [axxium.routes.well-known :as well-known-routes]
             ["@fastify/cors" :default fastifyCors]
             ["@fastify/cookie" :default fastifyCookie]
             ["@fastify/static" :default fastifyStatic]
@@ -35,8 +40,12 @@
   "Register all API routes on the app."
   [app]
   (health-routes/register-health-routes! app)
+  (well-known-routes/register-well-known-routes! app)
   (auth-routes/register-auth-routes! app)
   (google-routes/register-google-routes! app)
+  (drive-routes/register-drive-routes! app)
+  (github-identity-routes/register-github-identity-routes! app)
+  (mailbox-routes/register-mailbox-routes! app)
   (actor-routes/register-actor-routes! app)
   (agent-routes/register-agent-routes! app)
   (atproto-routes/register-atproto-routes! app)
@@ -51,13 +60,18 @@
 
 (defn start!
   "Start the Axxium server.
-   Initializes database schema and starts listening."
+   Loads the signing key, initializes the database schema, and listens.
+   The log line is the kid only."
   []
   (println "Starting Axxium identity kernel...")
   (let [statement-timeout-ms (cfg/schema-statement-timeout-ms)
         schema-pool (db/create-schema-pool! statement-timeout-ms)
         controller (lifecycle/install! @db/pool schema-pool statement-timeout-ms)]
-    (-> (db/init-schema! schema-pool #(lifecycle/stopping? controller))
+    (-> (signing-key/load!)
+        (.then
+         (fn [loaded]
+           (println (str "Signing key " (:kid loaded)))
+           (db/init-schema! schema-pool #(lifecycle/stopping? controller))))
       (.then
         (fn ^:async schema-ready [_]
           (await (lifecycle/close-startup! controller))
@@ -82,5 +96,7 @@
       (.catch
         (fn [err]
           (when-not (lifecycle/stopping? controller)
-            (println (str "Failed to start Axxium: " (.-message err)))
+            (let [reason (:reason (ex-data err))]
+              (println (str "Failed to start Axxium: " (.-message err)
+                            (when reason (str " (" (name reason) ")")))))
             (js/process.exit 1)))))))
