@@ -170,12 +170,12 @@
       c)))
 
 (defn decide-mint
-  "Record the decision to mint a token for `did` (a read: no effect event).
+  "Record the decision to export a read-only token for `did`.
    Allowed for the actor itself or a managing ancestor, within policy (G4)."
   [lg state operator did label scope {:keys [at] :as ids}]
   (let [ok? (boolean (and (usable-credential state did label)
                           (or (= operator did) (may-manage? state operator did))
-                          (law/scope-within? scope (policy-of state did))))]
+                          (law/raw-token-scope-within? scope (policy-of state did))))]
     (assoc (policy/act lg state {:actor operator :resource (law/credential-resource-id did label)
                                  :action :mint :at at}
                        nil ids (constantly ok?))

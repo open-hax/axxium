@@ -82,6 +82,20 @@
        (repos-within? (set (:scope/repos scope)) (:policy/repos policy))
        (perms-within? (:scope/permissions scope) (:policy/permissions policy))))
 
+(def ^:private exported-read-permissions
+  #{"checks" "contents" "issues" "metadata" "pull_requests" "statuses"})
+
+(defn raw-token-scope-within?
+  "Only export explicitly scoped repository reads. A GitHub bearer token
+   cannot express individual write actions or restrictions on a holder's PR."
+  [{:scope/keys [permissions] :as scope} policy]
+  (and (scope-within? scope policy)
+       (contains? (:policy/actions policy) :read)
+       (seq permissions)
+       (every? (fn [[permission level]]
+                 (and (= "read" level) (contains? exported-read-permissions permission)))
+               permissions)))
+
 (defn action-allowed?
   "May an actor with `policy` take `action` on a PR? `own?` = the PR was
    authored by this same GitHub identity (no self-approval or self-merge)."

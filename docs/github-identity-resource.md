@@ -32,8 +32,8 @@ alice ─┬─ assistant-bot   credential github-app (existing App, imported)
 - **G3:** an actor is effective only when it and all of its ancestors are
   `:active`, so suspending an actor also suspends everything under it. Children
   are not rewritten, so resuming the parent restores the whole subtree.
-- **G4:** a token is minted only for scopes that fit inside the holder's policy.
-  The holder itself or a managing ancestor can mint.
+- **G4:** the holder or a managing ancestor can request a read-only GitHub
+  installation token within the holder's repository and permission policy.
 - **G5:** secrets are sealed with AES-256-GCM and bound to the owner's DID as
   AAD. An imported key file is referenced by path. Plaintext never enters the
   ledger. Revoking a credential drops the secret from the current resource.
@@ -57,15 +57,32 @@ GitHub blocks automated sign-ups, so each bot is its own GitHub App. It acts as
    app's install page.
 3. After installing, call `credential_rotate` with `:github/installation-id`.
 
-Minting works like this. Axxium signs an app JWT locally (RS256, 9-minute
-lifetime). It then calls `POST /app/installations/:id/access_tokens`, narrowed to
-the requested repos and permissions. Tokens are cached in memory until 60 seconds
-before they expire. The cache key is (credential, generation, scope), so a
-rotation invalidates the cache.
+To export a raw installation token, the holder's policy must allow `:read`.
+Pass concrete repository names and a nonempty permission map. Supported GitHub
+permissions at level `read` are `checks`, `contents`, `issues`, `metadata`,
+`pull_requests`, and `statuses`. GitHub adds its required metadata read
+permission. Axxium refuses write, empty, and unrecognized permission requests
+before contacting GitHub.
 
-`token_for` also returns `:axxium/marker`, which is
-`<!-- axxium-actor:v1 did=… -->`, for attribution in comments. The function
-`law/action-allowed?` encodes the forbid rules `:approve-own` and `:merge-own`.
+Axxium signs an app JWT locally (RS256, 9-minute lifetime) and verifies the
+GitHub installation's account and current permission grants before requesting a
+token. It uses an internal metadata-read token limited to the requested names
+to verify their full names, owner, and immutable repository IDs. The final token
+request uses those IDs, and Axxium checks the returned scope before serving the
+token. This flow supports user and organization installations.
+
+The cache key includes the credential generation, verified installation and
+repository IDs, and requested permissions. Axxium rechecks the scope before
+serving a cached token and stops reusing it 60 seconds before expiration.
+
+GitHub permission levels group multiple actions together. For example,
+`pull_requests:write` grants review submission with any supported review event.
+The identity policy retains narrower actions and forbids for managed operations.
+`token_for` only exports reads. GitHub repository rules independently govern
+branch protection, bypasses, and force pushes.
+
+`token_for` also returns `:axxium/marker` (`<!-- axxium-actor:v1 did=… -->`) to
+identify the actor for consumers that record attribution.
 
 ## Importing an existing GitHub App
 
@@ -106,8 +123,7 @@ credentials retain their own DIDs and cannot act as the configured root.
 ## Not yet
 
 - The ledger supports a single writer process only.
-- There is no proxied review/comment/merge yet. Callers use the minted token and
-  apply `action-allowed?` and the marker themselves.
+- A write proxy for review, comment, push, and merge is still pending.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
 - Nothing has been run against real GitHub.
 
@@ -182,8 +198,8 @@ ledger as MCP. The signed-in actor sees itself and its descendants and can:
 ### How each tool would consume its credentials (wrapper sketch, not shipped)
 
 A small launcher on the host calls `credentials_self` and exports each
-`:api-key` under its `:credential/env`. It then calls `token_for` for a short-lived
-`GH_TOKEN`, and execs the tool.
+`:api-key` under its `:credential/env`. It then calls `token_for` for a
+short-lived read-only `GH_TOKEN`, and execs the tool.
 
 - **Codex CLI:** gets `OPENAI_API_KEY` and `GH_TOKEN` from the environment. The
   launcher writes nothing to `~/.codex`.
