@@ -159,7 +159,7 @@
                                    calls installation-grants)
                 :token-key key :key-dir dir :cache (atom {}) :now (constantly 1e12) :ids ids}
           c (fn [lg actor tool args] (mcp/call (assoc deps :ledger lg) {:actor actor} tool args))
-          widgets-scope {:scope/repos ["example-org/widgets"] :scope/permissions {"contents" "write"}}]
+          widgets-scope {:scope/repos ["example-org/widgets"] :scope/permissions {"contents" "read"}}]
       (-> (c lg alice "credential_provision"
              {:actor/did widgets :credential/label "github-app" :credential/pem (:pem widgets-key)
               :github/app-id 9001 :github/app-slug "widgets-bot" :github/installation-id 77})
@@ -179,7 +179,7 @@
                              (c lg review "token_for" (assoc widgets-scope :actor/did widgets :credential/label "github-app"))
                              (c lg assistant "token_for" {:actor/did assistant :credential/label "github-app"
                                                      :scope/repos ["other-org/private"]
-                                                     :scope/permissions {"pull_requests" "write"}})])
+                                                     :scope/permissions {"pull_requests" "read"}})])
                        (.then (fn [rs] [lg (vec rs)])))))
           (.then (fn [[lg [a out-of-policy sibling g]]]
                    (is (= "widgets-bot[bot]" (get-in a [:result :github/actor])))
