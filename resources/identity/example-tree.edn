@@ -20,4 +20,3 @@
   {:id "alice:laptop" :parent "alice" :kind :host :name "laptop" :policy :team}
   {:id "alice:laptop:coding-agent" :parent "alice:laptop" :kind :agent
    :name "coding-agent" :policy :team}]}
-

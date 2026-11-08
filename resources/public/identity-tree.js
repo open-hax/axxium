@@ -49,4 +49,3 @@ export function fieldsFromPolicy(p) {
   return { repos: (p.repos || []).join(', '), permissions: formatPermissions(p.permissions),
            actions: (p.actions || []).join(', '), forbid: (p.forbid || []).join(', ') };
 }
-

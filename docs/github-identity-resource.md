@@ -212,4 +212,3 @@ short-lived read-only `GH_TOKEN`, and execs the tool.
 
 GitHub tokens expire within an hour, and the launcher mints a new one on each
 run.
-

@@ -498,4 +498,3 @@
   [lg ctx request]
   (cond-> (rpc-request lg ctx request)
     (not (contains? request "id")) (assoc :response nil)))
-

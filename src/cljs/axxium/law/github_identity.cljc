@@ -129,4 +129,3 @@
   "Comment marker naming the Axxium actor behind a GitHub action."
   [did]
   (str "<!-- axxium-actor:v1 did=" did " -->"))
-

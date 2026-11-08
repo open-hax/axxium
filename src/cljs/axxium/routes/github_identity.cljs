@@ -221,4 +221,3 @@
   (http/post! app "/api/github/manifest" (auth-context/with-auth manifest!))
   (http/get! app law/manifest-callback-path (auth-context/with-auth callback!))
   (http/post! app "/api/github/mcp" (auth-context/with-auth mcp!)))
-

@@ -391,4 +391,3 @@
     (-> (malformed-provider-scope*)
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
-

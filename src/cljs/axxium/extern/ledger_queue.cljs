@@ -29,4 +29,3 @@
                                 out)))))]
     (reset! queue (.catch run (fn [_] nil)))
     run))
-

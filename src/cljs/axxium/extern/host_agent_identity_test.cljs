@@ -178,4 +178,3 @@
                    (is (= [agent] unchanged))))
           (.catch (fn [e] (is false (pr-str e))))
           (.finally done)))))
-
