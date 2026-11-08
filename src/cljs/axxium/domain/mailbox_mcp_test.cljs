@@ -40,6 +40,26 @@
 (defn- send [lg c k body]
   (mm/call lg c :send_message {:to fx/bob :idempotency-key k :body body}))
 
+(deftest registration-repairs-only-a-missing-initial-grant
+  (let [[initial s] (open mm/empty-ledger alice)
+        c (ctx alice (:session/id s))
+        [registered] (ok (mm/call initial c :register_mailbox {}))]
+    (doseq [length (range (count initial) (inc (count registered)))]
+      (let [prefix (subvec registered 0 length)
+            [repaired] (ok (mm/call prefix c :register_mailbox {}))]
+        (is (nil? (:error (mm/call repaired c :read_inbox {})))
+            (str "the mailbox is usable after retrying legacy prefix " length))
+        (is (= repaired (:ledger (mm/call repaired c :register_mailbox {})))
+            "repeating a complete registration adds no events")))
+    (doseq [before [registered (subvec registered 0 (+ (count initial) 2))]]
+      (let [[revoked] (ok (mm/call before c :revoke_send {:to fx/alice}))
+            [retry] (ok (mm/call revoked c :register_mailbox {}))]
+        (is (= retry (:ledger (mm/call retry c :register_mailbox {}))))
+        (is (nil? (:error (mm/call retry c :read_inbox {}))))
+        (is (= :forbidden (:error (mm/call retry c :send_message
+                                           {:to fx/alice :idempotency-key "revoked" :body {:n 1}})))
+            "retry preserves revocation even when the initial grant never committed")))))
+
 ;; 1
 (deftest anonymous-and-cross-owner-refused
   (let [{:keys [lg a b]} (world)]

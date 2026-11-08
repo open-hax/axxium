@@ -45,6 +45,12 @@ setting absent in deployments that do not operate a mailbox. The route
 `/api/mailbox/mcp` uses the configured public origin and that URL as its
 mailbox audience.
 
+The polling ledger writes each operation as a single newline-terminated
+`:axxium.mailbox/batch-v1` EDN frame. Recovery drops an incomplete final
+frame and reads older complete event lines. Retrying registration completes
+an interrupted legacy owner grant while preserving any recorded revocation.
+Once a ledger receives framed writes, use a polling build that reads v1 frames.
+
 The polling profile uses MCP Streamable HTTP with the 2025-06-18 version
 and JSON POST responses. Initialize with a live Axxium session issued by
 the verified AT Protocol callback. A bearer works for programmatic callers.

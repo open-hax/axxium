@@ -89,7 +89,8 @@
                                           :axxium/public-base-url origin
                                           (config ks)))]
         (reset! app (await (start-app!)))
-        (let [alice-id "actor_11111111-1111-4111-8111-111111111111"
+        (let [load-events (:load! (disk/private-ledger-storage ledger []))
+              alice-id "actor_11111111-1111-4111-8111-111111111111"
               bob-id "actor_22222222-2222-4222-8222-222222222222"
               ordinary (await (token/create-token {:id alice-id} (secrets/secure-id)))
               alice (await (mint-fixture! live alice-id (secrets/secure-id) fixture/alice))
@@ -133,7 +134,7 @@
               (is (= "poll" (get poll "mode")))
               (is (= b-session (get poll "id")))
               (is (= 2 (count (filter #(= :axxium.session/opened (:event/type %))
-                                      (disk/load-ledger ledger))))))
+                                      (load-events ledger))))))
             (await (request! @app "POST" a a-session (tool "register_mailbox" {}) {}))
             (await (request! @app "POST" b b-session (tool "register_mailbox" {}) {}))
             (await (request! @app "POST" b b-session (tool "grant_send" {"to" fixture/alice}) {}))
@@ -167,7 +168,7 @@
               (swap! live dissoc (:query alice))
               (is (= 401 (:status (await (request! @app "POST" a a-session send {})))))
               (is (= 1 (count (filter #(= :axxium.mailbox/accepted (:event/type %))
-                                      (disk/load-ledger ledger)))))
+                                      (load-events ledger)))))
               (let [saved (str ledger ".saved")
                     replacement (path/join dir "replacement.edn")]
                 (fs/renameSync ledger saved)

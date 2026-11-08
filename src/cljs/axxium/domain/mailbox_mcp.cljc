@@ -143,21 +143,51 @@
                 :address/registered? (contains? (:resources (state/fold lg)) (mailbox/stream d))}}
       (refuse lg :bad-address))))
 
+(def ^:private owner-actions [:send :read :ack])
+
+(defn- owner-grant-issued? [lg owner box]
+  ;; Look at grant history so a retry never recreates a revoked grant.
+  (some (fn [{:event/keys [actor body]}]
+          (and (= owner actor (:grant/actor body))
+               (= box (:grant/resource body))
+               (str/starts-with? (or (:grant/id body) "") "mbox-grant:")))
+        (of-type lg "grants" :axxium.grant/granted)))
+
+(defn- unrevoked-owner-actions [lg owner box]
+  (let [revoked (into #{}
+                      (mapcat (fn [{:event/keys [body]}]
+                                (when (and (= owner (:revoke/actor body))
+                                           (= box (:revoke/resource body)))
+                                  (or (:revoke/actions body) owner-actions))))
+                      (of-type lg "grants" :axxium.grant/revoked))]
+    (filterv (complement revoked) owner-actions)))
+
 (defn- register-mailbox [lg {:keys [principal now]} _]
   (let [me (:auth/did principal)
-        box (mailbox/stream me)]
-    (if (contains? (:resources (state/fold lg)) box)
+        box (mailbox/stream me)
+        st (state/fold lg)
+        registered? (contains? (:resources st) box)
+        actions (if registered?
+                  (when-not (owner-grant-issued? lg me box)
+                    (unrevoked-owner-actions lg me box))
+                  owner-actions)]
+    (if-not (seq actions)
       {:ledger lg :result {:mailbox box}}
-      (let [r {:resource/id box :resource/kind :resource/mailbox :resource/owner me
-               :resource/store :clio :resource/location {:stream box}}
-            {lg1 :ledger e1 :effect} (resource/register lg (state/fold lg) me r
-                                                        {:decision-id (nid lg) :effect-id (nid lg 1) :at now})
-            g {:grant/id (str "mbox-grant:" (nid lg1 1)) :grant/actor me :grant/resource box
-               :grant/actions [:send :read :ack]}
-            {lg2 :ledger e2 :effect} (when e1
-                                       (resource/issue-grant lg1 (state/fold lg1) me g
-                                                             {:decision-id (nid lg1) :effect-id (nid lg1 1) :at now}))]
-        (if e2 {:ledger lg2 :result {:mailbox box :grant/id (:grant/id g)}} (refuse lg :forbidden))))))
+      (let [{lg1 :ledger registration :effect}
+            (when-not registered?
+              (resource/register lg st me {:resource/id box :resource/kind :resource/mailbox
+                                           :resource/owner me :resource/store :clio
+                                           :resource/location {:stream box}}
+                                 {:decision-id (nid lg) :effect-id (nid lg 1) :at now}))]
+        (if (or registered? registration)
+          (let [lg1 (or lg1 lg)
+                g {:grant/id (str "mbox-grant:" (nid lg1 1)) :grant/actor me :grant/resource box
+                   :grant/actions actions}
+                {lg2 :ledger grant :effect}
+                (resource/issue-grant lg1 (if registered? st (state/fold lg1)) me g
+                                      {:decision-id (nid lg1) :effect-id (nid lg1 1) :at now})]
+            (if grant {:ledger lg2 :result {:mailbox box :grant/id (:grant/id g)}} (refuse lg :forbidden)))
+          (refuse lg :forbidden))))))
 
 (defn- grant-send [lg {:keys [principal now]} {:keys [to]}]
   (if-not (did/did? to)
