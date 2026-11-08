@@ -166,5 +166,6 @@
 (def q-insert-session q/insert-session)
 (def q-select-actor-by-session q/select-actor-by-session)
 (def q-select-active-human-session q/select-active-human-session)
+(def q-select-actor-by-atproto-session q/select-actor-by-atproto-session)
 (def q-delete-session-by-hash q/delete-session-by-hash)
 (def q-health-check q/health-check)

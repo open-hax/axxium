@@ -7,6 +7,7 @@
             [axxium.domain.token :as domain]
             [axxium.extern.jose :as jose]
             [axxium.extern.signing-key :as signing-key]
+            [axxium.law.principal :as principal]
             [axxium.law.token :as law]))
 
 (defn- jwt-options [instance material]
@@ -21,16 +22,26 @@
   (throw (ex-info "actor token claims are outside the token law"
                   {:contract :axxium.law.token/valid-token-claims?})))
 
-(defn ^:async create-token
-  "Create a JWT for an actor acting through cred-id.
-   Returns the token string. Refuses claims outside the token law."
-  [actor cred-id]
+(defn- ^:async issue-token!
+  [actor cred-id extra-claims]
   (let [instance (cfg/instance)
         material (signing-key/current!)
-        claims (domain/actor-claims actor cred-id instance)]
+        claims (merge (domain/actor-claims actor cred-id instance) extra-claims)]
     (when-not (law/valid-token-claims? claims instance)
       (refuse-claims!))
     (await (jose/sign-actor! claims (jwt-options instance material)))))
+
+(defn create-token
+  "Create an actor JWT without an AT Protocol proof."
+  [actor cred-id]
+  (issue-token! actor cred-id nil))
+
+(defn create-atproto-token!
+  "Issue an actor JWT for a DID already verified by the AT Protocol callback."
+  [actor cred-id did]
+  (when-not (principal/from-atproto-session did)
+    (throw (ex-info "Invalid AT Protocol session DID" {})))
+  (issue-token! actor cred-id {:atproto_did did}))
 
 (defn ^:async verify-token
   "Verify a JWT and return its claims.

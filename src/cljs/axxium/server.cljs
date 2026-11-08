@@ -15,6 +15,7 @@
             [axxium.routes.github-identity :as github-identity-routes]
             [axxium.routes.google :as google-routes]
             [axxium.routes.health :as health-routes]
+            [axxium.routes.mailbox :as mailbox-routes]
             [axxium.routes.well-known :as well-known-routes]
             ["@fastify/cors" :default fastifyCors]
             ["@fastify/cookie" :default fastifyCookie]
@@ -42,6 +43,7 @@
   (google-routes/register-google-routes! app)
   (drive-routes/register-drive-routes! app)
   (github-identity-routes/register-github-identity-routes! app)
+  (mailbox-routes/register-mailbox-routes! app)
   (actor-routes/register-actor-routes! app)
   (agent-routes/register-agent-routes! app)
   (atproto-routes/register-atproto-routes! app)

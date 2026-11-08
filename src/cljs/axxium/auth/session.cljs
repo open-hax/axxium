@@ -9,16 +9,15 @@
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.http :as http]
             [axxium.law.actor :as actor-law]
+            [axxium.law.principal :as principal]
             [clojure.string :as str]))
 
 (def COOKIE-NAME (cfg/get-in-config [:session/cookie-name]))
 
-(defn ^:async create-session!
-  "Create a session for an actor.
-   The session id is the token cred_id. Returns {:token :actor :cred-id}."
-  [actor]
+(defn- ^:async issue-session!
+  [actor issue-token!]
   (let [cred-id (str (random-uuid))
-        value (await (token/create-token actor cred-id))
+        value (await (issue-token! actor cred-id))
         expires-at (secrets/expires-at (cfg/get-in-config [:jwt/expiry-hours]))]
     (await (db/query-sql
             (db/q-insert-session {:id cred-id
@@ -26,6 +25,34 @@
                                   :token-hash (secrets/token-hash value)
                                   :expires-at expires-at})))
     {:token value :actor actor :cred-id cred-id}))
+
+(defn create-session!
+  "Create a live session row and its actor JWT."
+  [actor]
+  (issue-session! actor token/create-token))
+
+(defn create-atproto-session!
+  "Create a session that records the verified AT Protocol sign-in DID."
+  [actor did]
+  (issue-session! actor #(token/create-atproto-token! %1 %2 did)))
+
+(defn ^:async atproto-session-proof
+  "Return a proof from the signed callback DID without retaining the bearer."
+  [value]
+  (when-not (str/blank? value)
+    (when-let [claims (try
+                        (await (token/verify-token value))
+                        (catch :default _ nil))]
+      (when-let [p (principal/from-atproto-session (:atproto_did claims))]
+        {:principal p :actor-id (:sub claims) :cred-id (:cred_id claims)
+         :token-hash (secrets/token-hash value)}))))
+
+(defn ^:async active-atproto-session?
+  "Check the live session and current provider binding in one database read."
+  [{:keys [principal actor-id cred-id token-hash]}]
+  (some? (await (db/query-one-sql
+                 (db/q-select-actor-by-atproto-session
+                  actor-id token-hash cred-id (:auth/did principal))))))
 
 (defn ^:async verify-session
   "Verify a session token. Returns promise of actor or nil.

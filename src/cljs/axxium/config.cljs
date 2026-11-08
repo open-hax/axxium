@@ -132,6 +132,7 @@
      ;; Directory imported App PEMs may be read from in place (never copied).
      :github-identity/key-dir (env "AXXIUM_GITHUB_IDENTITY_KEY_DIR" "")
      :identity/seed-file (env "AXXIUM_IDENTITY_SEED_FILE" "")
+     :mailbox/ledger-file (present (env "AXXIUM_MAILBOX_LEDGER_FILE"))
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))

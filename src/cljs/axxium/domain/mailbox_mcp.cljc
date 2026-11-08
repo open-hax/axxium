@@ -71,15 +71,16 @@
 
 ;; ---------------------------------------------------------------- guards
 
-(defn- authenticate
+(defn session-error
   "Fail closed: principal, session binding, audience and expiry."
-  [lg {:keys [principal audience now] sid :session/id}]
+  [lg {:keys [principal audience now] sid :session/id :as ctx}]
   (let [s (when sid (session lg sid))]
     (cond
       (not (principal/authenticated? principal)) :unauthenticated
       (nil? s) :no-session
       (not= (:auth/did principal) (:session/did s)) :session-mismatch
       (not= audience (:session/aud s)) :wrong-audience
+      (not= (:session/binding s) (:session/binding ctx)) :session-mismatch
       (>= (ms now) (ms (:session/expires s))) :session-expired
       :else nil)))
 
@@ -107,20 +108,31 @@
               :session/aud (:session/aud s) :session/expires (:session/expires s)
               :delivery/mode (if (:session/push? s) :push :poll)}}))
 
-(defn- open-session [lg {:keys [principal audience now]} {aud :audience :keys [ttl-ms push]}]
+(defn- session-result [lg body]
+  {:ledger lg
+   :result (assoc (dissoc body :session/binding)
+                  :delivery/mode (if (:session/push? body) :push :poll))})
+
+(defn- open-session [lg {:keys [principal audience now] :as ctx} {aud :audience :keys [ttl-ms push]}]
   (cond
     (not (principal/authenticated? principal)) (refuse :unauthenticated)
     (not= aud audience) (refuse :wrong-audience)
     (not (pos-int? ttl-ms)) (refuse :bad-ttl)
+    (:session/current-only? ctx)
+    (if-let [error (session-error lg ctx)]
+      (refuse lg error)
+      (session-result lg (session lg (:session/id ctx))))
     :else
-    (let [sid (nid lg)
-          body {:session/id sid :session/did (:auth/did principal)
-                :session/method (:auth/method principal) :session/aud aud
-                :session/expires (plus-ms now (min ttl-ms 86400000))
-                :session/push? (true? push)}
+    (let [sid (or (:session/new-id ctx) (nid lg))
+          body (cond-> {:session/id sid :session/did (:auth/did principal)
+                        :session/method (:auth/method principal) :session/aud aud
+                        :session/expires (plus-ms now (min ttl-ms 86400000))
+                        :session/push? (and (not= false (:session/push-supported? ctx))
+                                            (true? push))}
+                 (:session/binding ctx) (assoc :session/binding (:session/binding ctx)))
           [lg' _] (ledger/emit lg {:id sid :stream sessions :type :axxium.session/opened
                                    :actor (:auth/did principal) :at now :body body})]
-      {:ledger lg' :result (assoc body :delivery/mode (if (:session/push? body) :push :poll))})))
+      (session-result lg' body))))
 
 (defn- resolve-address [lg _ {:keys [address]}]
   (let [d (if (and (string? address) (str/starts-with? address mailbox/prefix))
@@ -302,7 +314,7 @@
   (if (= tool :open_session)
     (let [r (open-session lg ctx args)] (update r :ledger #(or % lg)))
     (if-let [f (get tools tool)]
-      (if-let [err (authenticate lg ctx)]
+      (if-let [err (session-error lg ctx)]
         (refuse lg err)
         (update (f lg ctx args) :ledger #(or % lg)))
       (refuse lg :unknown-tool))))
