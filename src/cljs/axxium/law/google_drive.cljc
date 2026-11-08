@@ -60,6 +60,14 @@
 (defn valid-get? [r] (m/validate GetRequest r))
 (defn valid-list? [r] (m/validate ListRequest r))
 
+(defn valid-file-list-page?
+  "An omitted files array is empty only in an identified Drive file list."
+  [{:keys [kind files] :as page}]
+  (and (map? page)
+       (if (contains? page :files)
+         (and (vector? files) (every? map? files))
+         (= "drive#fileList" kind))))
+
 (defn query-literal
   "Escape a value for a Drive `q` string literal."
   [value]

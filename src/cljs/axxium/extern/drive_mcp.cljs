@@ -45,16 +45,34 @@
                    {:error :created-untracked :drive/reason :forbidden
                     :drive/existing [(:drive/file-id file)]}))))))
 
-(defn- put! [{:keys [fetch] :as deps} st owner args]
-  (let [request (select-keys args [:drive/name :drive/folder-id])]
-    (-> (access-token deps st owner)
-        (.then (fn [at]
-                 (-> (gd/list-files fetch at {:q (law/same-name-query request)})
-                     (.then (fn [{:drive/keys [files]}]
-                              (let [plan (drive/put-plan st owner files request)]
-                                (if (= :refused (:drive/outcome plan))
-                                  {:error (:drive/reason plan) :drive/existing (:drive/existing plan)}
-                                  (create! deps st owner at args)))))))))))
+(defn- find-existing
+  "Find a same-name page or prove exhaustion within one search deadline."
+  [fetch at q]
+  (let [signal (js/AbortSignal.timeout law/request-timeout-ms)]
+    (letfn [(search [page-token seen]
+              (.throwIfAborted signal)
+              (-> (gd/list-files fetch at {:q q :page-token page-token :signal signal})
+                  (.then (fn [{:drive/keys [files next-page-token incomplete-search?]}]
+                           (.throwIfAborted signal)
+                           (cond
+                             (seq files) files
+                             incomplete-search? (throw (ex-info "incomplete Drive duplicate search" {}))
+                             (nil? next-page-token) files
+                             (and (string? next-page-token)
+                                  (seq next-page-token)
+                                  (not (contains? seen next-page-token)))
+                             (search next-page-token (conj seen next-page-token))
+                             :else (throw (ex-info "invalid Drive continuation token" {})))))))]
+      (search nil #{}))))
+
+(defn- ^:async put! [{:keys [fetch] :as deps} st owner args]
+  (let [request (select-keys args [:drive/name :drive/folder-id])
+        at (await (access-token deps st owner))
+        files (await (find-existing fetch at (law/same-name-query request)))
+        plan (drive/put-plan st owner files request)]
+    (if (= :refused (:drive/outcome plan))
+      {:error (:drive/reason plan) :drive/existing (:drive/existing plan)}
+      (create! deps st owner at args))))
 
 (defn- get! [{:keys [fetch] :as deps} st owner {:resource/keys [id]}]
   (if-let [r (drive/owned-file st owner id)]

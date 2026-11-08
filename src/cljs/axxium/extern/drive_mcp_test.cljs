@@ -186,6 +186,53 @@
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
 
+(defn- ^:async duplicate-search-pages* []
+  (let [key (crypto/randomBytes 32)
+        args {:drive/name "evidence.edn" :drive/folder-id "F" :drive/value 1}
+        match {:id "preexisting" :name "evidence.edn" :parents ["F"]}
+        outcomes [[{:files [match]} :exists-untracked false]
+                  [{:files []} nil true]
+                  [{:kind "drive#fileList"} nil true]
+                  [{:files [] :nextPageToken "page+2"} :drive-unavailable false]
+                  [{:files [] :incompleteSearch true} :drive-unavailable false]
+                  [{} :drive-unavailable false]
+                  [{:kind "drive#fileList" :files {}} :drive-unavailable false]]]
+    (doseq [[second-page expected-error upload?] outcomes]
+      (let [calls (atom [])
+            files (atom {})
+            fetch (fake-drive files calls "1//refresh-alice")
+            search (atom [])
+            paged-fetch (fn [url opts]
+                          (let [params (.-searchParams (js/URL. url))]
+                            (if-let [q (.get params "q")]
+                              (let [page-token (.get params "pageToken")]
+                                (swap! search conj [q page-token (.-signal opts)])
+                                (js/Promise.resolve
+                                 (respond 200 (if page-token second-page
+                                                  {:files [] :nextPageToken "page+2"}))))
+                              (fetch url opts))))
+            result (await (mcp/call {:fetch paged-fetch :token-key key
+                                    :client {:client-id "cid" :client-secret "csecret"}
+                                    :ids (counter-ids) :ledger (ctx-ledger key)}
+                                   {:owner fx/alice} "drive_put" args))
+            q "name = 'evidence.edn' and trashed = false and 'F' in parents"]
+        (is (= [[q nil] [q "page+2"]] (mapv #(subvec % 0 2) @search)))
+        (let [[first-signal second-signal] (map #(nth % 2) @search)]
+          (is (instance? js/AbortSignal first-signal))
+          (is (identical? first-signal second-signal) "both pages share the same search deadline"))
+        (is (= expected-error (:error result)))
+        (is (= (if upload? 1 0) (count (filter (fn [[method url]]
+                                                 (and (= "POST" method) (str/includes? url "/upload/")))
+                                               @calls))))
+        (when (= :exists-untracked expected-error)
+          (is (= ["preexisting"] (:drive/existing result))))))))
+
+(deftest duplicate-search-must-finish-before-upload
+  (async done
+    (-> (duplicate-search-pages*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))
+
 (defn- ^:async refresh-error-classification* []
   (let [key (crypto/randomBytes 32)
         deps {:token-key key :client {} :ids (counter-ids) :ledger (ctx-ledger key)}
