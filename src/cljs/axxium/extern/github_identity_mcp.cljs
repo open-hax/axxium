@@ -72,23 +72,31 @@
     (cond sealed (some->> sealed (tc/open-sealed token-key did))
           key-file (gh/read-key-file key-dir key-file))))
 
-(defn- token-for! [{:keys [fetch ids cache now] :as deps} lg st caller
-                   {:actor/keys [did] :credential/keys [label] :as args}]
+(defn- ^:async token-for! [{:keys [fetch ids cache now] :as deps} lg st caller
+                           {:actor/keys [did] :credential/keys [label] :as args}]
   (let [scope (select-keys args [:scope/repos :scope/permissions])
         {lg' :ledger ok? :allow?} (gi/decide-mint lg st caller did label scope (ids))
         cred (gi/usable-credential st did label)
         meta (:resource/metadata cred)]
     (if-not ok?
-      (js/Promise.resolve {:ledger lg' :error :forbidden})
-      (if-let [pem (private-key deps did cred)]
-        (-> (gh/cached-mint cache (now) [(:resource/id cred) (:credential/generation meta) scope]
-                            #(gh/mint-installation-token
-                              fetch (gh/app-jwt (:github/app-id meta) pem (now))
-                              (:github/installation-id meta) scope))
-            (.then (fn [t] {:ledger lg'
-                            :result (assoc t :github/actor (str (:github/app-slug meta) "[bot]")
-                                           :axxium/marker (law/attribution-marker did))})))
-        (js/Promise.resolve {:ledger lg' :error :key-unavailable})))))
+      {:ledger lg' :error :forbidden}
+      (try
+        (if-let [pem (private-key deps did cred)]
+          (let [signal (js/AbortSignal.timeout 20000)
+                app-id (:github/app-id meta)
+                jwt (gh/app-jwt app-id pem (now))
+                verified (await (gh/verify-installation-scope
+                                 fetch jwt app-id (:github/installation-id meta) scope signal))
+                permissions (:scope/permissions scope)
+                token (await (gh/cached-mint cache (now)
+                                            [(:resource/id cred) (:credential/generation meta) app-id verified permissions]
+                                            #(gh/mint-installation-token fetch jwt verified permissions signal)))]
+            {:ledger lg'
+             :result (assoc token :github/actor (str (:github/app-slug meta) "[bot]")
+                            :axxium/marker (law/attribution-marker did))})
+          {:ledger lg' :error :key-unavailable})
+        (catch :default error
+          {:ledger lg' :error (or (:axxium/error (ex-data error)) :github-unavailable)})))))
 
 (defn- run [{:keys [ids] :as deps} lg st caller tool a]
   (let [did (:actor/did a) label (:credential/label a)]
