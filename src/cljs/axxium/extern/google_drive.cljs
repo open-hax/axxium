@@ -64,15 +64,21 @@
    :drive/mime-type (:mimeType f) :drive/parents (vec (:parents f))})
 
 (defn list-files
-  [fetch access-token {:keys [q page-token]}]
-  (let [qs (form (cond-> {"fields" "nextPageToken,files(id,name,mimeType,parents)"
+  [fetch access-token {:keys [q page-token signal]}]
+  (let [qs (form (cond-> {"fields" "kind,nextPageToken,incompleteSearch,files(id,name,mimeType,parents)"
                           "pageSize" "100" "spaces" "drive"}
                    q (assoc "q" q)
-                   page-token (assoc "pageToken" page-token)))]
-    (-> (fetch (str files-endpoint "?" qs) #js {:headers (auth access-token)})
+                   page-token (assoc "pageToken" page-token)))
+        options #js {:headers (auth access-token)}]
+    (when signal (set! (.-signal options) signal))
+    (-> (fetch (str files-endpoint "?" qs) options)
         (.then json-body)
-        (.then (fn [b] {:drive/files (mapv ->file (:files b))
-                        :drive/next-page-token (:nextPageToken b)})))))
+        (.then (fn [body]
+                 (when-not (law/valid-file-list-page? body)
+                   (throw (ex-info "invalid Drive file list" {})))
+                 {:drive/files (mapv ->file (:files body))
+                  :drive/next-page-token (:nextPageToken body)
+                  :drive/incomplete-search? (:incompleteSearch body)})))))
 
 (defn create-file
   "Multipart create. Always a new file id; never PATCHes an existing one."
