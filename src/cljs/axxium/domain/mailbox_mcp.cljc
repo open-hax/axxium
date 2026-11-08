@@ -19,6 +19,7 @@
             [axxium.law.did :as did]
             [axxium.law.event :as law]
             [axxium.law.principal :as principal]
+            [clio.shape.canonical :as canonical]
             [clojure.string :as str]))
 
 (def empty-ledger ledger/empty-ledger)
@@ -212,13 +213,20 @@
            (when (and (= from (:message/from b)) (= key (:message/idempotency-key b))) b))
         (accepted-events lg)))
 
+(defn- portable-edn? [value]
+  (try
+    (canonical/canonical-form value)
+    true
+    (catch #?(:clj Exception :cljs :default) _ false)))
+
 (defn- send-message [lg {:keys [principal now]} {:keys [to from idempotency-key body]}]
   (let [me (:auth/did principal)]
     (cond
       (and (some? from) (not= from me)) (refuse :forged-sender)
       (not (did/did? to)) (refuse :bad-address)
-      (not (and (string? idempotency-key) (<= 1 (count idempotency-key) 256))) (refuse :bad-idempotency-key)
-      (not (map? body)) (refuse :bad-body)
+      (not (and (string? idempotency-key) (<= 1 (count idempotency-key) 256)
+                (portable-edn? idempotency-key))) (refuse :bad-idempotency-key)
+      (not (and (map? body) (portable-edn? body))) (refuse :bad-body)
       (secret? body) (refuse :secret-in-payload)
       :else
       (if-let [prior (prior-send lg me idempotency-key)]
@@ -484,6 +492,8 @@
    :forbidden "Request the mailbox owner's permission before retrying."
    :not-found "Check the resource id and use its authorized owner."
    :idempotency-conflict "Use a new idempotency key for changed content."
+   :bad-idempotency-key "Use a 1–256 character key with valid Unicode."
+   :bad-body "Send an object with valid Unicode, finite numbers, and safe integers."
    :secret-in-payload "Remove credentials from the message body."
    :forged-sender "Omit from or use the authenticated actor's DID."})
 
