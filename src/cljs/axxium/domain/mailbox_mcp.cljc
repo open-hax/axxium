@@ -57,6 +57,9 @@
   [lg did]
   (mapv :event/body (of-type lg (mailbox/stream did) :axxium.mailbox/accepted)))
 
+(defn- accepted-events [lg]
+  (filter #(= :axxium.mailbox/accepted (:event/type %)) lg))
+
 (defn- message-event [lg message-id]
   (some #(when (and (= :axxium.mailbox/accepted (:event/type %))
                     (= message-id (get-in % [:event/body :message/id]))) %)
@@ -165,7 +168,7 @@
 (defn- prior-send [lg from key]
   (some #(let [b (:event/body %)]
            (when (and (= from (:message/from b)) (= key (:message/idempotency-key b))) b))
-        (filter #(= :axxium.mailbox/accepted (:event/type %)) lg)))
+        (accepted-events lg)))
 
 (defn- send-message [lg {:keys [principal now]} {:keys [to from idempotency-key body]}]
   (let [me (:auth/did principal)]
@@ -231,7 +234,8 @@
     (if-not (get-in d [:event/body :decision/allow?])
       (refuse lg' :forbidden)
       (let [explicit? (int? after)
-            cursor (if explicit? after (ack-cursor lg owner))
+            durable-cursor (ack-cursor lg owner)
+            cursor (if explicit? (min after durable-cursor) durable-cursor)
             acked (if explicit? #{} (acked-ids lg owner))
             es (->> (of-type lg box :axxium.mailbox/accepted)
                     (filter #(> (:event/seq %) cursor))
@@ -312,7 +316,8 @@
         (of-type lg sessions :axxium.session/opened)))
 
 (defn dispatch
-  "Plan each pending entry once per persisted ledger. Push is at-most-once:
+  "Plan each accepted message once per persisted ledger, even if its pending
+   event was lost in a partial write. Push is at-most-once:
    a persisted plan suppresses replay even if a crash prevented its send.
    Planning and external sending are not atomic; durable polling is the fallback.
    Push goes only to explicitly subscribed recipients; everyone else is
@@ -320,13 +325,15 @@
   [lg now]
   (let [done (into #{} (map #(get-in % [:event/body :outbox/message-id]))
                    (of-type lg outbox :axxium.outbox/dispatched))
-        pending (remove #(done (get-in % [:event/body :outbox/message-id]))
-                        (of-type lg outbox :axxium.outbox/pending))]
+        pending-ids (into {} (map (juxt #(get-in % [:event/body :outbox/message-id]) :event/id))
+                          (of-type lg outbox :axxium.outbox/pending))
+        pending (remove #(done (get-in % [:event/body :message/id])) (accepted-events lg))]
     (reduce (fn [{l :ledger :as acc} p]
-              (let [{:outbox/keys [message-id recipient]} (:event/body p)
+              (let [{message-id :message/id recipient :message/to} (:event/body p)
+                    cause (get pending-ids message-id (:event/id p))
                     channel (if (push-subscriber? l recipient now) :push :poll)
                     [l' _] (ledger/emit l {:id (nid l) :stream outbox :type :axxium.outbox/dispatched
-                                           :actor recipient :at now :causes [(:event/id p)]
+                                           :actor recipient :at now :causes [cause]
                                            :body {:outbox/message-id message-id :outbox/channel channel}})]
                 (cond-> (assoc acc :ledger l')
                   (= :push channel)
@@ -377,7 +384,7 @@
    (tool "send_message" "Send to a mailbox. Repeating an idempotency key with the same body returns the original receipt."
          {"to" str-schema "from" str-schema "idempotency_key" str-schema "body" {"type" "object"}}
          ["to" "idempotency_key" "body"] {"idempotentHint" true "openWorldHint" true})
-   (tool "read_inbox" "Read messages after a cursor (default: contiguous acknowledged prefix)."
+   (tool "read_inbox" "Read inbox messages. A supplied cursor cannot skip an unacknowledged message."
          {"mailbox" str-schema "after" {"type" "integer"}} [] read-hints)
    (tool "acknowledge_message" "Acknowledge one message; return the contiguous durable cursor."
          {"message_id" str-schema} ["message_id"] {})
