@@ -28,9 +28,28 @@ class AxxiumIdentityManager extends HTMLElement {
     this.unavailable = false;
     this.bootstrap = null;   // {did, key} — shown once, never refetched
     this.exported = '';
+    this.sessionVersion = 0;
+    this.onSessionChanged = () => {
+      this.sessionVersion += 1;
+      this.actors = [];
+      this.selected = '';
+      this.message = '';
+      this.unavailable = true;
+      this.bootstrap = null;
+      this.exported = '';
+      this.render();
+      this.refresh();
+    };
   }
 
-  connectedCallback() { this.refresh(); }
+  connectedCallback() {
+    window.addEventListener('axxium-session-changed', this.onSessionChanged);
+    this.refresh();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener('axxium-session-changed', this.onSessionChanged);
+  }
 
   async admin(body) {
     const response = await fetch('/api/identity/admin', {
@@ -44,10 +63,14 @@ class AxxiumIdentityManager extends HTMLElement {
   }
 
   async refresh() {
+    const sessionVersion = this.sessionVersion;
     try {
-      this.actors = (await this.admin({ op: 'list' })).actors;
+      const { actors } = await this.admin({ op: 'list' });
+      if (sessionVersion !== this.sessionVersion) return;
+      this.actors = actors;
       this.unavailable = false;
     } catch (error) {
+      if (sessionVersion !== this.sessionVersion) return;
       this.actors = [];
       this.unavailable = error.status === 401 || error.status === 403 || error.status === 503;
       if (!this.unavailable) this.message = error.message;
@@ -55,9 +78,17 @@ class AxxiumIdentityManager extends HTMLElement {
     this.render();
   }
 
-  async run(action) {
+  async run(action, applyResult) {
+    const sessionVersion = this.sessionVersion;
     this.message = '';
-    try { await action(); } catch (error) { this.message = error.message; }
+    try {
+      const result = await action();
+      if (sessionVersion !== this.sessionVersion) return;
+      applyResult?.(result);
+    } catch (error) {
+      if (sessionVersion !== this.sessionVersion) return;
+      this.message = error.message;
+    }
     await this.refresh();
   }
 
@@ -115,7 +146,7 @@ class AxxiumIdentityManager extends HTMLElement {
         el('button', {}, 'Provision'))));
 
     panel.append(el('details', {}, el('summary', {}, 'Create child actor'),
-      el('form', { onsubmit: submit('create', d => ({ policy: policyFromFields(d) })) },
+      el('form', { onsubmit: submit('create', d => ({ parent: a.did, policy: policyFromFields(d) })) },
         input('slug', 'Slug (a-z, 0-9, -)'), input('name', 'Display name'),
         el('label', {}, 'Kind', el('select', { name: 'kind' }, ...KINDS.map(k => el('option', { value: k }, k)))),
         el('small', {}, 'Policy starts as this actor\'s; it may only narrow.'),
@@ -129,8 +160,7 @@ class AxxiumIdentityManager extends HTMLElement {
       a.status === 'active' ? act('Suspend', 'suspend', 'secondary') : null,
       a.status === 'suspended' ? act('Resume', 'resume', 'secondary') : null,
       a.status !== 'revoked' ? act('Revoke actor', 'revoke', 'danger') : null,
-      el('button', { onclick: () => this.run(async () => {
-        const { bootstrapKey } = await this.admin({ op: 'bootstrap-issue', did: a.did });
+      el('button', { onclick: () => this.run(() => this.admin({ op: 'bootstrap-issue', did: a.did }), ({ bootstrapKey }) => {
         this.bootstrap = { did: a.did, key: bootstrapKey };
       }) }, 'Issue bootstrap key'),
       el('button', { onclick: () => this.run(() => this.startManifest(a.did)) }, 'Create GitHub App')));
@@ -175,13 +205,14 @@ class AxxiumIdentityManager extends HTMLElement {
     if (selected) section.append(this.actorPanel(selected));
 
     section.append(el('details', {}, el('summary', {}, 'Export / import subtree (EDN, no secrets)'),
-      el('button', { onclick: () => this.run(async () => { this.exported = (await this.admin({ op: 'export' })).edn; }) }, 'Export'),
+      el('button', { onclick: () => this.run(() => this.admin({ op: 'export' }), ({ edn }) => {
+        this.exported = edn;
+      }) }, 'Export'),
       this.exported ? el('code', {}, this.exported) : null,
       el('form', { onsubmit: event => {
           event.preventDefault();
           const seed = new FormData(event.currentTarget).get('seed');
-          this.run(async () => {
-            const r = await this.admin({ op: 'import', seed });
+          this.run(() => this.admin({ op: 'import', seed }), r => {
             this.message = `Imported: ${r.created.length} created, ${r.unchanged.length} unchanged, ${r.refused.length} refused`;
           });
         } },

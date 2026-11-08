@@ -103,7 +103,8 @@
     (case tool
       "actor_list" (js/Promise.resolve {:result {:actors (gi/actors-under st caller)}})
       "actor_provision" (js/Promise.resolve
-                         (effect-out (gi/provision-actor lg st caller did (:actor/name a) (:actor/policy a)
+                         (effect-out (gi/provision-actor lg st caller (get a :actor/parent caller)
+                                                           did (:actor/name a) (:actor/policy a)
                                                            (or (:actor/kind a) :bot) (ids))))
       "actor_suspend" (js/Promise.resolve (effect-out (gi/suspend lg st caller did (ids))))
       "actor_resume" (js/Promise.resolve (effect-out (gi/resume lg st caller did (ids))))
@@ -152,6 +153,7 @@
   (and (map? a)
        (or (#{"actor_list" "credentials_self" "subtree_export"} tool)
            (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a))) (string? (:actor/did a)))
+       (or (not= "actor_provision" tool) (not (contains? a :actor/parent)) (string? (:actor/parent a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))
 
