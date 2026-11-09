@@ -79,6 +79,37 @@
         (.catch (fn [error] (is false (pr-str error))))
         (.finally done))))
 
+(deftest startup-seed-attributes-nested-events-to-its-root
+  (let [ledger (seeded (counter-ids))]
+    (is (= laptop (gi/parent-of (state/fold ledger) agent)))
+    (is (seq ledger))
+    (is (every? #(= alice (:event/actor %)) ledger))))
+
+(defn- ^:async nested-seed-import []
+  (let [ids (counter-ids)
+        before (seeded ids)
+        child (str laptop ":imported")
+        seed {:nodes [{:id child :parent laptop :name "Imported Agent" :kind :agent
+                       :policy (admin/json->policy team-json)}]}
+        {:keys [status body ledger]}
+        (await (mcp/admin {:ledger before :ids ids} alice
+                          {:op "import" :seed (pr-str seed)}
+                          {:read-edn edn/read-one :host host}))
+        [decision effect :as added] (subvec ledger (count before))]
+    (is (= 200 status))
+    (is (= [child] (:created body)))
+    (is (= laptop (gi/parent-of (state/fold ledger) child)))
+    (is (= [:axxium.policy/decided :axxium.resource/registered] (mapv :event/type added)))
+    (is (= [alice alice] (mapv :event/actor added)))
+    (is (= alice (get-in decision [:event/body :decision/request :actor])))
+    (is (= [(:event/id decision)] (:event/causes effect)))))
+
+(deftest nested-seed-import-preserves-operator-attribution
+  (async done
+    (-> (nested-seed-import)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
 (deftest admin-handler-end-to-end
   (async done
     (let [ids (counter-ids)

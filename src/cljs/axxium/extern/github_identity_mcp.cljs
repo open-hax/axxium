@@ -34,6 +34,11 @@
 
 (defn digest [key] (.digest (.update (crypto/createHash "sha256") key "utf8") "hex"))
 
+(defn event-ids
+  "Create fresh identity decision and effect IDs with a shared timestamp."
+  []
+  {:decision-id (str (random-uuid)) :effect-id (str (random-uuid)) :at (js/Date.)})
+
 (defn authenticate
   "The agent DID when `key` matches its current bootstrap digest and the
    agent and every ancestor are effective; nil otherwise."
@@ -72,7 +77,7 @@
     (cond sealed (some->> sealed (tc/open-sealed token-key did))
           key-file (gh/read-key-file key-dir key-file))))
 
-(defn- ^:async token-for! [{:keys [fetch ids cache now] :as deps} lg st caller
+(defn- ^:async token-for! [{:keys [fetch ids cache now] :or {now #(js/Date.now)} :as deps} lg st caller
                            {:actor/keys [did] :credential/keys [label] :as args}]
   (let [scope (select-keys args [:scope/repos :scope/permissions])
         {lg' :ledger ok? :allow?} (gi/decide-mint lg st caller did label scope (ids))
