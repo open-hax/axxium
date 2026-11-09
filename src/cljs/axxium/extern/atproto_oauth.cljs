@@ -4,9 +4,14 @@
   (:require [axxium.config :as cfg]
             [axxium.law.atproto :as atproto-law]
             [clojure.string :as str]
+            ["@atproto-labs/fetch-node" :refer [safeFetchWrap]]
+            ["@atproto-labs/handle-resolver-node" :refer [AtprotoHandleResolverNode]]
             ["@atproto-labs/simple-store-memory" :refer [SimpleStoreMemory]]
             ["@atproto/oauth-client-node" :refer [NodeOAuthClient]]
-            ["ipaddr.js" :as ipaddr]))
+            ["ipaddr.js" :as ipaddr-module]))
+
+;; Node ESM wraps the CommonJS export, while the CJS test build gets it directly.
+(def ^:private ipaddr (or (.-default ipaddr-module) ipaddr-module))
 
 (def ^:private callback-path "/api/auth/atproto/callback")
 (def ^:private metadata-path "/api/auth/atproto/client-metadata.json")
@@ -243,11 +248,21 @@
 
 (defonce ^:private client
   (delay
-    (NodeOAuthClient.
-     #js {:clientMetadata (metadata)
-          :stateStore (new-oauth-state-store)
-          :sessionStore (new-oauth-store)
-          :requestLock with-local-oauth-lock})))
+    (let [safe-fetch (safeFetchWrap)]
+      (NodeOAuthClient.
+       #js {:clientMetadata (metadata)
+            ;; The handle resolver retains its own guarded fetch and smaller
+            ;; budgets. Do not pass the OAuth fetch through its guard again.
+            :handleResolver (AtprotoHandleResolverNode.)
+            ;; The SDK supplies a Request. Refuse implicit redirects on its
+            ;; DPoP POSTs while retaining explicit metadata request modes.
+            :fetch (fn [request]
+                     (if (= "follow" (.-redirect request))
+                       (safe-fetch request #js {:redirect "error"})
+                       (safe-fetch request)))
+            :stateStore (new-oauth-state-store)
+            :sessionStore (new-oauth-store)
+            :requestLock with-local-oauth-lock}))))
 
 (defn client-metadata []
   (js->clj (.-clientMetadata @client) :keywordize-keys true))

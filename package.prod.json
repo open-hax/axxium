@@ -8,6 +8,8 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@atproto-labs/fetch-node": "0.4.0",
+    "@atproto-labs/handle-resolver-node": "0.2.11",
     "@atproto-labs/simple-store-memory": "^0.2.6",
     "@atproto/identity": "^0.5.15",
     "@atproto/oauth-client-node": "^0.5.8",
