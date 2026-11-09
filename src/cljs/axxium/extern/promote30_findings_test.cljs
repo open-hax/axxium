@@ -7,6 +7,7 @@
             [axxium.extern.bcrypt :as bcrypt]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
+            [axxium.extern.signing-key :as signing-key]
             [axxium.routes.agents :as agents]
             [axxium.routes.auth :as auth]
             [axxium.shape.db :as shape]
@@ -96,32 +97,37 @@
         "axx_ branch database errors must propagate")))
 
 (defn- ^:async sign-actor-without-exp!
-  [claims secret]
+  [claims private-key kid]
+  (-> (new jose/SignJWT (clj->js claims))
+      (.setProtectedHeader #js {"alg" "EdDSA" "typ" "JWT" "kid" kid})
+      (.setIssuedAt)
+      (.setIssuer "axxium")
+      (.setAudience "axxium-api")
+      (.sign private-key)
+      (await)))
+
+(defn- ^:async sign-actor-with-hmac!
+  [claims]
   (-> (new jose/SignJWT (clj->js claims))
       (.setProtectedHeader #js {"alg" "HS256" "typ" "JWT"})
       (.setIssuedAt)
       (.setIssuer "axxium")
       (.setAudience "axxium-api")
-      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
-      (await)))
-
-(defn- ^:async sign-actor-with-algorithm!
-  [claims secret algorithm]
-  (-> (new jose/SignJWT (clj->js claims))
-      (.setProtectedHeader #js {"alg" algorithm "typ" "JWT"})
-      (.setIssuedAt)
-      (.setIssuer "axxium")
-      (.setAudience "axxium-api")
       (.setExpirationTime "1h")
-      (.sign (.encode (new (.-TextEncoder js/globalThis)) secret))
+      (.sign (.encode (new (.-TextEncoder js/globalThis)) "not-the-instance-key"))
       (await)))
 
-(defn- ^:async verify-actor-requires-hs256-and-exp*
+(defn- ^:async verify-actor-requires-eddsa-and-exp*
   []
-  (let [opts {:secret "fixture-secret" :issuer "axxium" :audience "axxium-api"}
+  (let [material (await (signing-key/generate-ephemeral!))
+        opts {:private-key (:private-key material)
+              :public-key (:public-key material)
+              :kid (:kid material)
+              :issuer "axxium"
+              :audience "axxium-api"}
         sealed (await (jose/sign-actor! {:sub "actor"} (assoc opts :expiry-hours 1)))
-        no-exp (await (sign-actor-without-exp! {:sub "actor"} "fixture-secret"))
-        wrong-alg (await (sign-actor-with-algorithm! {:sub "actor"} "fixture-secret" "HS384"))]
+        no-exp (await (sign-actor-without-exp! {:sub "actor"} (:private-key material) (:kid material)))
+        hmac (await (sign-actor-with-hmac! {:sub "actor"}))]
     (is (= "actor" (:sub (await (jose/verify-actor! sealed opts)))))
     (is (= :rejected
            (try
@@ -131,10 +137,10 @@
         "actor tokens without exp must be rejected")
     (is (= :rejected
            (try
-             (await (jose/verify-actor! wrong-alg opts))
+             (await (jose/verify-actor! hmac opts))
              :accepted
              (catch :default _ :rejected)))
-        "actor tokens signed with non-HS256 algorithms must be rejected")))
+        "actor tokens signed with HS256 must be rejected")))
 
 (defn- ^:async signup-actor-failure-rolls-back-entity*
   []
@@ -186,9 +192,9 @@
                   (.catch (fn [e] (is false (str "jwt-verify-failures-return-nil-but-database-errors-propagate rejected: " (pr-str e)))))
                   (.finally done))))
 
-(deftest verify-actor-requires-hs256-and-exp
-  (async done (-> (verify-actor-requires-hs256-and-exp*)
-                  (.catch (fn [e] (is false (str "verify-actor-requires-hs256-and-exp rejected: " (pr-str e)))))
+(deftest verify-actor-requires-eddsa-and-exp
+  (async done (-> (verify-actor-requires-eddsa-and-exp*)
+                  (.catch (fn [e] (is false (str "verify-actor-requires-eddsa-and-exp rejected: " (ex-message e)))))
                   (.finally done))))
 
 (deftest signup-actor-failure-rolls-back-entity

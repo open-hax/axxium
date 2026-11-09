@@ -5,6 +5,11 @@
 (defn body [req]
   (js->clj (or (aget req "body") #js {}) :keywordize-keys true))
 
+(defn json-body
+  "Decode a JSON protocol body while preserving its string keys."
+  [req]
+  (js->clj (aget req "body")))
+
 (defn param [req key]
   (aget (aget req "params") key))
 
@@ -19,16 +24,31 @@
 (defn send! [reply status data]
   (.send (.code reply status) (clj->js data)))
 
+(defn set-header! [reply name value]
+  (.header reply name value))
+
 (defn send-secret! [reply status data]
   (.header reply "Cache-Control" "no-store")
   (.header reply "Pragma" "no-cache")
   (send! reply status data))
+
+(defn send-empty! [reply status]
+  (.send (.code reply status)))
+
+(defn origin-settings
+  "Resolve the configured public host, origin and endpoint."
+  [base-url path]
+  (let [url (js/URL. path base-url)]
+    {:host (.-host url) :origin (.-origin url) :resource (.-href url)}))
 
 (defn redirect! [reply url]
   (.redirect reply url))
 
 (defn cookie [req name]
   (some-> req (aget "cookies") (aget name)))
+
+(defn header [req name]
+  (some-> req (aget "headers") (aget name)))
 
 (defn authorization [req]
   (some-> req (aget "headers") (aget "authorization")))
