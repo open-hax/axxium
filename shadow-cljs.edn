@@ -62,6 +62,14 @@
     :source-map true
     :infer-externs false}}
 
+  :atproto-oauth-fixture
+  {:target :esm :runtime :node
+   :output-dir "target/atproto-oauth"
+   :js-options {:js-provider :import}
+   :modules {:atproto {:exports {:startLimiterKey axxium.extern.atproto-oauth/start-limiter-key
+                                :authorize axxium.extern.atproto-oauth/authorize!}}}
+   :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
+
   :oidc-store-fixture
   {:target :esm :runtime :node
    :output-dir "target/oidc-store"
