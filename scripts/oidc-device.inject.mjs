@@ -59,6 +59,12 @@ const pool = {
       else row = records.get(key(p[0], p[1]));
       if (row && (!sql.includes('expires_at>clock_timestamp()') || row.expiry_ms > Date.now())) {
         rows = [{ ...clone(row), now_ms: Date.now() }];
+        if (sql.includes('payload::text AS payload')) {
+          rows[0].payload = JSON.stringify(row.payload);
+        }
+        if (sql.includes("payload->>'clientId' AS client_id")) {
+          rows[0].client_id = row.payload.clientId;
+        }
         rowCount = 1;
       }
     } else if (sql.startsWith('UPDATE axxium_oidc_records SET poll_last_ms')) {

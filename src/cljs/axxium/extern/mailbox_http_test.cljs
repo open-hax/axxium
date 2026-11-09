@@ -26,11 +26,13 @@
 (def ^:private headers {"host" "axxium.test"
                        "accept" "application/json, text/event-stream"})
 
-(defn- ^:async start-app! []
-  (let [app (fastify/create-app)]
-    (.register app fastify-cookie)
-    (routes/register-mailbox-routes! app)
-    {:app app :url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)}))
+(defn- ^:async start-app!
+  ([] (await (start-app! nil)))
+  ([oauth]
+   (let [app (fastify/create-app)]
+     (.register app fastify-cookie)
+     (routes/register-mailbox-routes! app oauth)
+     {:app app :url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)})))
 
 (defn- request! [app method token sid body overrides]
   (let [request-headers (merge headers
@@ -54,6 +56,7 @@
                                (let [text (apply str @chunks)]
                                  (resolve {:status (.-statusCode response)
                                            :sid (aget (.-headers response) "mcp-session-id")
+                                           :challenge (aget (.-headers response) "www-authenticate")
                                            :data (when (seq text) (js->clj (js/JSON.parse text)))
                                            :text text}))
                                (catch :default error (reject error))))))))]
@@ -217,6 +220,11 @@
         live (atom {})
         app (atom nil)
         tick (atom nil)
+        mailbox-grant (atom nil)
+        access-token "fixture-mailbox-oauth-access-token"
+        oauth {:issuer (str origin "/oidc") :resource audience :scope "mailbox:events"
+               :access-proof! (fn [value] (when (= access-token value) @mailbox-grant))
+               :active-grant? (fn [proof] (= proof @mailbox-grant))}
         challenge-ok? (atom false)
         challenge-count (atom 0)
         on-delivery (atom nil)
@@ -251,13 +259,14 @@
                                           :mailbox/webhook-actor-did fixture/bob
                                           :axxium/public-base-url origin
                                           (config ks)))]
-        (reset! app (await (start-app!)))
+        (reset! app (await (start-app! oauth)))
         (let [alice (await (mint-fixture! live "actor_11111111-1111-4111-8111-111111111111"
                                           (secrets/secure-id) fixture/alice))
               bob (await (mint-fixture! live "actor_22222222-2222-4222-8222-222222222222"
                                         (secrets/secure-id) fixture/bob))
               a (:bearer alice)
               b (:bearer bob)
+              root (await (session/atproto-session-proof b))
               initialized-a (await (request! @app "POST" a nil (rpc "initialize") {}))
               initialized-b (await (request! @app "POST" b nil (rpc "initialize") {}))
               a-session (:sid initialized-a)
@@ -268,6 +277,28 @@
                                                               "body" {"private_content" "fixture"}}) {}))]
           (is (= {"tools" {}} (get-in initialized-a [:data "result" "capabilities"])))
           (is (= {"tools" {} "events" {}} (get-in initialized-b [:data "result" "capabilities"])))
+          (reset! mailbox-grant (assoc root :oauth/grant-id "fixture-grant" :oauth/client-id "chatgpt-test"
+                                           :oauth/resource audience))
+          (let [metadata-path "/.well-known/oauth-protected-resource/api/mailbox/mcp"
+                metadata-app (update @app :url #(str/replace % (re-pattern (str endpoint "$")) metadata-path))
+                missing (await (request! @app "POST" nil nil (rpc "initialize") {}))
+                metadata (await (request! metadata-app "GET" nil nil nil {}))
+                initialized (await (request! @app "POST" access-token nil (rpc "initialize") {}))
+                oauth-session (:sid initialized)]
+            (is (= 401 (:status missing)))
+            (is (= (str "Bearer resource_metadata=\"" origin metadata-path "\"") (:challenge missing)))
+            (is (= [audience ["mailbox:events"] [(str origin "/oidc")]]
+                   (mapv (:data metadata) ["resource" "scopes_supported" "authorization_servers"])))
+            (is (= {"tools" {} "events" {}} (get-in initialized [:data "result" "capabilities"])))
+            (is (= ["whoami"]
+                   (mapv #(get % "name") (get-in (await (request! @app "POST" access-token oauth-session
+                                                      (rpc "tools/list") {}))
+                                                [:data "result" "tools"]))))
+            (is (= -32001 (get-in (await (request! @app "POST" access-token oauth-session
+                                           (tool "read_inbox" {}) {})) [:data "error" "code"])))
+            (is (= 404 (:status (await (request! @app "POST" b oauth-session (rpc "tools/list") {})))))
+            (reset! mailbox-grant nil)
+            (is (= 401 (:status (await (request! @app "POST" access-token oauth-session (rpc "tools/list") {}))))))
           (is (= [] (get-in (await (event-call (rpc "events/list"))) [:data "result" "events"])))
           (is (= -32601 (get-in (await (request! @app "POST" a a-session subscribe {}))
                                 [:data "error" "code"])))
@@ -290,7 +321,7 @@
           (await (@tick))
           (is (empty? @deliveries) "Existing messages are not replayed on subscribe.")
           (await (.close (:app @app)))
-          (reset! app (await (start-app!)))
+          (reset! app (await (start-app! oauth)))
           (reset! on-delivery
                   (fn ^:async repeat-subscribe []
                     (is (str/starts-with? (get-in (await (event-call subscribe)) [:data "result" "id"] "")

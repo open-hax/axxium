@@ -31,6 +31,39 @@
                      (assoc config :dynamic-registration true)]]
     (is (thrown? cljs.core/ExceptionInfo (law/require-config! candidate)))))
 
+(deftest mailbox-resource-requires-one-registered-confidential-client
+  (let [resource "https://identity.example.test/api/mailbox/mcp"
+        candidate (assoc config :mailbox-client-id "knoxx-stealth" :mailbox-resource resource)]
+    (is (= candidate (admitted-config candidate)))
+    (is (law/mailbox-client? candidate "knoxx-stealth"))
+    (is (not (law/mailbox-client? config nil)))
+    (is (not (law/mailbox-client? candidate "another-client")))
+    (doseq [invalid [(dissoc candidate :mailbox-client-id)
+                     (dissoc candidate :mailbox-resource)
+                     (assoc candidate :mailbox-client-id "another-client")
+                     (assoc-in candidate [:clients 0 :device-enabled?] true)
+                     (update-in candidate [:clients 0 :redirect-uris]
+                                conj "https://knoxx.example.test/another-callback")]]
+      (is (nil? (admitted-config invalid))))))
+
+(deftest mailbox-access-claims-are-bound-to-one-issuer-client-resource-and-scope
+  (let [resource "https://identity.example.test/api/mailbox/mcp"
+        candidate (assoc config :mailbox-client-id "knoxx-stealth" :mailbox-resource resource)
+        claims {:client-id "knoxx-stealth" :token-issuer (:issuer config)
+                :audience resource :scope law/mailbox-scope :account-id "actor" :grant-id "grant"}]
+    (is (law/mailbox-access-claims? candidate claims))
+    (is (not (law/mailbox-access-claims? config claims)))
+    (doseq [change [{:token-issuer nil}
+                    {:token-issuer "https://other.example.test"}
+                    {:client-id "another-client"}
+                    {:audience [resource]}
+                    {:audience (str resource "/")}
+                    {:scope (str law/mailbox-scope " profile")}
+                    {:scope "profile"}
+                    {:account-id nil}
+                    {:grant-id ""}]]
+      (is (not (law/mailbox-access-claims? candidate (merge claims change)))))))
+
 (deftest unqualified-urls-and-absent-private-keys-refuse
   (doseq [candidate [(assoc config :issuer "http://identity.example.test")
                      (assoc config :issuer "https://user:pass@identity.example.test")
@@ -55,6 +88,17 @@
     (is (= {:decision :restart-login} (law/interaction-admission (assoc context :session-actor-id "b"))))
     (is (= {:decision :login} (law/interaction-admission (assoc context :prompt "login"))))
     (is (= {:decision :deny} (law/interaction-admission (assoc context :decision "deny"))))))
+
+(deftest mailbox-consent-is-confined-to-the-dedicated-client-and-resource-scope
+  (let [context {:expected-uid "interaction" :actual-uid "interaction" :actor-id "a"
+                 :session-actor-id "a" :prompt "consent" :decision "approve"
+                 :scopes ["openid" "profile" law/mailbox-scope] :claims ["name"]}]
+    (is (= {:decision :consent}
+           (law/interaction-admission (assoc context :mailbox-client? true))))
+    (is (= {:decision :refuse :status 403} (law/interaction-admission context)))
+    (doseq [scopes [["openid"] ["openid" "admin" law/mailbox-scope] [law/mailbox-scope]]]
+      (is (= {:decision :refuse :status 403}
+             (law/interaction-admission (assoc context :mailbox-client? true :scopes scopes)))))))
 
 (deftest matching-interaction-identifiers-still-require-the-public-uid-shape
   (let [context {:actor-id "a" :session-actor-id "a" :prompt "consent"

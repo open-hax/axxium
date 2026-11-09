@@ -12,6 +12,7 @@
   (transport/install! app @db/pool
     {:config-file (environment/get-value "AXXIUM_OIDC_CONFIG_FILE")
      :public-base-url (config/get-in-config [:axxium/public-base-url])
+     :mailbox-actor-did (config/get-in-config [:mailbox/webhook-actor-did])
      :session-cookie-name (config/get-in-config [:session/cookie-name])}
     session/verify-session
     (fn [subject] (db/query-one-sql (db/q-select-actor-by-id {:id subject})))))

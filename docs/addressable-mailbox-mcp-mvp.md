@@ -106,6 +106,20 @@ mailbox acknowledgment and execution. While the pilot is configured, ordinary
 appends leave 32 KiB of the 2 MiB ledger for settlement of the in-flight
 attempt. After unsubscribe, an already-issued HTTPS request may complete.
 
+### Subscriber OAuth connection
+
 The pilot accepts the mailbox's existing AT Protocol session credentials.
-ChatGPT connection still requires an OAuth grant scoped to this MCP resource
-and bound to the verified recipient.
+For a private ChatGPT connection, set `mailbox-client-id` and
+`mailbox-resource` in the existing private OIDC authority file. The client
+must be a registered confidential authorization-code client with one exact
+redirect URI from the ChatGPT connection settings. The resource is the
+canonical public URL ending in `/api/mailbox/mcp`. Discovery advertises that
+resource and the `mailbox:events` scope. Use authorization code with S256 PKCE
+and the resource indicator at authorization and token exchange.
+
+Consent requires the pilot recipient's live verified AT Protocol session.
+The resulting grant binds the exact client, resource, actor, DID and parent
+session. The scoped bearer can discover and manage events and use `whoami`.
+Direct AT Protocol credentials continue to authorize the mailbox tools.
+Provider revocation or loss of the parent session or DID binding stops future
+delivery for that OAuth grant.

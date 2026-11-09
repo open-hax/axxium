@@ -38,14 +38,14 @@
 
 (defn- register-routes!
   "Register all API routes on the app."
-  [app]
+  [app oidc]
   (health-routes/register-health-routes! app)
   (well-known-routes/register-well-known-routes! app)
   (auth-routes/register-auth-routes! app)
   (google-routes/register-google-routes! app)
   (drive-routes/register-drive-routes! app)
   (github-identity-routes/register-github-identity-routes! app)
-  (mailbox-routes/register-mailbox-routes! app)
+  (mailbox-routes/register-mailbox-routes! app (when (map? oidc) oidc))
   (actor-routes/register-actor-routes! app)
   (agent-routes/register-agent-routes! app)
   (atproto-routes/register-atproto-routes! app)
@@ -79,20 +79,20 @@
             (println "Database schema initialized")
             (let [app (create-app)]
               (lifecycle/attach! controller app)
-              (await (oidc/enable! app))
-              (when-not (lifecycle/stopping? controller)
-                (http/register-portal-origin!
-                 app (cfg/get-in-config [:axxium/public-base-url]))
-                (register-routes! app)
-                (register-static! app)
-                (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])
-                                      :host (cfg/get-in-config [:axxium/host])})
-                    (.then
-                      (fn [address]
-                        (when-not (lifecycle/stopping? controller)
-                          (println (str "Axxium listening on " address))
-                          (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
-                          app)))))))))
+              (let [authority (await (oidc/enable! app))]
+                (when-not (lifecycle/stopping? controller)
+                  (http/register-portal-origin!
+                   app (cfg/get-in-config [:axxium/public-base-url]))
+                  (register-routes! app authority)
+                  (register-static! app)
+                  (-> (.listen app #js {:port (cfg/get-in-config [:axxium/port])
+                                        :host (cfg/get-in-config [:axxium/host])})
+                      (.then
+                        (fn [address]
+                          (when-not (lifecycle/stopping? controller)
+                            (println (str "Axxium listening on " address))
+                            (println (str "Portal: " (cfg/get-in-config [:axxium/public-base-url]) "/portal/index.html"))
+                            app))))))))))
       (.catch
         (fn [err]
           (when-not (lifecycle/stopping? controller)

@@ -108,7 +108,13 @@
                                                       (:events/enabled? ctx) (assoc "events" {}))}}}
 
     (= method "tools/list")
-    {:ledger lg :response {"jsonrpc" "2.0" "id" id "result" {"tools" tool-descriptors}}}
+    {:ledger lg :response {"jsonrpc" "2.0" "id" id
+                           "result" {"tools" (if (:events/only? ctx)
+                                               (filterv #(= "whoami" (get % "name")) tool-descriptors)
+                                               tool-descriptors)}}}
+
+    (and (= method "tools/call") (:events/only? ctx) (not= "whoami" (get params "name")))
+    {:ledger lg :response (rpc-error id -32001 "Mailbox event scope does not grant this tool")}
 
     (= method "tools/call")
     (let [tool-name (get params "name")

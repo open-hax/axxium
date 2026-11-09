@@ -18,6 +18,51 @@
       (throw (ex-info "OIDC URI must be an exact HTTPS endpoint" {}))))
   value)
 
+(defn- resource-indicators
+  "Confine resource grants to the configured mailbox client and audience."
+  [{:keys [mailbox-resource] :as config}]
+  #js {:getResourceServerInfo
+       (fn [_ctx resource client]
+         (if (and (law/mailbox-client? config (.-clientId client)) (= mailbox-resource resource))
+           #js {:scope law/mailbox-scope :audience mailbox-resource :accessTokenFormat "opaque"}
+           (throw (new (.-InvalidTarget errors)))))
+       :defaultResource
+       (fn [_ctx client requested]
+         (if (law/mailbox-client? config (.-clientId client))
+           (if (and (array? requested) (= 1 (alength requested)) (= mailbox-resource (aget requested 0)))
+             mailbox-resource
+             (throw (new (.-InvalidTarget errors))))
+           (or requested js/undefined)))
+       :useGrantedResource
+       (fn [ctx source]
+         (and (law/mailbox-client? config (.. ctx -oidc -client -clientId))
+              (.has (.-resourceIndicators source) mailbox-resource)))})
+
+(defn- current-grant!
+  "Apply the mailbox's verified-AT parent law to its dedicated client only."
+  [pool config verify-grant! grant-id account-id client-id]
+  (if (law/mailbox-client? config client-id)
+    (store/mailbox-grant-proof! pool grant-id account-id client-id (:mailbox-resource config))
+    (verify-grant! grant-id account-id)))
+
+(defn ^:async mailbox-access-proof!
+  "Resolve one opaque resource access token to its current mailbox grant proof."
+  [provider pool {:keys [issuer mailbox-client-id mailbox-resource] :as config} bearer]
+  (when (and mailbox-client-id provider (= issuer (.-issuer provider))
+             (string? bearer) (re-matches #"[A-Za-z0-9_-]{1,512}" bearer))
+    (when-let [token (await (.find (.-AccessToken provider) bearer))]
+      (let [account-id (.-accountId token)
+            grant-id (.-grantId token)]
+        (when (and (true? (.-isValid token))
+                   (not (.isSenderConstrained token))
+                   (law/mailbox-access-claims?
+                    config {:client-id (.-clientId token)
+                            :token-issuer (some-> token (aget "extra") (aget "iss"))
+                            :audience (.-aud token) :scope (.-scope token)
+                            :account-id account-id :grant-id grant-id}))
+          (await (store/mailbox-grant-proof! pool grant-id account-id mailbox-client-id
+                                             mailbox-resource)))))))
+
 (defn- html-escape
   "Encode labels supplied by registered clients and displayed user codes."
   [value]
@@ -34,15 +79,21 @@
                          title "</h1>" content "</body></html>")))
 
 (defn- approval-policy
-  "Always require a fresh root-session consent submission for a device request,
-   even when this browser already has a provider session and a reusable grant."
-  []
-  (let [policy (.base interactionPolicy)]
-    (.add (.-checks (.get policy "consent"))
+  "Require fresh root-session consent for device and mailbox authorization."
+  [config]
+  (let [policy (.base interactionPolicy)
+        checks (.-checks (.get policy "consent"))]
+    (.add checks
       (new (.-Check interactionPolicy)
         "device_root_approval" "Device sign-in requires explicit approval"
         (fn [ctx]
           (and (some? (.. ctx -oidc -deviceCode))
+               (nil? (some-> ctx (aget "oidc") (aget "result") (aget "consent")))))))
+    (.add checks
+      (new (.-Check interactionPolicy)
+        "mailbox_root_approval" "Mailbox authorization requires explicit approval"
+        (fn [ctx]
+          (and (law/mailbox-client? config (some-> ctx (aget "oidc") (aget "client") (aget "clientId")))
                (nil? (some-> ctx (aget "oidc") (aget "result") (aget "consent")))))))
     policy))
 
@@ -62,10 +113,14 @@
   (law/require-config! config)
   (when-not (and (fn? lookup-actor!) (fn? verify-grant!))
     (throw (ex-info "OIDC requires current actor and parent session verification" {})))
-  (let [{:keys [issuer clients cookie-keys jwks allow-loopback?]} config
+  (let [{:keys [issuer clients cookie-keys jwks allow-loopback? mailbox-resource]} config
         _ (require-uri! issuer allow-loopback?)
         _ (doseq [client clients uri (:redirect-uris client)]
             (require-uri! uri allow-loopback?))
+        _ (when mailbox-resource
+            (require-uri! mailbox-resource allow-loopback?)
+            (when-not (= mailbox-resource (str (.-origin (js/URL. issuer)) "/api/mailbox/mcp"))
+              (throw (ex-info "OIDC mailbox resource must be the exact primary MCP endpoint" {}))))
         keys (:keys jwks)]
     (when-not (and (seq keys)
                    (every? #(and (= "RSA" (:kty %)) (= "RS256" (:alg %))
@@ -87,13 +142,16 @@
                                         :redirect_uris redirect-uris
                                         :response_types ["code"]
                                         :grant_types (cond-> ["authorization_code"]
-                                                       (and (:device-flow-enabled? config) (not= false device-enabled?))
+                                                       (and (:device-flow-enabled? config)
+                                                            (not (law/mailbox-client? config id))
+                                                            (not= false device-enabled?))
                                                        (conj "urn:ietf:params:oauth:grant-type:device_code")
                                                        refresh-enabled? (conj "refresh_token"))
                                         :token_endpoint_auth_method "client_secret_post"}) clients))
               :jwks (clj->js jwks)
               :cookies #js {:keys (clj->js cookie-keys)}
               :features #js {:devInteractions #js {:enabled false}
+                             :resourceIndicators (resource-indicators config)
                              :deviceFlow #js {:enabled (true? (:device-flow-enabled? config))
                                               :deviceInfo (fn [_ctx] nil)
                                               :userCodeInputSource
@@ -118,7 +176,9 @@
                                                  (fn ^:async introspection-policy [_ctx client token]
                                                    (and (= (.-clientId token) (.-clientId client))
                                                         (some? (.-grantId token))
-                                                        (await (verify-grant! (.-grantId token) (.-accountId token)))
+                                                        (await (current-grant! pool config verify-grant!
+                                                                 (.-grantId token) (.-accountId token)
+                                                                 (.-clientId client)))
                                                         (when-let [actor (await (lookup-actor! (.-accountId token)))]
                                                           (and (= (.-accountId token) (:id actor))
                                                                (= "active" (:status actor))))))}
@@ -133,6 +193,20 @@
                       true)
                   false))
               :rotateRefreshToken true
+              :revokeGrantPolicy
+              (fn [ctx]
+                ;; oidc-provider 9.13.0 preserves a grant on access-token
+                ;; revocation. The mailbox worker relies on that grant, so
+                ;; its dedicated client's disconnect must revoke it as well.
+                (or (law/mailbox-client? config (some-> ctx (aget "oidc") (aget "client") (aget "clientId")))
+                    (not (and (= "revocation" (.. ctx -oidc -route))
+                              (some? (.. ctx -oidc -entities -AccessToken))))))
+              :extraTokenClaims (fn [_ctx token]
+                                  (if (and (= "AccessToken" (.-kind token))
+                                           (law/mailbox-client? config (.-clientId token))
+                                           (= mailbox-resource (.-aud token)))
+                                    #js {:iss issuer}
+                                    js/undefined))
               :scopes #js ["openid" "profile"]
               :claims #js {:openid #js ["sub"] :profile #js ["name"]}
               :renderError (fn [ctx _out _error]
@@ -143,16 +217,18 @@
                         :IdToken (bounded-ttl 300) :Interaction 300 :Session 86400
                         :RefreshToken (bounded-ttl 86400) :DeviceCode 600 :ClientCredentials 300
                         :BackchannelAuthenticationRequest 300}
-              :interactions #js {:policy (approval-policy)
+              :interactions #js {:policy (approval-policy config)
                                  :url (fn [_ctx interaction]
                                        (str "/oidc/interaction/" (.-uid interaction)))}
               :loadExistingGrant
               (fn ^:async load-grant [ctx]
                 (let [oidc (.-oidc ctx)
                       session (.-session oidc)
+                      client-id (.. oidc -client -clientId)
                       grant-id (or (some-> oidc (aget "result") (aget "consent") (aget "grantId"))
-                                   (.grantIdFor session (.. oidc -client -clientId)))]
-                  (when (and grant-id (await (verify-grant! grant-id (.-accountId session))))
+                                   (.grantIdFor session client-id))]
+                  (when (and grant-id (await (current-grant! pool config verify-grant!
+                                               grant-id (.-accountId session) client-id)))
                     (await (.find (.. oidc -provider -Grant) grant-id)))))
               :findAccount
               (fn ^:async find-account [ctx subject token]
@@ -162,7 +238,8 @@
                       (when (and (= subject (:id actor)) (= "active" (:status actor))
                                  (or (nil? token)
                                      (when-let [grant-id (.-grantId token)]
-                                       (await (verify-grant! grant-id subject)))))
+                                       (await (current-grant! pool config verify-grant!
+                                                grant-id subject (.-clientId token))))))
                         (when token
                           (aset ctx "axxiumRootExpiry"
                             (await (store/session-grant-expiry! pool (.-grantId token) subject))))

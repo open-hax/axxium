@@ -3,6 +3,10 @@
   (:require [axxium.law.relay :as relay]
             [malli.core :as m]))
 
+(def mailbox-scope
+  "The only resource scope granted to the dedicated mailbox client."
+  "mailbox:events")
+
 (def registry
   "Named input contracts; private keys and client secrets stay in server config."
   {::id [:string {:min 1 :max 128}]
@@ -21,7 +25,24 @@
              [:jwks :map]
              [:allow-loopback? {:optional true} :boolean]
              [:device-flow-enabled? {:optional true} :boolean]
+             [:mailbox-client-id {:optional true} [:ref ::id]]
+             [:mailbox-resource {:optional true} [:ref ::uri]]
              [:node-grants {:optional true} [:vector {:max 64} relay/grant-schema]]]})
+
+(defn mailbox-client?
+  "Check the exact opt-in registered client identity."
+  [{:keys [mailbox-client-id mailbox-resource]} client-id]
+  (and (some? mailbox-client-id) (some? mailbox-resource)
+       (= mailbox-client-id client-id)))
+
+(defn- mailbox-client-configured?
+  [{:keys [clients mailbox-client-id mailbox-resource] :as config}]
+  (or (and (nil? mailbox-client-id) (nil? mailbox-resource))
+      (some (fn [{:keys [id redirect-uris device-enabled?]}]
+              (and (mailbox-client? config id)
+                   (= 1 (count redirect-uris))
+                   (not (true? device-enabled?))))
+            clients)))
 
 (defn require-config!
   "Validate closed config and unique client IDs before any provider is created.
@@ -32,14 +53,34 @@
                             {:registry (merge (m/default-schemas) registry)})
                  (= (count (:clients config)) (count (set (map :id (:clients config)))))
                  (= (count (:clients config)) (count (set (map :secret (:clients config)))))
+                 (mailbox-client-configured? config)
                  (relay/grants-valid? (get config :node-grants []) (:clients config)))
     (throw (ex-info "Invalid OIDC authority configuration" {})))
   config)
 
+(defn mailbox-access-claims?
+  "Admit only verified token claims for the exact client, issuer and resource."
+  [{:keys [issuer mailbox-resource] :as config}
+   {:keys [client-id token-issuer audience scope account-id grant-id]}]
+  (and (mailbox-client? config client-id)
+       (= issuer token-issuer)
+       (= mailbox-resource audience)
+       (= mailbox-scope scope)
+       (every? #(and (string? %) (<= 1 (count %) 2048)) [account-id grant-id])))
+
+(defn- consent-scopes?
+  [scopes mailbox-client?]
+  (and (vector? scopes)
+       (some #{"openid"} scopes)
+       (if mailbox-client?
+         (and (some #{mailbox-scope} scopes)
+              (every? #{"openid" "profile" "mailbox:events"} scopes))
+         (every? #{"openid" "profile"} scopes))))
+
 (defn interaction-admission
   "Admit only a current principal's exact interaction and bounded profile scope.
    Context contains decoded scalars, never request objects or provider handles."
-  [{:keys [expected-uid actual-uid actor-id session-actor-id prompt decision scopes claims]}]
+  [{:keys [expected-uid actual-uid actor-id session-actor-id prompt decision scopes claims mailbox-client?]}]
   (cond
     (or (not (and (string? expected-uid) (re-matches #"[A-Za-z0-9_-]{1,128}" expected-uid)))
         (not= expected-uid actual-uid))
@@ -54,8 +95,7 @@
     (not= "consent" prompt)
     {:decision :refuse :status 409}
 
-    (not (and (vector? scopes) (some #{"openid"} scopes)
-              (every? #{"openid" "profile"} scopes)
+    (not (and (consent-scopes? scopes mailbox-client?)
               (vector? claims) (every? #{"sub" "name"} claims)))
     {:decision :refuse :status 403}
 
