@@ -69,11 +69,9 @@
 (defn- serialized [f]
   (ledger-queue/submit! ledger-writer (ledger-path) f))
 
-(defn- ids [] {:decision-id (str (random-uuid)) :effect-id (str (random-uuid)) :at (js/Date.)})
-
 (defn- deps [lg]
-  {:fetch js/fetch :token-key (token-key) :ledger lg :ids ids :cache token-cache
-   :now #(js/Date.now) :key-dir (cfg/get-in-config [:github-identity/key-dir])})
+  {:fetch gh/fetch! :token-key (token-key) :ledger lg :ids mcp/event-ids :cache token-cache
+   :key-dir (cfg/get-in-config [:github-identity/key-dir])})
 
 (defn- esc [s] (-> s (str/replace "&" "&amp;") (str/replace "\"" "&quot;") (str/replace "<" "&lt;")))
 
@@ -92,8 +90,8 @@
         (http/set-state-cookie! reply state-cookie sealed (secure?) law/manifest-callback-path)
         (http/set-header! reply "content-type" "text/html; charset=utf-8")
         (http/send! reply 200
-                    (str "<form id=f method=post action=\"https://github.com/settings/apps/new?state="
-                         (js/encodeURIComponent state) "\"><input type=hidden name=manifest value=\""
+                    (str "<form id=f method=post action=\"" (gh/manifest-create-url state)
+                         "\"><input type=hidden name=manifest value=\""
                          (esc (gh/manifest-json manifest))
                          "\"><button>Create GitHub App</button></form>"))))))
 
@@ -112,7 +110,7 @@
     (if-not (and bound? (seq code))
       (http/send! reply 400 {:error "Invalid or expired manifest state"})
       (try
-        (let [app (await (gh/convert-manifest js/fetch code))
+        (let [app (await (gh/convert-manifest gh/fetch! code))
               out (await (serialized
                           (fn ^:async register-app-credential [lg]
                             (let [st (state/fold lg)]
@@ -121,7 +119,7 @@
                                   lg st parent child "github-app" :github-app
                                   {:credential/sealed (tc/seal (token-key) child (:pem app))}
                                   {:github/app-id (:id app) :github/app-slug (:slug app)}
-                                  (ids)))))))]
+                                  (mcp/event-ids)))))))]
           (if (:effect out)
             (http/redirect! reply (str "https://github.com/apps/" (:slug app) "/installations/new"))
             (http/send! reply 403 {:error "credential registration refused"})))
@@ -203,7 +201,7 @@
     (when (configured?)
       (let [seed (gi/resolve-seed (edn/read-one (ledger-file/read-text path)) (host))
             out (await (serialized
-                        #(gi/apply-seed % (get-in seed [:root :did]) seed ids)))]
+                        #(gi/apply-seed % (get-in seed [:root :did]) seed mcp/event-ids)))]
         (println "Identity seed:" (count (:created out)) "created,"
                  (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
         out))))

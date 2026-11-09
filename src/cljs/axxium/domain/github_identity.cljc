@@ -273,7 +273,7 @@
                            (may-manage? st operator parent)))
                   (update acc :refused conj did)
                   :else
-                  (let [out (provision-actor lg st parent did name policy (or kind :bot) (ids))]
+                  (let [out (provision-actor lg st operator parent did name policy (or kind :bot) (ids))]
                     (-> (assoc acc :ledger (:ledger out))
                         (update (if (:effect out) :created :refused) conj did))))))
             {:ledger lg :created [] :unchanged [] :refused []}
