@@ -1,7 +1,6 @@
 (ns axxium.routes.mailbox-events
   "Opt-in MCP webhook subscription and delivery for a selected mailbox actor."
-  (:require [axxium.auth.session :as session]
-            [axxium.domain.mailbox-events :as events]
+  (:require [axxium.domain.mailbox-events :as events]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.http :as http]
@@ -71,11 +70,11 @@
                "refreshBefore" (secrets/instant-iso (:expires subscription))
                "cursor" nil "truncated" false}))
 
-(defn- check-session! [{:keys [writer path]} proof ctx f]
+(defn- check-session! [{:keys [writer path active-proof!]} proof ctx f]
   (queue/submit! writer path
     (fn ^:async authorized-operation [lg]
       (cond
-        (not (await (session/active-atproto-session? proof))) {:unauthenticated? true}
+        (not (await (active-proof! proof))) {:unauthenticated? true}
         (mailbox/session-error lg (assoc ctx :now (secrets/now))) {:session-error true}
         :else (f lg)))))
 
@@ -154,10 +153,10 @@
                        (merge (select-keys out [:ledger]) (success id {})))))))
         (rpc-error id -32602 "Invalid event arguments")))))
 
-(defn- ^:async send-attempt! [{:keys [writer path]} candidate subscription {:keys [url secret proof]}]
+(defn- ^:async send-attempt! [{:keys [writer path active-proof!]} candidate subscription {:keys [url secret proof]}]
   (let [attempt (await (queue/submit! writer path
                          (fn ^:async claim [lg]
-                           (when (await (session/active-atproto-session? proof))
+                           (when (await (active-proof! proof))
                              (events/attempt lg candidate (secrets/now))))))
         lg (queue/current-ledger writer path)
         current (events/subscription lg (:owner candidate))
@@ -182,11 +181,12 @@
 
 (defn install!
   "Enable the bounded pilot only for an explicitly selected DID and private key."
-  [app writer path owner key-file]
+  [app writer path owner key-file active-proof!]
   (when (or owner key-file)
     (let [key (when key-file (crypto/read-private-key! key-file))]
       (when-not (and (did/did? owner) (<= (count owner) 2048) key)
         (throw (ex-info "Mailbox webhook pilot requires a recipient DID and a private key file" {})))
-      (let [runtime {:owner owner :key key :writer writer :path path :verifying? (atom nil)}]
+      (let [runtime {:owner owner :key key :writer writer :path path
+                     :active-proof! active-proof! :verifying? (atom nil)}]
         (http/on-interval! app 2500 #(work! runtime))
         runtime))))

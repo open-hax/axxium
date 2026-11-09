@@ -1,6 +1,7 @@
 (ns axxium.extern.oidc-http
   "Fastify interaction transport around the durable OIDC engine."
-  (:require [axxium.extern.agent-credentials :as secrets]
+  (:require [axxium.auth.session :as session]
+            [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.oidc-provider :as engine]
             [axxium.extern.oidc-store :as store]
             [axxium.extern.relay :as relay]
@@ -68,6 +69,15 @@
       (when-let [actor (await (resolve-session! token))]
         (when (= "active" (:status actor)) {:actor actor :digest (secrets/token-hash token)})))))
 
+(defn- ^:async interaction-root!
+  [request cookie-name resolve-session! mailbox? owner]
+  (if mailbox?
+    (when-let [proof (await (session/atproto-session-proof (cookie-value request cookie-name)))]
+      (when (and (= owner (get-in proof [:principal :auth/did]))
+                 (await (session/active-atproto-session? proof)))
+        {:actor {:id (:actor-id proof) :display_name owner} :proof proof}))
+    (await (current-root request cookie-name resolve-session!))))
+
 (defn- fail!
   "Return a generic refusal without disclosing protocol codes or private state."
   [reply status]
@@ -76,14 +86,15 @@
 
 (defn- html!
   "Render an origin-bound form without scripts, framing or response caching."
-  [reply uid client-id actor-label token]
+  [reply uid client-id actor-label token mailbox?]
   (.header reply "Cache-Control" "no-store")
   (.header reply "Referrer-Policy" "no-referrer")
   (.header reply "Content-Security-Policy" "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
   (.type reply "text/html; charset=utf-8")
   (.send reply (str "<!doctype html><html><head><meta charset=utf-8><title>Axxium shared login</title></head><body>"
                     "<h1>Continue with your Axxium identity</h1><p>Signed in as " (html-escape actor-label) ".</p>"
-                    "<p>Allow sign-in to " (html-escape client-id) "?</p>"
+                    "<p>Allow " (if mailbox? "mailbox event subscriptions for " "sign-in to ")
+                    (html-escape client-id) "?</p>"
                     "<p>This sign-in may renew while your current Axxium root session is active, for at most 24 hours. Signing out of Axxium or disabling the actor ends reuse. This does not grant offline access or machine federation permission.</p>"
                     "<form method=post action='/oidc/interaction/" (html-escape uid) "'>"
                     "<input type=hidden name=csrf value='" (html-escape token) "'>"
@@ -93,19 +104,32 @@
 
 (defn- ^:async dispatch-engine!
   "Preserve the mount path and consume only trusted proxy protocol/host values."
-  [callback issuer request reply]
+  [callback issuer request reply url]
   (.hijack reply)
   (let [raw (.-raw request)
         original-url (.-url raw)
         prior-original-url (.-originalUrl raw)]
     (aset (.-headers raw) "x-forwarded-proto" (.-protocol request))
     (aset (.-headers raw) "x-forwarded-host" (.-host (js/URL. issuer)))
-    (set! (.-originalUrl raw) original-url)
-    (set! (.-url raw) (subs original-url 5))
+    (set! (.-originalUrl raw) url)
+    (set! (.-url raw) (subs url 5))
     (try (await (callback raw (.-raw reply)))
          (finally
            (set! (.-url raw) original-url)
            (set! (.-originalUrl raw) prior-original-url)))))
+
+(def ^:private metadata-aliases
+  {"/.well-known/oauth-authorization-server/oidc" "/oidc/.well-known/oauth-authorization-server"
+   "/.well-known/openid-configuration/oidc" "/oidc/.well-known/openid-configuration"})
+
+(defn- mailbox-interaction? [config details]
+  (law/mailbox-client? config (.. details -params -client_id)))
+
+(defn- mailbox-resource? [config details]
+  (let [actual (some-> details (aget "params") (aget "resource"))]
+    (or (= (:mailbox-resource config) actual)
+        (and (.isArray js/Array actual)
+             (= [(:mailbox-resource config)] (vec (array-seq actual)))))))
 
 (defn- install-store-sweeper!
   "Own the bounded protocol-retention timer for this server lifecycle only."
@@ -130,20 +154,27 @@
 (defn ^:async install!
   "Optionally mount an operator-configured authority at the fixed /oidc issuer.
    Root session and actor resolution remain owned by Axxium, not by this UI."
-  [app pool {:keys [config-file public-base-url session-cookie-name]} resolve-session! lookup-actor!]
+  [app pool {:keys [config-file public-base-url session-cookie-name mailbox-actor-did mailbox-available?]}
+   resolve-session! lookup-actor!]
   (when (seq config-file)
     (let [config (private-config config-file)
           issuer (:issuer config)
+          mailbox-resource (:mailbox-resource config)
           origin (.-origin (js/URL. issuer))
           secure? (= "https:" (.-protocol (js/URL. issuer)))
           csrf-cookie (if secure? "__Host-axxium_oidc_csrf" "axxium_oidc_fixture_csrf")
           csrf-key (first (:cookie-keys config))]
       (when-not (= issuer (str (str/replace public-base-url #"/$" "") "/oidc"))
         (throw (ex-info "OIDC issuer must be the configured primary origin at /oidc" {})))
+      (when (and mailbox-resource
+                 (not (and mailbox-available? (seq mailbox-actor-did)
+                           (= mailbox-resource (str (str/replace public-base-url #"/$" "") "/api/mailbox/mcp")))))
+        (throw (ex-info "OIDC mailbox grant requires the configured pilot and exact mailbox resource" {})))
       (await (store/initialize! pool))
       (install-store-sweeper! app pool)
       (let [provider (engine/create-provider! pool config lookup-actor!
-                       (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id)))
+                       (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id))
+                       mailbox-actor-did)
             callback (.callback provider)]
         (await (relay/install! app config #(private-config config-file) lookup-actor!))
         ;; Provider receives the raw stream before Fastify can parse a token body.
@@ -155,7 +186,9 @@
                   verification? (or (= path "/oidc/device")
                                     (and (str/starts-with? path "/oidc/device/")
                                          (not= path "/oidc/device/auth")))]
-              (when (str/starts-with? url "/oidc/")
+              (when-let [engine-url (or (when (str/starts-with? url "/oidc/") url)
+                                        (when (and mailbox-resource (= "GET" (.-method request)))
+                                          (get metadata-aliases path)))]
                 (cond
                   (and secure? (not= "https" (.-protocol request)))
                   (fail! reply 503)
@@ -176,10 +209,10 @@
                                               (law/device-login-return url))))
                       (fail! reply 401))
 
-                    :else (await (dispatch-engine! callback issuer request reply)))
+                    :else (await (dispatch-engine! callback issuer request reply engine-url)))
 
                   (not (str/starts-with? url "/oidc/interaction/"))
-                  (await (dispatch-engine! callback issuer request reply)))))))
+                  (await (dispatch-engine! callback issuer request reply engine-url)))))))
         (.register app
           (fn ^:async register-interaction-routes [routes]
             (.addContentTypeParser routes "application/x-www-form-urlencoded"
@@ -196,10 +229,12 @@
               (fn ^:async show-interaction [request reply]
                 (try
                   (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
-                        uid (.. request -params -uid)]
+                        uid (.. request -params -uid)
+                        mailbox? (mailbox-interaction? config details)]
                     (if-not (= uid (.-uid details))
                       (fail! reply 400)
-                      (if-let [root (await (current-root request session-cookie-name resolve-session!))]
+                      (if-let [root (await (interaction-root! request session-cookie-name resolve-session!
+                                              mailbox? mailbox-actor-did))]
                         ;; The root actor may have changed since the provider's
                         ;; browser session. Render current identity; the protected
                         ;; POST restarts login before it can ever grant consent.
@@ -209,9 +244,13 @@
                             (html! reply uid (.. details -params -client_id)
                                    (or (get-in root [:actor :email]) (get-in root [:actor :display_name])
                                        (get-in root [:actor :id]))
-                                   (csrf-value csrf-key seed uid)))
-                        (.redirect reply (str "/portal/index.html?oidc_return="
-                                              (js/encodeURIComponent (str "/oidc/interaction/" uid)))))))
+                                   (csrf-value csrf-key seed uid) mailbox?))
+                        (if (and mailbox? (await (current-root request session-cookie-name resolve-session!)))
+                          (do (.header reply "Cache-Control" "no-store")
+                              (.type reply "text/plain")
+                              (.send (.code reply 403) "Sign out of Axxium and sign in with the selected AT Protocol account."))
+                          (.redirect reply (str "/portal/index.html?oidc_return="
+                                                (js/encodeURIComponent (str "/oidc/interaction/" uid))))))))
                   (catch :default error (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503))))))
             (.post routes "/oidc/interaction/:uid"
               (fn ^:async finish-interaction [request reply]
@@ -219,9 +258,11 @@
                   (let [uid (.. request -params -uid)]
                     (if-not (csrf-valid? request origin csrf-cookie csrf-key uid)
                       (fail! reply 403)
-                      (if-let [root (await (current-root request session-cookie-name resolve-session!))]
-                        (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
-                              actor-id (get-in root [:actor :id])
+                      (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
+                            mailbox? (mailbox-interaction? config details)]
+                        (if-let [root (await (interaction-root! request session-cookie-name resolve-session!
+                                               mailbox? mailbox-actor-did))]
+                          (let [actor-id (get-in root [:actor :id])
                               prompt (.. details -prompt -name)
                               scopes (str/split (or (.. details -params -scope) "") #"\s+")
                               claims (vec (array-seq (or (some-> details (aget "prompt") (aget "details") (aget "missingOIDCClaims")) #js [])))
@@ -229,8 +270,10 @@
                                           {:expected-uid uid :actual-uid (.-uid details)
                                            :actor-id actor-id :session-actor-id (some-> details (aget "session") (aget "accountId"))
                                            :prompt prompt :decision (.. request -body -decision)
+                                           :mailbox-client? mailbox?
                                            :scopes scopes :claims claims})]
-                          (case (:decision admission)
+                            (case (if (and mailbox? (not (mailbox-resource? config details)))
+                                    :invalid-resource (:decision admission))
                             :deny
                             (do (.hijack reply)
                                 (await (.interactionFinished provider (.-raw request) (.-raw reply)
@@ -244,16 +287,21 @@
                             :consent
                             (let [grant (new (.-Grant provider)
                                              #js {:accountId actor-id :clientId (.. details -params -client_id)})]
-                              (.addOIDCScope grant (str/join " " scopes))
+                              (.addOIDCScope grant (str/join " " (remove #{law/mailbox-scope} scopes)))
                               (.addOIDCClaims grant (clj->js claims))
+                              (when mailbox? (.addResourceScope grant mailbox-resource law/mailbox-scope))
                               (let [grant-id (await (.save grant))]
-                                (await (store/bind-session! pool grant-id actor-id (:digest root)))
+                                (if mailbox?
+                                  (await (store/bind-mailbox-session! pool grant-id (:proof root)
+                                           (:mailbox-client-id config) mailbox-resource))
+                                  (await (store/bind-session! pool grant-id actor-id (:digest root))))
                                 (.hijack reply)
                                 (await (.interactionFinished provider (.-raw request) (.-raw reply)
                                          #js {:consent #js {:grantId grant-id}}
                                          #js {:mergeWithLastSubmission false}))))
+                            :invalid-resource (fail! reply 403)
                             (fail! reply (:status admission))))
-                        (fail! reply 401))))
+                          (fail! reply 401)))))
                   (catch :default error
                     (if (.-sent reply)
                       (do (when-not (.. reply -raw -headersSent)
@@ -261,4 +309,11 @@
                             (.setHeader (.-raw reply) "Cache-Control" "no-store"))
                           (.end (.-raw reply) "Shared login could not be completed"))
                       (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503)))))))))
-        true))))
+        (if mailbox-resource
+          {:resource mailbox-resource :issuer issuer :scope law/mailbox-scope
+           :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did bearer))
+           :active-grant?
+           (fn ^:async active-grant? [proof]
+             (= proof (await (engine/current-mailbox-grant! pool config mailbox-actor-did
+                               (:oauth/grant-id proof) (:actor-id proof)))))}
+          true)))))

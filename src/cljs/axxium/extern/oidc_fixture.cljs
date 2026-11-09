@@ -11,7 +11,8 @@
     pool (js->clj native-config :keywordize-keys true)
     (fn ^:async lookup-fixture [subject]
       (some-> (await (native-lookup subject)) (js->clj :keywordize-keys true)))
-    (fn [grant-id subject] (store/session-grant-active? pool grant-id subject))))
+    (fn [grant-id subject] (store/session-grant-active? pool grant-id subject))
+    nil))
 
 (defn install-http
   "Decode native fixture options around the ordinary optional HTTP transport."

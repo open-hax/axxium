@@ -13,6 +13,7 @@
             [clojure.string :as str]))
 
 (def ^:private endpoint "/api/mailbox/mcp")
+(def ^:private resource-metadata-path "/.well-known/oauth-protected-resource/api/mailbox/mcp")
 
 (defn- admitted-origin? [req {:keys [host origin]}]
   (let [incoming (http/header req "origin")]
@@ -25,20 +26,29 @@
     (when (= origin (http/header req "origin"))
       (http/cookie req session/COOKIE-NAME))))
 
-(defn- require-auth! [reply]
-  (http/set-header! reply "WWW-Authenticate" "Bearer")
+(defn- require-auth! [reply resource-metadata]
+  (http/set-header! reply "WWW-Authenticate"
+                    (if resource-metadata (str "Bearer resource_metadata=\"" resource-metadata "\"") "Bearer"))
   (http/send-secret! reply 401 {:error "A live AT Protocol session is required"}))
 
+(defn- active-proof! [oauth proof]
+  (if (:oauth/grant-id proof)
+    ((:active-grant? oauth) proof)
+    (session/active-atproto-session? proof)))
+
 (defn- authorized
-  [origin handler]
+  [origin oauth resource-metadata handler]
   (fn ^:async mailbox-handler [req reply]
     (try
       (if-not (admitted-origin? req origin)
         (http/send-secret! reply 403 {:error "Mailbox origin refused"})
-        (let [proof (await (session/atproto-session-proof (request-token req (:origin origin))))]
-          (if (and proof (await (session/active-atproto-session? proof)))
+        (let [token (request-token req (:origin origin))
+              proof (or (await (session/atproto-session-proof token))
+                        (when (and oauth token (http/authorization req))
+                          (await ((:access-proof! oauth) token))))]
+          (if (and proof (await (active-proof! oauth proof)))
             (await (handler req reply proof))
-            (require-auth! reply))))
+            (require-auth! reply resource-metadata))))
       (catch :default _
         (http/send-secret! reply 503 {:error "Mailbox is unavailable"})))))
 
@@ -87,7 +97,8 @@
         "ping" {:ledger lg :response {"jsonrpc" "2.0" "id" (get body "id") "result" {}}}
         (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
-(defn- ^:async post-mailbox! [writer path resource runtime req reply {:keys [principal cred-id] :as proof}]
+(defn- ^:async post-mailbox!
+  [writer path resource runtime oauth resource-metadata req reply {:keys [principal cred-id] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
         sid (http/header req "mcp-session-id")
@@ -114,20 +125,23 @@
       :else
       (let [ctx {:principal principal
                  :session/id sid
-                 :session/binding (secrets/token-hash cred-id)
+                 :session/binding (secrets/token-hash (if-let [grant (:oauth/grant-id proof)]
+                                                       (pr-str ["oauth" (:oauth/client-id proof) resource grant])
+                                                       cred-id))
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? false
                  :events/enabled? (events/enabled? runtime proof)
+                 :events/only? (some? (:oauth/grant-id proof))
                  :audience resource}
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
                   (await (events/execute! runtime proof ctx body))
                   (await (queue/submit! writer path
                            (fn ^:async apply-mailbox [lg]
-                             (if (await (session/active-atproto-session? proof))
+                             (if (await (active-proof! oauth proof))
                                (operation lg (assoc ctx :now (secrets/now)) body)
                                {:unauthenticated? true})))))]
         (cond
-          (:unauthenticated? out) (require-auth! reply)
+          (:unauthenticated? out) (require-auth! reply resource-metadata)
 
           (:session-error out)
           (rpc-error reply 404 (get body "id") -32600 "Mailbox session not found")
@@ -142,21 +156,31 @@
 
 (defn register-mailbox-routes!
   "Mount only when a dedicated mailbox ledger is explicitly configured."
-  [app]
+  ([app] (register-mailbox-routes! app nil))
+  ([app oauth]
   (when-let [path (cfg/get-in-config [:mailbox/ledger-file])]
     (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
+          resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
           owner (cfg/get-in-config [:mailbox/webhook-actor-did])
           webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
           storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file])
                                                      (cfg/get-in-config [:github-identity/ledger-file])]
                                               (some? owner))
           writer (queue/create storage)
-          runtime (events/install! app writer path owner webhook-key-file)
-          no-stream (authorized origin
+          runtime (events/install! app writer path owner webhook-key-file (partial active-proof! oauth))
+          no-stream (authorized origin oauth resource-metadata
                                 (fn [_ reply _]
                                   (http/set-header! reply "Allow" "POST")
                                   (http/send-empty! reply 405)))]
+      (when oauth
+        (http/get! app resource-metadata-path
+                   (fn [_ reply]
+                     (http/send-secret! reply 200 {"resource" (:resource oauth)
+                                                    "authorization_servers" [(:issuer oauth)]
+                                                    "scopes_supported" [(:scope oauth)]
+                                                    "bearer_methods_supported" ["header"]}))))
       (http/post! app endpoint
-                  (authorized origin (partial post-mailbox! writer path (:resource origin) runtime)))
+                  (authorized origin oauth resource-metadata
+                              (partial post-mailbox! writer path (:resource origin) runtime oauth resource-metadata)))
       (http/get! app endpoint no-stream)
-      (http/delete! app endpoint no-stream))))
+      (http/delete! app endpoint no-stream)))))

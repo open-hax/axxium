@@ -2,7 +2,9 @@
   "PostgreSQL adapter for oidc-provider's opaque protocol records.
    Does not accept a product session or infer an actor from an email."
   (:require [axxium.extern.pg :as pg]
+            [axxium.law.actor :as actor]
             [axxium.law.device-polling :as polling]
+            [axxium.law.principal :as principal]
             ["oidc-provider" :refer [errors]]))
 
 (def schema-sql
@@ -16,6 +18,11 @@
    "CREATE INDEX IF NOT EXISTS axxium_oidc_uid ON axxium_oidc_records (model,(payload->>'uid'))"
    "CREATE INDEX IF NOT EXISTS axxium_oidc_expiry ON axxium_oidc_records (expires_at)"
    "CREATE TABLE IF NOT EXISTS axxium_oidc_grant_sessions (grant_id text PRIMARY KEY, actor_id text NOT NULL, token_hash text NOT NULL, expires_at timestamptz NOT NULL)"
+   (str "ALTER TABLE axxium_oidc_grant_sessions"
+        " ADD COLUMN IF NOT EXISTS mailbox_cred_id uuid,"
+        " ADD COLUMN IF NOT EXISTS mailbox_did text,"
+        " ADD COLUMN IF NOT EXISTS mailbox_client_id text,"
+        " ADD COLUMN IF NOT EXISTS mailbox_resource text")
    "CREATE INDEX IF NOT EXISTS axxium_oidc_binding_expiry ON axxium_oidc_grant_sessions (expires_at)"])
 
 (defn ^:async cleanup-expired!
@@ -38,11 +45,13 @@
   (await (cleanup-expired! pool)))
 
 (defn- decode-record
-  "Return an opaque provider payload, including durable consumption evidence."
+  "Read JSON text without converting the provider's URI and claim keys to keywords."
   [row]
   (when row
-    (clj->js (cond-> (:payload row)
-               (:consumed_at row) (assoc :consumed (js/Number (:consumed_at row)))))))
+    (let [payload (js/JSON.parse (:payload row))]
+      (when-let [consumed (:consumed_at row)]
+        (aset payload "consumed" (js/Number consumed)))
+      payload)))
 
 (defn- valid-key?
   "Bound opaque provider keys before crossing the database boundary."
@@ -75,6 +84,62 @@
                        [grant-id actor-id token-hash]))]
     (when-not (= 1 (:row-count result))
       (throw (new (.-InvalidGrant errors) "A current root session is required")))))
+
+(def ^:private mailbox-scope "mailbox:events")
+
+(def ^:private mailbox-grant-join
+  ;; oidc-provider persists Resource scopes as space-delimited strings keyed
+  ;; by resource. Mirror its effective scope check, including rejections.
+  (str " JOIN axxium_oidc_records g ON g.model='Grant' AND g.id=$1"
+       " AND g.expires_at>clock_timestamp()"
+       " AND g.payload->>'accountId'=$2 AND g.payload->>'clientId'=$3"
+       " AND $5::text=ANY(string_to_array(g.payload->'resources'->>$4::text,' '))"
+       " AND NOT COALESCE($5::text=ANY(string_to_array(g.payload->'rejected'->'resources'->>$4::text,' ')),false)"))
+
+(defn ^:async bind-mailbox-session!
+  "Bind a fresh resource grant to the verified AT Protocol proof. Insert the
+   ordinary parent binding and the mailbox provenance in one statement."
+  [pool grant-id {:keys [principal actor-id cred-id token-hash]} client-id resource]
+  (doseq [value [grant-id actor-id client-id resource]] (require-key! value))
+  (when-not (and (principal/authenticated? principal)
+                 (= :atproto (:auth/method principal))
+                 (actor/valid-credential-id? cred-id)
+                 (string? token-hash) (re-matches #"[0-9a-f]{64}" token-hash))
+    (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required")))
+  (let [result
+        (await (pg/query! pool
+                 (str "INSERT INTO axxium_oidc_grant_sessions"
+                      "(grant_id,actor_id,token_hash,expires_at,mailbox_cred_id,mailbox_did,mailbox_client_id,mailbox_resource)"
+                      " SELECT $1,a.id,s.token_hash,"
+                      " LEAST(s.expires_at,g.expires_at,clock_timestamp()+interval '1 day'),s.id,p.subject,$3,$4"
+                      " FROM actors a JOIN sessions s ON s.actor_id=a.id"
+                      " JOIN provider_bindings p ON p.actor_id=a.id AND p.provider='atproto' AND p.subject=$8"
+                      mailbox-grant-join
+                      " WHERE a.id=$2 AND a.status='active' AND s.id=$6::uuid"
+                      " AND s.token_hash=$7 AND s.expires_at>clock_timestamp()"
+                      " LIMIT 1 ON CONFLICT(grant_id) DO NOTHING")
+                 [grant-id actor-id client-id resource mailbox-scope cred-id token-hash (:auth/did principal)]))]
+    (when-not (= 1 (:row-count result))
+      (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required")))))
+
+(defn ^:async mailbox-grant-proof!
+  "Read the exact current mailbox OAuth proof. Missing/revoked grants, actors,
+   root sessions or provider bindings return nil. Never load a bearer value."
+  [pool grant-id actor-id client-id resource]
+  (when (every? valid-key? [grant-id actor-id client-id resource])
+    (when-let [{:keys [mailbox_cred_id mailbox_did token_hash]}
+               (await (pg/query-one! pool
+                        (str "SELECT b.mailbox_cred_id::text AS mailbox_cred_id,b.mailbox_did,b.token_hash"
+                             " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
+                             " JOIN sessions s ON s.actor_id=b.actor_id AND s.id=b.mailbox_cred_id AND s.token_hash=b.token_hash"
+                             " JOIN provider_bindings p ON p.actor_id=b.actor_id AND p.provider='atproto' AND p.subject=b.mailbox_did"
+                             mailbox-grant-join
+                             " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
+                             " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'")
+                        [grant-id actor-id client-id resource mailbox-scope]))]
+      (when-let [proof (principal/from-atproto-session mailbox_did)]
+        {:principal proof :actor-id actor-id :cred-id mailbox_cred_id :token-hash token_hash
+         :oauth/grant-id grant-id :oauth/client-id client-id :oauth/resource resource}))))
 
 (defn ^:async session-grant-active?
   "Check current actor and root-session state before grant reuse/introspection."
@@ -126,10 +191,10 @@
         (await (pg/with-transaction! pool
                  (fn ^:async locked-poll [client]
                    (let [row (await (pg/query-one! client
-                                      "SELECT payload,consumed_at,poll_last_ms,poll_interval,poll_count,floor(extract(epoch from expires_at)*1000) AS expiry_ms,floor(extract(epoch from clock_timestamp())*1000) AS now_ms FROM axxium_oidc_records WHERE model='DeviceCode' AND id=$1 FOR UPDATE"
+                                      "SELECT payload::text AS payload,payload->>'clientId' AS client_id,consumed_at,poll_last_ms,poll_interval,poll_count,floor(extract(epoch from expires_at)*1000) AS expiry_ms,floor(extract(epoch from clock_timestamp())*1000) AS now_ms FROM axxium_oidc_records WHERE model='DeviceCode' AND id=$1 FOR UPDATE"
                                       [id]))
                          record (when row
-                                  {:client-id (get-in row [:payload :clientId])
+                                  {:client-id (:client_id row)
                                    :expires-at-ms (js/Number (:expiry_ms row))
                                    :last-poll-ms (when (:poll_last_ms row) (js/Number (:poll_last_ms row)))
                                    :interval-seconds (:poll_interval row)
@@ -181,21 +246,21 @@
                (await (find-polled-device! pool id authenticated-client-id))
                (decode-record
                  (await (pg/query-one! pool
-                          "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND id=$2 AND expires_at>clock_timestamp()"
+                          "SELECT payload::text AS payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND id=$2 AND expires_at>clock_timestamp()"
                           [model id]))))))
          :findByUserCode
          (fn ^:async find-user-code [code]
            (require-key! code)
            (decode-record
              (await (pg/query-one! pool
-                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'userCode'=$2 AND expires_at>clock_timestamp()"
+                      "SELECT payload::text AS payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'userCode'=$2 AND expires_at>clock_timestamp()"
                       [model code]))))
          :findByUid
          (fn ^:async find-uid [uid]
            (require-key! uid)
            (decode-record
              (await (pg/query-one! pool
-                      "SELECT payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'uid'=$2 AND expires_at>clock_timestamp()"
+                      "SELECT payload::text AS payload,consumed_at FROM axxium_oidc_records WHERE model=$1 AND payload->>'uid'=$2 AND expires_at>clock_timestamp()"
                       [model uid]))))
          :destroy
          (fn ^:async destroy-record [id]

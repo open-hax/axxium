@@ -12,7 +12,7 @@
                     (js/Promise.resolve
                       (cond
                         (.startsWith sql "SELECT")
-                        #js {:rowCount 1 :rows #js [#js {:payload #js {:accountId "actor-a" :grantId "grant-a"}
+                        #js {:rowCount 1 :rows #js [#js {:payload "{\"accountId\":\"actor-a\",\"grantId\":\"grant-a\",\"resources\":{\"https://staging.example.com/api/mailbox/mcp\":\"mailbox:events\"}}"
                                                         :consumed_at nil}]}
                         (.startsWith sql "UPDATE")
                         #js {:rowCount (if (= 1 (swap! consume-count inc)) 1 0) :rows #js []}
@@ -22,7 +22,10 @@
     (await (.upsert adapter "opaque-code" #js {:accountId "actor-a" :grantId "grant-a"} 60))
     (is (= ["AuthorizationCode" "opaque-code" "{\"accountId\":\"actor-a\",\"grantId\":\"grant-a\"}" 60]
            (second (first @calls))))
-    (is (= "actor-a" (.-accountId (await (.find adapter "opaque-code")))))
+    (let [loaded (await (.find adapter "opaque-code"))]
+      (is (= "actor-a" (.-accountId loaded)))
+      (is (= "mailbox:events" (aget (.-resources loaded) "https://staging.example.com/api/mailbox/mcp")))
+      (is (.includes (first (last @calls)) "payload::text AS payload")))
     (await (.consume adapter "opaque-code"))
     (is (= "invalid_grant"
            (try (await (.consume adapter "opaque-code")) nil
@@ -45,7 +48,8 @@
 
 (defn- ^:async durable-polling-boundary* []
   (let [context (atom {:poll? true :authenticated-client-id "registered-a"})
-        row (atom {:payload {:clientId "registered-a" :kind "DeviceCode"}
+        row (atom {:payload "{\"clientId\":\"registered-a\",\"kind\":\"DeviceCode\"}"
+                   :client_id "registered-a"
                    :consumed_at nil :poll_last_ms nil :poll_interval 5 :poll_count 0
                    :expiry_ms "600000" :now_ms "1000"})
         queries (atom [])
@@ -150,7 +154,7 @@
         pool #js {:query (fn [sql params]
                            (swap! calls conj [sql (vec (array-seq params))])
                            (js/Promise.resolve
-                             #js {:rowCount 1 :rows #js [#js {:payload #js {} :consumed_at nil
+                             #js {:rowCount 1 :rows #js [#js {:payload "{}" :consumed_at nil
                                                               :active true :expires_ms "10000"}]}))}
         factory (store/adapter-factory pool)
         adapter (factory "Session")
@@ -196,4 +200,54 @@
   (async done
     (-> (opaque-key-public-boundaries*)
         (.catch (fn [error] (is false (str "Opaque key fixture rejected: " (.-message error)))))
+        (.finally done))))
+
+(defn- ^:async mailbox-proof-boundary* []
+  (let [calls (atom [])
+        admitted? (atom true)
+        did "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa"
+        credential "00000000-0000-4000-8000-000000000001"
+        digest (apply str (repeat 64 "a"))
+        resource "https://fixture.example/api/mailbox/mcp"
+        proof {:principal {:auth/did did :auth/method :atproto}
+               :actor-id "actor" :cred-id credential :token-hash digest}
+        pool #js {:query
+                  (fn [sql params]
+                    (swap! calls conj [sql (vec (array-seq params))])
+                    (js/Promise.resolve
+                     #js {:rowCount (if @admitted? 1 0)
+                          :rows (if (and @admitted? (.startsWith sql "SELECT"))
+                                  #js [#js {:mailbox_did did :mailbox_cred_id credential :token_hash digest}]
+                                  #js [])}))}
+        bind! (fn [candidate] (store/bind-mailbox-session! pool "grant" candidate "client" resource))
+        read! #(store/mailbox-grant-proof! pool % "actor" "client" resource)]
+    (doseq [invalid [(assoc-in proof [:principal :auth/method] :service-token)
+                     (assoc proof :cred-id "different")
+                     (assoc proof :token-hash "raw bearer")]]
+      (is (= "invalid_grant"
+             (try (await (bind! invalid)) nil
+                  (catch :default error (.-error error))))))
+    (is (nil? (await (read! nil))))
+    (is (empty? @calls))
+    (await (bind! proof))
+    (is (= ["grant" "actor" "client" resource "mailbox:events" credential digest did]
+           (second (first @calls))))
+    (is (.includes (ffirst @calls) "ON CONFLICT(grant_id) DO NOTHING"))
+    (is (= (assoc proof :oauth/grant-id "grant" :oauth/client-id "client" :oauth/resource resource)
+           (await (read! "grant"))))
+    (is (= ["grant" "actor" "client" resource "mailbox:events"] (second (last @calls))))
+    (doseq [[sql] @calls]
+      (is (.includes sql "p.provider='atproto'"))
+      (is (.includes sql "g.payload->'rejected'->'resources'"))
+      (is (.includes sql "g.expires_at>clock_timestamp()")))
+    (reset! admitted? false)
+    (is (= "invalid_grant"
+           (try (await (bind! proof)) nil
+                (catch :default error (.-error error)))))
+    (is (nil? (await (read! "grant"))))))
+
+(deftest mailbox-proof-boundary
+  (async done
+    (-> (mailbox-proof-boundary*)
+        (.catch (fn [error] (is false (str "Mailbox proof fixture rejected: " (.-message error)))))
         (.finally done))))
