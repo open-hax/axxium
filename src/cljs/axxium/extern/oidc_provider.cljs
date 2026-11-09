@@ -180,14 +180,15 @@
                              :introspection #js {:enabled true
                                                  :allowedPolicy
                                                  (fn ^:async introspection-policy [_ctx client token]
-                                                   (and (= (.-clientId token) (.-clientId client))
-                                                        (some? (.-grantId token))
-                                                        (await (current-grant! pool config mailbox-owner verify-grant!
-                                                                 (.-grantId token) (.-accountId token)
-                                                                 (.-clientId client)))
-                                                        (when-let [actor (await (lookup-actor! (.-accountId token)))]
-                                                          (and (= (.-accountId token) (:id actor))
-                                                               (= "active" (:status actor))))))}
+                                                   (boolean
+                                                     (and (= (.-clientId token) (.-clientId client))
+                                                          (some? (.-grantId token))
+                                                          (await (current-grant! pool config mailbox-owner verify-grant!
+                                                                   (.-grantId token) (.-accountId token)
+                                                                   (.-clientId client)))
+                                                          (when-let [actor (await (lookup-actor! (.-accountId token)))]
+                                                            (and (= (.-accountId token) (:id actor))
+                                                                 (= "active" (:status actor)))))))}
                              :revocation #js {:enabled true
                                               :allowedPolicy (fn [_ctx client token]
                                                                (= (.-clientId token) (.-clientId client)))}}
