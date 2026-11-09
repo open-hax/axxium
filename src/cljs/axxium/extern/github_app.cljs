@@ -10,6 +10,16 @@
 
 (def api "https://api.github.com")
 
+(defn fetch!
+  "Run a GitHub HTTP request using the runtime fetch adapter."
+  [url options]
+  (js/fetch url options))
+
+(defn manifest-create-url
+  "GitHub's app creation page, with the encoded callback state."
+  [state]
+  (str "https://github.com/settings/apps/new?state=" (js/encodeURIComponent state)))
+
 (defn- b64u [s] (.toString (js/Buffer.from s "utf8") "base64url"))
 
 (defn app-jwt

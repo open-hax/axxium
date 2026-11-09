@@ -250,6 +250,8 @@
     (is (= false (:public m)))
     (is (= {"metadata" "read" "pull_requests" "write"} (:default_permissions m)))
     (is (= "https://axxium.example/api/github/manifest/callback" (:redirect_url m))))
+  (is (= "https://github.com/settings/apps/new?state=actor%26nonce%2B%20"
+         (gh/manifest-create-url "actor&nonce+ ")))
   (is (law/action-allowed? review-policy :approve {:own? false}))
   (is (not (law/action-allowed? review-policy :approve {:own? true})) "never approve its own PR")
   (is (not (law/action-allowed? widgets-policy :approve {:own? false}))))
