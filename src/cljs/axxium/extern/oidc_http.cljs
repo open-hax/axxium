@@ -86,10 +86,13 @@
 
 (defn- html!
   "Render an origin-bound form without scripts, framing or response caching."
-  [reply uid client-id actor-label token mailbox?]
+  [reply uid client-id actor-label token mailbox? redirect-source]
   (.header reply "Cache-Control" "no-store")
   (.header reply "Referrer-Policy" "no-referrer")
-  (.header reply "Content-Security-Policy" "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+  (.header reply "Content-Security-Policy"
+    (str "default-src 'none'; form-action 'self'"
+         (when redirect-source (str " " redirect-source))
+         "; base-uri 'none'; frame-ancestors 'none'"))
   (.type reply "text/html; charset=utf-8")
   (.send reply (str "<!doctype html><html><head><meta charset=utf-8><title>Axxium shared login</title></head><body>"
                     "<h1>Continue with your Axxium identity</h1><p>Signed in as " (html-escape actor-label) ".</p>"
@@ -124,6 +127,17 @@
 
 (defn- mailbox-interaction? [config details]
   (law/mailbox-client? config (.. details -params -client_id)))
+
+(defn- mailbox-redirect-source
+  "Allow the browser to finish this mailbox interaction's registered callback redirect."
+  [{:keys [clients mailbox-client-id]} details]
+  (let [redirect (.. details -params -redirect_uri)
+        registered (some #(when (= mailbox-client-id (:id %)) (:redirect-uris %)) clients)]
+    (when (some #{redirect} registered)
+      (let [url (js/URL. redirect)]
+        ;; Browsers check the origin across redirects. The provider still checks the exact URI.
+        (when (re-matches #"[A-Za-z0-9.-]+(?::[0-9]+)?" (.-host url))
+          (.-origin url))))))
 
 (defn- mailbox-resource? [config details]
   (let [actual (some-> details (aget "params") (aget "resource"))]
@@ -244,7 +258,8 @@
                             (html! reply uid (.. details -params -client_id)
                                    (or (get-in root [:actor :email]) (get-in root [:actor :display_name])
                                        (get-in root [:actor :id]))
-                                   (csrf-value csrf-key seed uid) mailbox?))
+                                   (csrf-value csrf-key seed uid) mailbox?
+                                   (when mailbox? (mailbox-redirect-source config details))))
                         (if (and mailbox? (await (current-root request session-cookie-name resolve-session!)))
                           (do (.header reply "Cache-Control" "no-store")
                               (.type reply "text/plain")
