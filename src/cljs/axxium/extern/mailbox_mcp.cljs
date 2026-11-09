@@ -104,7 +104,8 @@
     {:ledger lg :response {"jsonrpc" "2.0" "id" id
                            "result" {"protocolVersion" protocol-version
                                      "serverInfo" {"name" "axxium-mailbox" "version" "0.1.0"}
-                                     "capabilities" {"tools" {}}}}}
+                                     "capabilities" (cond-> {"tools" {}}
+                                                      (:events/enabled? ctx) (assoc "events" {}))}}}
 
     (= method "tools/list")
     {:ledger lg :response {"jsonrpc" "2.0" "id" id "result" {"tools" tool-descriptors}}}

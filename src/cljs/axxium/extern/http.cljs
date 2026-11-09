@@ -35,6 +35,24 @@
 (defn send-empty! [reply status]
   (.send (.code reply status)))
 
+(defn on-interval!
+  "Run one background operation at a time and drain it when the app closes."
+  [app interval-ms operation]
+  (let [running (atom nil)
+        timer (js/setInterval
+               (fn []
+                 (when-not @running
+                   (reset! running (-> (js/Promise.resolve nil)
+                                       (.then (fn [_] (operation)))
+                                       (.catch (fn [_] (.warn (.-log app) "Background operation failed")))
+                                       (.finally (fn [] (reset! running nil)))))))
+               interval-ms)]
+    (.unref timer)
+    (.addHook app "onClose"
+              (fn ^:async stop-interval [_app]
+                (js/clearInterval timer)
+                (await @running)))))
+
 (defn origin-settings
   "Resolve the configured public host, origin and endpoint."
   [base-url path]

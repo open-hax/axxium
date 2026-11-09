@@ -7,7 +7,9 @@
             [axxium.domain.kernel-fixture :as fixture]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.fastify :as fastify]
+            [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
+            [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.signing-key :as signing]
             [axxium.routes.mailbox :as routes]
             [clojure.string :as str]
@@ -112,6 +114,7 @@
                 a-session (:sid started)
                 b-session (:sid (await (request! @app "POST" b nil init {})))]
             (is (= 200 (:status started)))
+            (is (= {"tools" {}} (get-in started [:data "result" "capabilities"])))
             (is (and a-session b-session (not= a-session b-session)))
             (is (= "2025-06-18" (get-in started [:data "result" "protocolVersion"])))
             (let [initialized (await (request! @app "POST" a a-session
@@ -203,5 +206,123 @@
 (deftest authenticated-loopback-mailbox-polls-and-recovers
   (async done
     (-> (verify-http*)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(defn- ^:async verify-webhook* []
+  (let [keys (await (signing/generate-ephemeral!))
+        dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-events-"))
+        ledger (path/join dir "ledger.edn")
+        key-file (path/join dir "webhook.key")
+        live (atom {})
+        app (atom nil)
+        tick (atom nil)
+        challenge-ok? (atom false)
+        challenge-count (atom 0)
+        on-delivery (atom nil)
+        deliveries (atom [])
+        config cfg/get-in-config
+        callback "https://callback.example.com/inbox"
+        secret (str "whsec_" (.toString (js/Buffer.alloc 32 7) "base64"))
+        filter-args {"name" "message.available" "arguments" {}
+                     "delivery" {"mode" "webhook" "url" callback}}
+        subscribe (assoc (rpc "events/subscribe") "params"
+                         (assoc-in filter-args ["delivery" "secret"] secret))
+        unsubscribe (assoc (rpc "events/unsubscribe") "params" filter-args)
+        verify (fn []
+                 (swap! challenge-count inc)
+                 (js/Promise.resolve {:verified? @challenge-ok? :reason "challenge_failed"}))
+        deliver (fn ^:async fake-callback [event]
+                  (swap! deliveries conj event)
+                  (when-let [f @on-delivery] (await (f)))
+                  {:accepted? true :status 202})]
+    (try
+      (fs/writeFileSync ledger "" #js {:mode 384})
+      (fs/writeFileSync key-file (.toString (js/Buffer.alloc 32 8) "base64") #js {:mode 384})
+      (with-redefs [signing/current! (constantly keys)
+                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    http/on-interval! (fn [_ _ f] (reset! tick f))
+                    webhook/verify! (fn ([_] (verify)) ([_ _] (verify)))
+                    webhook/deliver! (fn ([_ event] (deliver event)) ([_ _ event] (deliver event)))
+                    cfg/get-in-config (fn [ks]
+                                        (case (first ks)
+                                          :mailbox/ledger-file ledger
+                                          :mailbox/webhook-key-file key-file
+                                          :mailbox/webhook-actor-did fixture/bob
+                                          :axxium/public-base-url origin
+                                          (config ks)))]
+        (reset! app (await (start-app!)))
+        (let [alice (await (mint-fixture! live "actor_11111111-1111-4111-8111-111111111111"
+                                          (secrets/secure-id) fixture/alice))
+              bob (await (mint-fixture! live "actor_22222222-2222-4222-8222-222222222222"
+                                        (secrets/secure-id) fixture/bob))
+              a (:bearer alice)
+              b (:bearer bob)
+              initialized-a (await (request! @app "POST" a nil (rpc "initialize") {}))
+              initialized-b (await (request! @app "POST" b nil (rpc "initialize") {}))
+              a-session (:sid initialized-a)
+              b-session (:sid initialized-b)
+              event-call (fn [body] (request! @app "POST" b b-session body {}))
+              send (fn [key] (request! @app "POST" a a-session
+                                        (tool "send_message" {"to" fixture/bob "idempotency_key" key
+                                                              "body" {"private_content" "fixture"}}) {}))]
+          (is (= {"tools" {}} (get-in initialized-a [:data "result" "capabilities"])))
+          (is (= {"tools" {} "events" {}} (get-in initialized-b [:data "result" "capabilities"])))
+          (is (= [] (get-in (await (event-call (rpc "events/list"))) [:data "result" "events"])))
+          (is (= -32601 (get-in (await (request! @app "POST" a a-session subscribe {}))
+                                [:data "error" "code"])))
+          (is (= -32001 (get-in (await (event-call subscribe)) [:data "error" "code"])))
+          (is (zero? @challenge-count))
+          (await (request! @app "POST" b b-session (tool "register_mailbox" {}) {}))
+          (is (= "message.available" (get-in (await (event-call (rpc "events/list")))
+                                              [:data "result" "events" 0 "name"])))
+          (await (request! @app "POST" b b-session (tool "grant_send" {"to" fixture/alice}) {}))
+          (is (= "accepted" (get (result (await (send "pre-subscription"))) "accepted")))
+          (is (= -32015 (get-in (await (event-call subscribe)) [:data "error" "code"])))
+          (reset! challenge-ok? true)
+          (let [sub (get-in (await (event-call subscribe)) [:data "result"])
+                before (fs/readFileSync ledger "utf8")
+                refreshed (get-in (await (event-call subscribe)) [:data "result"])]
+            (is (str/starts-with? (get sub "id" "") "sub_"))
+            (is (= sub refreshed))
+            (is (= before (fs/readFileSync ledger "utf8")) "A duplicate subscribe does not append.")
+            (is (= 2 @challenge-count) "The same verified callback and key do not require a repeat challenge."))
+          (await (@tick))
+          (is (empty? @deliveries) "Existing messages are not replayed on subscribe.")
+          (await (.close (:app @app)))
+          (reset! app (await (start-app!)))
+          (reset! on-delivery
+                  (fn ^:async repeat-subscribe []
+                    (is (str/starts-with? (get-in (await (event-call subscribe)) [:data "result" "id"] "")
+                                          "sub_"))))
+          (let [message-id (get (result (await (send "after-restart"))) "message_id")]
+            (await (@tick))
+            (await (@tick))
+            (is (= 1 (count @deliveries)))
+            (is (= {"message_id" message-id} (get (first @deliveries) "data")))
+            (let [receipt (result (await (request! @app "POST" a a-session
+                                            (tool "get_delivery" {"message_id" message-id}) {})))]
+              (is (= "delivered" (get receipt "notification")))
+              (is (= "unknown" (get receipt "execution")))
+              (is (false? (get receipt "acknowledged")))))
+          (swap! live dissoc (:query bob))
+          (is (= "accepted" (get (result (await (send "after-revocation"))) "accepted")))
+          (await (@tick))
+          (is (= 1 (count @deliveries)) "A dead root session cannot deliver.")
+          (swap! live assoc (:query bob) {:id "actor_22222222-2222-4222-8222-222222222222"})
+          (is (= {} (get-in (await (event-call unsubscribe)) [:data "result"])))
+          (await (@tick))
+          (is (= 1 (count @deliveries)))
+          (let [saved (fs/readFileSync ledger "utf8")]
+            (is (not (str/includes? saved callback)))
+            (is (not (str/includes? saved secret)))
+            (is (not (str/includes? saved (secrets/token-hash b)))))))
+      (finally
+        (when @app (await (.close (:app @app))))
+        (fs/rmSync dir #js {:recursive true})))))
+
+(deftest opted-in-mailbox-webhook-survives-restart-and-rechecks-access
+  (async done
+    (-> (verify-webhook*)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))

@@ -80,4 +80,32 @@ and acknowledge. GET and DELETE return 405. The `open_session` tool reports
 the current polling session. Only HTTP initialization opens a transport
 session. Payloads require valid Unicode, finite numbers, and safe integers.
 MCP OAuth discovery, SSE, cross-origin browser access, and actual
-subscribed ChatGPT delivery remain separate from this polling pilot.
+subscribed ChatGPT delivery remain separate from the polling profile.
+
+## Opt-in webhook pilot
+
+Set `AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID` to one dedicated test recipient and
+`AXXIUM_MAILBOX_WEBHOOK_KEY_FILE` to a separate 32-byte base64 key in a regular
+mode-0600 file owned by the service user. The existing mailbox ledger must
+also be configured. Only the selected actor's live AT Protocol session
+advertises the event capability. Register that actor's mailbox before
+requesting the event catalog or subscribing.
+
+The authenticated MCP endpoint supports `events/list`, `events/subscribe`
+and `events/unsubscribe` for `message.available`. The recipient is derived
+from the session. The event carries only `message_id`, and the subscription
+covers messages accepted after activation. One verified HTTPS callback per
+recipient is supported. A subscription expires within an hour, and refresh
+with a replacement key requires a new signed challenge.
+
+The single mailbox writer persists the sealed callback and access binding,
+then records each attempt before HTTPS. Each delivery rechecks the live AT
+Protocol session and mailbox read grant. Bounded retry keeps the event ID
+stable, and HTTP acceptance records notification delivery separately from
+mailbox acknowledgment and execution. While the pilot is configured, ordinary
+appends leave 32 KiB of the 2 MiB ledger for settlement of the in-flight
+attempt. After unsubscribe, an already-issued HTTPS request may complete.
+
+The pilot accepts the mailbox's existing AT Protocol session credentials.
+ChatGPT connection still requires an OAuth grant scoped to this MCP resource
+and bound to the verified recipient.

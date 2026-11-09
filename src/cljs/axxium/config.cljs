@@ -146,6 +146,8 @@
      :github-identity/key-dir (env "AXXIUM_GITHUB_IDENTITY_KEY_DIR" "")
      :identity/seed-file (env "AXXIUM_IDENTITY_SEED_FILE" "")
      :mailbox/ledger-file (present (env "AXXIUM_MAILBOX_LEDGER_FILE"))
+     :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
+     :mailbox/webhook-actor-did (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))
