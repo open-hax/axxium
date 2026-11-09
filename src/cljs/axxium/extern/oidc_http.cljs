@@ -154,7 +154,7 @@
 (defn ^:async install!
   "Optionally mount an operator-configured authority at the fixed /oidc issuer.
    Root session and actor resolution remain owned by Axxium, not by this UI."
-  [app pool {:keys [config-file public-base-url session-cookie-name mailbox-actor-did]}
+  [app pool {:keys [config-file public-base-url session-cookie-name mailbox-actor-did mailbox-available?]}
    resolve-session! lookup-actor!]
   (when (seq config-file)
     (let [config (private-config config-file)
@@ -167,13 +167,14 @@
       (when-not (= issuer (str (str/replace public-base-url #"/$" "") "/oidc"))
         (throw (ex-info "OIDC issuer must be the configured primary origin at /oidc" {})))
       (when (and mailbox-resource
-                 (not (and (seq mailbox-actor-did)
+                 (not (and mailbox-available? (seq mailbox-actor-did)
                            (= mailbox-resource (str (str/replace public-base-url #"/$" "") "/api/mailbox/mcp")))))
-        (throw (ex-info "OIDC mailbox grant requires the selected actor and exact mailbox resource" {})))
+        (throw (ex-info "OIDC mailbox grant requires the configured pilot and exact mailbox resource" {})))
       (await (store/initialize! pool))
       (install-store-sweeper! app pool)
       (let [provider (engine/create-provider! pool config lookup-actor!
-                       (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id)))
+                       (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id))
+                       mailbox-actor-did)
             callback (.callback provider)]
         (await (relay/install! app config #(private-config config-file) lookup-actor!))
         ;; Provider receives the raw stream before Fastify can parse a token body.
@@ -310,9 +311,9 @@
                       (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503)))))))))
         (if mailbox-resource
           {:resource mailbox-resource :issuer issuer :scope law/mailbox-scope
-           :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config bearer))
+           :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did bearer))
            :active-grant?
            (fn ^:async active-grant? [proof]
-             (= proof (await (store/mailbox-grant-proof! pool (:oauth/grant-id proof) (:actor-id proof)
-                               (:mailbox-client-id config) mailbox-resource))))}
+             (= proof (await (engine/current-mailbox-grant! pool config mailbox-actor-did
+                               (:oauth/grant-id proof) (:actor-id proof)))))}
           true)))))

@@ -70,7 +70,7 @@
                      (assoc config :issuer "https://identity.example.test#fragment")
                      (assoc-in config [:clients 0 :redirect-uris] ["http://knoxx.example.test/callback"])
                      config]]
-    (is (thrown? cljs.core/ExceptionInfo (provider/create-provider! nil candidate identity identity)))))
+    (is (thrown? cljs.core/ExceptionInfo (provider/create-provider! nil candidate identity identity nil)))))
 
 (deftest interaction-consent-is-principal-and-scope-bound
   (let [context {:expected-uid "interaction" :actual-uid "interaction" :actor-id "a"
