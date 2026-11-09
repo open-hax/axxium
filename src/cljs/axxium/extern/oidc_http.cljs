@@ -88,7 +88,8 @@
   "Render an origin-bound form without scripts, framing or response caching."
   [reply uid client-id actor-label token mailbox? redirect-source]
   (.header reply "Cache-Control" "no-store")
-  (.header reply "Referrer-Policy" "no-referrer")
+  ;; Keep the issuer Origin on the form POST while withholding cross-origin Referer.
+  (.header reply "Referrer-Policy" (if mailbox? "same-origin" "no-referrer"))
   (.header reply "Content-Security-Policy"
     (str "default-src 'none'; form-action 'self'"
          (when redirect-source (str " " redirect-source))

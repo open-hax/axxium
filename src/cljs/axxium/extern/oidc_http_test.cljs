@@ -58,6 +58,8 @@
             (is (= (str "default-src 'none'; form-action 'self'" allowed
                         "; base-uri 'none'; frame-ancestors 'none'")
                    (get @headers "Content-Security-Policy")))
+            (is (= (if (= client "mailbox") "same-origin" "no-referrer")
+                   (get @headers "Referrer-Policy")))
             (is (re-find #"name=csrf" @body)))))
       (finally
         (when-let [close! @close-hook] (await (close! nil)))
