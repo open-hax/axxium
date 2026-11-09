@@ -109,6 +109,26 @@
               "an oversized existing file is preserved for operator recovery")))
       (finally (fs/rmSync dir #js {:recursive true})))))
 
+(deftest webhook-receipt-has-space-after-the-ordinary-append-ceiling
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-webhook-capacity-"))
+        p (path/join dir "ledger.edn")
+        ordinary-ceiling (- (* 2 1024 1024) (* 32 1024))
+        {:keys [ledger]} (mm/call [] {:principal mailbox-fixture/alice
+                                    :audience mailbox-fixture/aud :now fx/t0}
+                                  :open_session {:audience mailbox-fixture/aud :ttl-ms 3600000})
+        receipt [(assoc (first ledger) :event/type :axxium.outbox/delivered)]]
+    (try
+      (let [padding (js/Buffer.alloc ordinary-ceiling 0x20)]
+        (.writeUInt8 padding 0x0a (dec ordinary-ceiling))
+        (fs/writeFileSync p padding #js {:mode 8r600})
+        (let [{:keys [load! append!]} (lf/private-ledger-storage p [] true)]
+          (is (thrown-with-msg? js/Error #"Mailbox ledger capacity exceeded" (append! p [] ledger)))
+          (is (.equals padding (fs/readFileSync p)))
+          (is (= receipt (append! p [] receipt)))
+          (is (= receipt (load! p)))
+          (is (> (.-size (fs/statSync p)) ordinary-ceiling))))
+      (finally (fs/rmSync dir #js {:recursive true})))))
+
 (defn- send-mailbox
   [lg ctx to key body]
   (mm/call lg ctx :send_message {:to to :idempotency-key key :body body}))

@@ -23,6 +23,24 @@
   (when (and (string? path) (seq path) (fs/existsSync path))
     (key-from-base64 (fs/readFileSync path "utf8"))))
 
+(defn read-private-key!
+  "Read a small mode-0600 key owned by this process through its open descriptor."
+  [path]
+  (try
+    (let [fd (fs/openSync path (bit-or (.-O_RDONLY fs/constants)
+                                      (.-O_NOFOLLOW fs/constants)
+                                      (.-O_NONBLOCK fs/constants)))]
+      (try
+        (let [stat (fs/fstatSync fd)
+              bytes (js/Buffer.alloc 129)]
+          (when (and (.isFile stat) (= 384 (bit-and (.-mode stat) 511))
+                     (= (.-uid stat) (.getuid js/process)) (<= (.-size stat) 128))
+            (let [length (fs/readSync fd bytes 0 129 0)]
+              (when (<= length 128)
+                (key-from-base64 (.toString bytes "utf8" 0 length))))))
+        (finally (fs/closeSync fd))))
+    (catch :default _ nil)))
+
 (defn seal [key aad plaintext]
   (let [iv (crypto/randomBytes 12)
         cipher (crypto/createCipheriv "aes-256-gcm" key iv)

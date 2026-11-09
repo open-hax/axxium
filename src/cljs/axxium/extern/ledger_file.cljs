@@ -29,9 +29,12 @@
 
 (def ^:private mailbox-batch-tag :axxium.mailbox/batch-v1)
 (def ^:private mailbox-capacity-bytes (* 2 1024 1024))
+(def ^:private webhook-settlement-reserve-bytes (* 32 1024))
+(def ^:private webhook-settlement-types
+  #{:axxium.outbox/delivered :axxium.outbox/webhook-retry :axxium.outbox/webhook-terminal})
 
-(defn- require-mailbox-capacity! [size]
-  (when (> size mailbox-capacity-bytes)
+(defn- require-mailbox-capacity! [size limit]
+  (when (> size limit)
     (throw (ex-info "Mailbox ledger capacity exceeded" {:reason :mailbox-ledger-capacity}))))
 
 (defn- mailbox-frame-events [frame]
@@ -99,8 +102,10 @@
 (defn private-ledger-storage
   "Pin an existing private mailbox file. Every load and append checks the
    opened descriptor and refuses missing files, symlinks, and replacements.
-   Read legacy event lines and write each new operation as one EDN frame."
-  [path other-paths]
+   Read legacy event lines and write each new operation as one EDN frame.
+   The optional single webhook worker reserves space for its in-flight result."
+  ([path other-paths] (private-ledger-storage path other-paths false))
+  ([path other-paths reserve-webhook-settlement?]
   (let [expected (try (fs/lstatSync path) (catch :default _ nil))]
     (when-not (private-stat? expected)
       (throw (private-file-error)))
@@ -113,7 +118,7 @@
               (with-private-file
                 path expected (.-O_RDWR fs/constants)
                 (fn [fd stat]
-                  (require-mailbox-capacity! (.-size stat))
+                  (require-mailbox-capacity! (.-size stat) mailbox-capacity-bytes)
                   (let [{:keys [events tail-bytes]} (decode-mailbox-ledger (fs/readFileSync fd))]
                     (when (some? tail-bytes) (fs/ftruncateSync fd tail-bytes))
                     events))))
@@ -123,8 +128,16 @@
                     path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants))
                     (fn [fd stat]
                       (when (seq batch)
-                        (let [frame (str (pr-str (into [mailbox-batch-tag] batch)) "\n")]
+                        (let [frame (str (pr-str (into [mailbox-batch-tag] batch)) "\n")
+                              frame-bytes (js/Buffer.byteLength frame "utf8")
+                              settlement? (and reserve-webhook-settlement? (= 1 (count batch))
+                                               (contains? webhook-settlement-types (:event/type (first batch))))
+                              limit (if (and reserve-webhook-settlement? (not settlement?))
+                                      (- mailbox-capacity-bytes webhook-settlement-reserve-bytes)
+                                      mailbox-capacity-bytes)]
+                          (when settlement?
+                            (require-mailbox-capacity! frame-bytes webhook-settlement-reserve-bytes))
                           (require-mailbox-capacity!
-                            (+ (.-size stat) (js/Buffer.byteLength frame "utf8")))
+                            (+ (.-size stat) frame-bytes) limit)
                           (append-text! fd frame)))
-                      after))))}))
+                      after))))})))

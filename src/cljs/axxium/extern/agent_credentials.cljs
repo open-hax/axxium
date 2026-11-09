@@ -11,6 +11,12 @@
 (defn now []
   (js/Date.))
 
+(defn instant-after [instant millis]
+  (js/Date. (+ (inst-ms instant) millis)))
+
+(defn instant-iso [instant]
+  (.toISOString instant))
+
 (defn token-hash [token]
   (-> (.createHash crypto "sha256")
       (.update token)
