@@ -169,7 +169,8 @@
                                "timestamp" (secrets/instant-iso (:message-at candidate))
                                "data" {"message_id" (:message-id candidate)} "cursor" nil}))]
         (await (queue/submit! writer path
-                 (fn [lg] (events/settle lg candidate (:status response) (secrets/now)))))))))
+                 (fn [lg] (events/settle lg candidate (:status response) (secrets/now)
+                                        (:response-request-id response)))))))))
 
 (defn- ^:async work! [{:keys [owner key writer path] :as runtime}]
   (let [lg (queue/current-ledger writer path)]

@@ -6,7 +6,8 @@
             [axxium.domain.mailbox :as mailbox]
             [axxium.domain.state :as state]
             [axxium.law.did :as did]
-            [axxium.law.event :as law]))
+            [axxium.law.event :as law]
+            [axxium.law.mailbox-webhook :as webhook-law]))
 
 (def ^:private subscriptions "mailbox-subscriptions")
 (def ^:private outbox "outbox")
@@ -211,36 +212,40 @@
 
 (defn settle
   "Settle only the currently persisted attempt for the active generation.
-   A 2xx records webhook receipt independently of mailbox acknowledgment."
-  [lg proposed status at]
-  (if-not (and (inst? at) (or (nil? status) (and (int? status) (<= 100 status 599))))
-    (refuse lg :invalid-delivery-outcome)
-    (let [view (project lg)
-          owner (:owner proposed)
-          sub (get-in view [:subscriptions owner])
-          delivery (get-in view [:delivery (:event-id proposed)])
-          accepted (some #(when (= (:message-id proposed) (:event/id %)) %)
-                         (get-in view [:accepted owner]))
-          count-attempts (get-in delivery [:event/body :outbox/attempt])]
-      (if-not (and (live? sub at)
-                   (can-read? (state/fold lg) owner at)
-                   accepted
-                   (not (contains? (:closed view) (:message-id proposed)))
-                   (= :axxium.outbox/webhook-attempted (:event/type delivery))
-                   (>= (inst-ms at) (inst-ms (:event/at delivery)))
-                   (= (:event/body delivery) (delivery-body proposed))
-                   (= proposed (candidate sub accepted count-attempts)))
-        (refuse lg :delivery-not-current)
-        (let [outcome (delivery-outcome status count-attempts)
-              type (case outcome
-                     :delivered :axxium.outbox/delivered
-                     :retry :axxium.outbox/webhook-retry
-                     :terminal :axxium.outbox/webhook-terminal)
-              body (cond-> (delivery-body proposed)
-                     status (assoc :outbox/http-status status)
-                     (= :delivered outcome)
-                     (assoc :outbox/channel :push
-                            :outbox/transport-receipt {:status status}))]
-          (record lg {:id (next-id lg) :stream outbox :type type
-                      :actor owner :at at :body body :causes [(:event/id delivery)]}
-                  {:status outcome}))))))
+   A 2xx records webhook receipt independently of mailbox acknowledgment.
+   Retain an optional response request ID only for an HTTP response."
+  ([lg proposed status at] (settle lg proposed status at nil))
+  ([lg proposed status at response-request-id]
+   (if-not (and (inst? at) (or (nil? status) (and (int? status) (<= 100 status 599))))
+     (refuse lg :invalid-delivery-outcome)
+     (let [view (project lg)
+           owner (:owner proposed)
+           sub (get-in view [:subscriptions owner])
+           delivery (get-in view [:delivery (:event-id proposed)])
+           accepted (some #(when (= (:message-id proposed) (:event/id %)) %)
+                          (get-in view [:accepted owner]))
+           count-attempts (get-in delivery [:event/body :outbox/attempt])]
+       (if-not (and (live? sub at)
+                    (can-read? (state/fold lg) owner at)
+                    accepted
+                    (not (contains? (:closed view) (:message-id proposed)))
+                    (= :axxium.outbox/webhook-attempted (:event/type delivery))
+                    (>= (inst-ms at) (inst-ms (:event/at delivery)))
+                    (= (:event/body delivery) (delivery-body proposed))
+                    (= proposed (candidate sub accepted count-attempts)))
+         (refuse lg :delivery-not-current)
+         (let [outcome (delivery-outcome status count-attempts)
+               type (case outcome
+                      :delivered :axxium.outbox/delivered
+                      :retry :axxium.outbox/webhook-retry
+                      :terminal :axxium.outbox/webhook-terminal)
+               body (cond-> (delivery-body proposed)
+                      status (assoc :outbox/http-status status)
+                      (and status (webhook-law/response-request-id? response-request-id))
+                      (assoc :outbox/response-request-id response-request-id)
+                      (= :delivered outcome)
+                      (assoc :outbox/channel :push
+                             :outbox/transport-receipt {:status status}))]
+           (record lg {:id (next-id lg) :stream outbox :type type
+                       :actor owner :at at :body body :causes [(:event/id delivery)]}
+                   {:status outcome})))))))
