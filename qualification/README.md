@@ -440,9 +440,9 @@ unqualified. Synthetic controller laws supply no real mutation credit.
 
 `qualification-work-campaign.yml` binds a separate manual main run to Work
 application `4805e9aa1ab574c2e517f6c156bca0c1e69696fb`. Its test overlay pins
-PR #55 head `a4d69606a5c66b1a3acf772780d75815e1c3a8d1`, a descendant
-whose only changes are `scripts/lifecycle.test.mjs` and
-`src/cljs/axxium/extern/ledger_short_write_test.cljs`. Native admission requires
+PR #55 head `3608091b1dd35d016078c09cbb43dccdd35d95d3`, a descendant
+whose changes are limited to the ledger and Fastify fixtures and the bounded
+Clio canonicalization test and its test-only extern helper. Native admission requires
 that exact head to be merged to main with those fixture bytes intact. The
 application and package bytes still come from the original application commit.
 The reviewed scanner from PR #53 freezes the

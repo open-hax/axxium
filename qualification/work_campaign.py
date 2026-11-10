@@ -8,11 +8,14 @@ SCANNER = '87c6d75c386afbeac1731941c535e6a16fcc05c4'
 SCANNER_HEAD = '5b893813530d2bf49a63e2cf24ab4d5cfc3f2beb'
 SCANNER_PR = 53
 APPLICATION_PR = 52
-HARNESS = 'a4d69606a5c66b1a3acf772780d75815e1c3a8d1'
+HARNESS = '3608091b1dd35d016078c09cbb43dccdd35d95d3'
 HARNESS_PR = 55
+HARNESS_ADDED_TEST = 'src/cljs/axxium/extern/clio_pin_fixture_test.cljs'
 HARNESS_PATHS = frozenset({
     'scripts/lifecycle.test.mjs',
     'src/cljs/axxium/extern/ledger_short_write_test.cljs',
+    'src/cljs/axxium/law/clio_pin_test.cljs',
+    HARNESS_ADDED_TEST,
 })
 WORKFLOW = '.github/workflows/qualification-work-campaign.yml'
 PROFILE = 'standard-v2'

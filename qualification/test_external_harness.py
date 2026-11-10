@@ -344,10 +344,11 @@ class ExternalHarnessTests(unittest.TestCase):
         with mock.patch.object(harness, 'FIXTURE_ERROR_HARNESS_SHA', bad), self.assertRaises(harness.HarnessError):
             harness.prepare(self.root, self.application, bad)
 
-    def test_work_overlay_accepts_only_the_two_fixed_fixture_paths(self):
+    def test_work_overlay_accepts_only_the_fixed_fixture_paths(self):
         """Only the exact reviewed test blobs overlay the clean Work checkout."""
         paths = harness.work_campaign.HARNESS_PATHS
-        for path in paths:
+        added = harness.work_campaign.HARNESS_ADDED_TEST
+        for path in paths - {added}:
             self.write(path, '; application fixture\n')
         application = self.commit('Work application')
         for path in paths:
@@ -374,7 +375,10 @@ class ExternalHarnessTests(unittest.TestCase):
                     relative = path.removeprefix('src/cljs/')
                     generated = project / ('src/'+relative if relative != path else path)
                     self.assertEqual(generated.read_text(), '; reviewed fixture\n')
-                    self.assertEqual((self.root/path).read_text(), '; application fixture\n')
+                    if path == added:
+                        self.assertFalse((self.root/path).exists())
+                    else:
+                        self.assertEqual((self.root/path).read_text(), '; application fixture\n')
                 self.assertEqual((project/'package.json').read_bytes(), (self.root/'package.json').read_bytes())
                 harness.validate(self.root, descriptor)
                 with self.assertRaises(harness.HarnessError):

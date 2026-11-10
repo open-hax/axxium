@@ -132,8 +132,11 @@ def contract(root, application_sha, harness_sha):
     if work:
         ancestor = git(root, 'merge-base', application_sha, harness_sha).decode().strip()
         require(ancestor == application_sha, 'Work harness must descend from the exact application')
-        require(expected_paths <= application.keys() & harness.keys()
-                and all(application[path]['mode'] == harness[path]['mode'] for path in expected_paths),
+        existing_paths = expected_paths - {work_campaign.HARNESS_ADDED_TEST}
+        require(expected_paths <= harness.keys() and existing_paths <= application.keys()
+                and work_campaign.HARNESS_ADDED_TEST not in application
+                and harness[work_campaign.HARNESS_ADDED_TEST]['mode'] == '100644'
+                and all(application[path]['mode'] == harness[path]['mode'] for path in existing_paths),
                 'Work fixture membership or modes differ')
         test_support = WORK_TEST_SUPPORT_PATHS
     else:
