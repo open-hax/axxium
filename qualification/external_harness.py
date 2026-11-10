@@ -14,7 +14,7 @@ import re
 import stat
 import subprocess
 
-from work_campaign import APPLICATION as WORK_APPLICATION_SHA
+import work_campaign
 
 APPLICATION_SHA = '58234df96ca86507e6cdd87f65aaa9ab35621415'
 HARNESS_SHA = '5b0e9be2170c8b79662077c612efec7bb79f21b8'
@@ -39,6 +39,7 @@ TEST_SUPPORT_PATHS = frozenset({
     'scripts/oidc-http.fixture.mjs',
     'scripts/oidc-device.fixture.mjs',
 })
+WORK_TEST_SUPPORT_PATHS = TEST_SUPPORT_PATHS | {'scripts/lifecycle.test.mjs'}
 
 
 def accepted_harnesses():
@@ -120,17 +121,24 @@ def canonical(value):
 
 def contract(root, application_sha, harness_sha):
     root = Path(root).resolve(strict=True)
-    work = application_sha == harness_sha == WORK_APPLICATION_SHA
-    expected_paths = frozenset() if work else accepted_harnesses().get(harness_sha)
+    work = application_sha == work_campaign.APPLICATION and harness_sha == work_campaign.HARNESS
+    expected_paths = work_campaign.HARNESS_PATHS if work else accepted_harnesses().get(harness_sha)
     require(work or (application_sha == APPLICATION_SHA and expected_paths is not None),
             'Only the fixed application and accepted regression harness are supported')
     require(git(root, 'rev-parse', '--show-toplevel').decode().strip() == str(root)
             and git(root, 'rev-parse', 'HEAD').decode().strip() == application_sha,
             'Worker must retain the exact application Git HEAD')
     application, harness = tree(root, application_sha), tree(root, harness_sha)
-    test_support = (TEST_SUPPORT_PATHS if work or harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA,
-                                                                FIXTURE_ERROR_HARNESS_SHA}
-                    else frozenset())
+    if work:
+        parents = git(root, 'rev-list', '--parents', '-n', '1', harness_sha).decode().split()
+        require(parents == [harness_sha, application_sha], 'Work harness must directly descend from the exact application')
+        require(expected_paths <= application.keys() & harness.keys()
+                and all(application[path]['mode'] == harness[path]['mode'] for path in expected_paths),
+                'Work fixture membership or modes differ')
+        test_support = WORK_TEST_SUPPORT_PATHS
+    else:
+        test_support = (TEST_SUPPORT_PATHS if harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA,
+                                                             FIXTURE_ERROR_HARNESS_SHA} else frozenset())
     require(test_support <= application.keys() & harness.keys(),
             'Accepted protocol test-support inputs are missing')
     changed = {path for path in application.keys() | harness.keys()

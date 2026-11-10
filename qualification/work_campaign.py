@@ -8,6 +8,12 @@ SCANNER = '87c6d75c386afbeac1731941c535e6a16fcc05c4'
 SCANNER_HEAD = '5b893813530d2bf49a63e2cf24ab4d5cfc3f2beb'
 SCANNER_PR = 53
 APPLICATION_PR = 52
+HARNESS = '44300000091423c267c0c3ea563be2dffeba94f1'
+HARNESS_PR = 55
+HARNESS_PATHS = frozenset({
+    'scripts/lifecycle.test.mjs',
+    'src/cljs/axxium/extern/ledger_short_write_test.cljs',
+})
 WORKFLOW = '.github/workflows/qualification-work-campaign.yml'
 PROFILE = 'standard-v2'
 SEED = 'full-qualification-4805e9a-v1'
@@ -18,7 +24,7 @@ PARTITIONS = {
     2: (1595, '447c882d046d07a72b0c9afff7477a59a134a7407bc061a2bea19720b4b864d0'),
     3: (1603, '20878ab7a773969cb66e2a0ed2b36183f04da238626e7cd93e2d9a616d6a6862'),
 }
-OUTPUT = 'work-standard-v2-v1'
+OUTPUT = 'work-standard-v2-v2'
 ENTRYPOINT = 'qualification/work_campaign.py'
 
 
@@ -55,7 +61,7 @@ def main():
             raise ValueError('The Work checkout retains an interrupted mutation')
         candidates, selection = select(campaign, collector.lineage, partition)
         campaign.run_campaign(candidates, root / 'qualification/results' / OUTPUT, len(candidates), 300,
-                              partition, SEED, APPLICATION, producer, selection=selection,
+                              partition, SEED, HARNESS, producer, selection=selection,
                               operator_id='github-native/work/partition' + str(partition))
 
 
