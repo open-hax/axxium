@@ -100,8 +100,22 @@
     (throw (ex-info "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID and AXXIUM_IDENTITY_ROOT_DID must specify a canonical actor ID and a DID"
                     {:reason :invalid-identity-root-operator-binding}))))
 
+(defn mailbox-pilot-allowed-dids
+  "Admit exactly two distinct AT Protocol DIDs including the webhook recipient."
+  [value webhook-actor]
+  (when (some? value)
+    (let [dids (str/split value #"," -1)
+          allowed (set dids)]
+      (when-not (and (= 2 (count dids) (count allowed))
+                     (every? #(and (atproto-law/did? %) (did-law/did? %)) dids)
+                     (contains? allowed webhook-actor))
+        (throw (ex-info "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS must contain two distinct AT Protocol DIDs including AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"
+                        {:reason :invalid-mailbox-pilot-allowed-dids})))
+      allowed)))
+
 (def config
-  (let [instance (load-instance)]
+  (let [instance (load-instance)
+        webhook-actor (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))]
     {:axxium/env (or (env "NODE_ENV") "development")
      :axxium/port (env-int "AXXIUM_PORT" 8787)
      :axxium/host (env "AXXIUM_HOST" "0.0.0.0")
@@ -147,7 +161,8 @@
      :identity/seed-file (env "AXXIUM_IDENTITY_SEED_FILE" "")
      :mailbox/ledger-file (present (env "AXXIUM_MAILBOX_LEDGER_FILE"))
      :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
-     :mailbox/webhook-actor-did (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))
+     :mailbox/webhook-actor-did webhook-actor
+     :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))

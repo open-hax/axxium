@@ -37,7 +37,7 @@
     (session/active-atproto-session? proof)))
 
 (defn- authorized
-  [origin oauth resource-metadata handler]
+  [origin oauth resource-metadata allowed-dids handler]
   (fn ^:async mailbox-handler [req reply]
     (try
       (if-not (admitted-origin? req origin)
@@ -46,9 +46,14 @@
               proof (or (await (session/atproto-session-proof token))
                         (when (and oauth token (http/authorization req))
                           (await ((:access-proof! oauth) token))))]
-          (if (and proof (await (active-proof! oauth proof)))
-            (await (handler req reply proof))
-            (require-auth! reply resource-metadata))))
+          (cond
+            (not (and proof (await (active-proof! oauth proof))))
+            (require-auth! reply resource-metadata)
+
+            (and allowed-dids (not (contains? allowed-dids (get-in proof [:principal :auth/did]))))
+            (http/send-secret! reply 403 {:error "Mailbox access refused"})
+
+            :else (await (handler req reply proof)))))
       (catch :default _
         (http/send-secret! reply 503 {:error "Mailbox is unavailable"})))))
 
@@ -162,13 +167,14 @@
     (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
           resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
           owner (cfg/get-in-config [:mailbox/webhook-actor-did])
+          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
           webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
           storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file])
                                                      (cfg/get-in-config [:github-identity/ledger-file])]
                                               (some? owner))
           writer (queue/create storage)
           runtime (events/install! app writer path owner webhook-key-file (partial active-proof! oauth))
-          no-stream (authorized origin oauth resource-metadata
+          no-stream (authorized origin oauth resource-metadata allowed-dids
                                 (fn [_ reply _]
                                   (http/set-header! reply "Allow" "POST")
                                   (http/send-empty! reply 405)))]
@@ -180,7 +186,7 @@
                                                     "scopes_supported" [(:scope oauth)]
                                                     "bearer_methods_supported" ["header"]}))))
       (http/post! app endpoint
-                  (authorized origin oauth resource-metadata
+                  (authorized origin oauth resource-metadata allowed-dids
                               (partial post-mailbox! writer path (:resource origin) runtime oauth resource-metadata)))
       (http/get! app endpoint no-stream)
       (http/delete! app endpoint no-stream)))))
