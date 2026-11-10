@@ -1,4 +1,20 @@
-# Axxium mutation evidence pilot
+# Archived Axxium mutation evidence pilot
+
+Axxium has retired the pilot's CI job and native campaign dispatch workflows.
+The implementation and operating notes below document how historical evidence
+was produced. Services owns production admission. Replacement design is tracked
+separately.
+
+The [final native Work campaign][final-work-campaign] targeted application
+revision `4805e9aa1ab574c2e517f6c156bca0c1e69696fb` under controller
+`4a0a858a348527d661fcb434abbfaf01541be967`. All four partitions aborted after
+timeouts. Their partial eligible counts were 68, 88, 193 and 115, respectively.
+No partition reached 250, recorded a restored baseline, or emitted a positive
+partition receipt. The run and its negative evidence retain that disposition.
+
+[final-work-campaign]: https://github.com/open-hax/axxium/actions/runs/42834010838/attempts/1
+
+## Historical operating notes
 
 This producer binds each run to the clean, full application Git HEAD of its own
 isolated checkout and records genuine outcomes separately from proposals.
