@@ -440,7 +440,7 @@ unqualified. Synthetic controller laws supply no real mutation credit.
 
 `qualification-work-campaign.yml` binds a separate manual main run to Work
 application `4805e9aa1ab574c2e517f6c156bca0c1e69696fb`. Its test overlay pins
-PR #55 head `44300000091423c267c0c3ea563be2dffeba94f1`, a direct descendant
+PR #55 head `a4d69606a5c66b1a3acf772780d75815e1c3a8d1`, a descendant
 whose only changes are `scripts/lifecycle.test.mjs` and
 `src/cljs/axxium/extern/ledger_short_write_test.cljs`. Native admission requires
 that exact head to be merged to main with those fixture bytes intact. The

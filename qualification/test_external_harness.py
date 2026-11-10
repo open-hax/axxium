@@ -360,6 +360,10 @@ class ExternalHarnessTests(unittest.TestCase):
             self.write(path, '; reviewed fixture\n')
         self.write('package.json', '{"name":"unexpected application bytes"}\n')
         extra = self.commit('extra package input')
+        self.git('checkout', '-q', '--detach', self.application)
+        for path in paths:
+            self.write(path, '; unrelated fixture\n')
+        unrelated = self.commit('overlay outside exact Work ancestry')
         self.git('checkout', '-q', '--detach', application)
         with mock.patch.object(harness.work_campaign, 'APPLICATION', application):
             with mock.patch.object(harness.work_campaign, 'HARNESS', reviewed):
@@ -375,7 +379,11 @@ class ExternalHarnessTests(unittest.TestCase):
                 harness.validate(self.root, descriptor)
                 with self.assertRaises(harness.HarnessError):
                     harness.prepare(self.root, application, application)
-            for revision, reason in ((indirect, 'directly descend'), (extra, 'exact accepted test files')):
+            with mock.patch.object(harness.work_campaign, 'HARNESS', indirect):
+                descendant = harness.prepare(self.root, application, indirect)
+                self.assertEqual(set(descendant['changed_test_paths']), paths)
+                harness.validate(self.root, descendant)
+            for revision, reason in ((unrelated, 'descend from'), (extra, 'exact accepted test files')):
                 with (self.subTest(revision=revision), mock.patch.object(harness.work_campaign, 'HARNESS', revision),
                       self.assertRaisesRegex(harness.HarnessError, reason)):
                     harness.prepare(self.root, application, revision)

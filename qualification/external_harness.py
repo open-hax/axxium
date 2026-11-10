@@ -130,8 +130,8 @@ def contract(root, application_sha, harness_sha):
             'Worker must retain the exact application Git HEAD')
     application, harness = tree(root, application_sha), tree(root, harness_sha)
     if work:
-        parents = git(root, 'rev-list', '--parents', '-n', '1', harness_sha).decode().split()
-        require(parents == [harness_sha, application_sha], 'Work harness must directly descend from the exact application')
+        ancestor = git(root, 'merge-base', application_sha, harness_sha).decode().strip()
+        require(ancestor == application_sha, 'Work harness must descend from the exact application')
         require(expected_paths <= application.keys() & harness.keys()
                 and all(application[path]['mode'] == harness[path]['mode'] for path in expected_paths),
                 'Work fixture membership or modes differ')
