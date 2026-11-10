@@ -1,12 +1,13 @@
 """Native GitHub runner resource gate and evidence witness; never a mutation executor.
 
 The accepted producer owns every mutation and test. The accepted collector owns
-positive eligibility. This controller starts only fresh whole partitions 2/3,
-does not acknowledge containment, and never retries an aborted invocation.
+positive eligibility. Each fixed lane starts fresh whole partitions and retains
+unknown containment for independent inspection.
 """
 import argparse
 from collections import Counter
 import hashlib
+from http.client import HTTPSConnection
 import json
 import os
 from pathlib import Path
@@ -20,12 +21,14 @@ import tarfile
 import time
 
 import collect_mutation_evidence as collector
+import work_campaign
 
 HERE = Path(__file__).absolute().parent
 CONTROLLER = HERE.parent
 COLLECTOR = '9974c0403a1176406d8cd470745b1555f802ee36'
 WORKFLOW = '.github/workflows/qualification-campaign.yml'
 BASE = Path('/home/err/.local/share/codex-work/axxium-sso/full-qualification-58234')
+WORK_BASE = BASE.with_name('full-qualification-work-4805')
 PARTITIONS = {
     2: (703, '727d823e658ba8c3877cca63841f3448a33a816334aa34565bb6580e48bfe923'),
     3: (708, 'd31ceea0c7263e3b3a4081333d25e1f36de4334329a820e1512e0c8de7ee6fd1'),
@@ -50,9 +53,11 @@ def write(path, value):
     return hashlib.sha256(raw).hexdigest()
 
 
-def context(partition, *, environment=os.environ, api=collector.github, command=run):
+def context(partition, *, work=False, environment=os.environ, api=collector.github, command=run):
     """Authenticate dispatch/run/attempt/job before creating any worker input."""
-    require(type(partition) is int and partition in PARTITIONS, 'Only partitions 2 and 3 are admitted')
+    partitions = work_campaign.PARTITIONS if work else PARTITIONS
+    workflow = work_campaign.WORKFLOW if work else WORKFLOW
+    require(type(partition) is int and partition in partitions, 'Partition is outside the fixed native lane')
     require(environment.get('GITHUB_REPOSITORY') == collector.REPOSITORY
             and environment.get('GITHUB_EVENT_NAME') == 'workflow_dispatch'
             and environment.get('GITHUB_REF') == 'refs/heads/main'
@@ -61,7 +66,7 @@ def context(partition, *, environment=os.environ, api=collector.github, command=
     sha = environment.get('GITHUB_SHA', '')
     require(collector.HEX40.fullmatch(sha) is not None, 'Missing controller source identity')
     require(command(['git', 'rev-parse', 'HEAD']) == sha, 'Checkout differs from the native controller')
-    for relative in (WORKFLOW, 'qualification/native_campaign_job.py'):
+    for relative in (workflow, 'qualification/native_campaign_job.py'):
         path = CONTROLLER/relative
         require(not path.is_symlink() and path.read_bytes() == subprocess.check_output(
             ['git', 'show', sha+':'+relative], cwd=CONTROLLER), 'Native controller source differs')
@@ -71,7 +76,7 @@ def context(partition, *, environment=os.environ, api=collector.github, command=
     native = api('actions/runs/'+run_id+'/attempts/'+attempt)
     require(native.get('id') == int(run_id) and native.get('run_attempt') == int(attempt)
             and native.get('event') == 'workflow_dispatch' and native.get('head_branch') == 'main'
-            and native.get('head_sha') == sha and native.get('path') == WORKFLOW
+            and native.get('head_sha') == sha and native.get('path') == workflow
             and native.get('status') == 'in_progress'
             and native.get('repository', {}).get('full_name') == collector.REPOSITORY
             and native.get('head_repository', {}).get('full_name') == collector.REPOSITORY,
@@ -88,8 +93,82 @@ def context(partition, *, environment=os.environ, api=collector.github, command=
     require(len(matches) == 1, 'Native job and runner identity are ambiguous')
     return {'repository': collector.REPOSITORY, 'run_id': int(run_id), 'run_attempt': int(attempt),
             'job_id': matches[0]['id'], 'job_name': matches[0]['name'],
-            'runner_name': matches[0]['runner_name'], 'controller_sha': sha, 'workflow': WORKFLOW,
+            'runner_name': matches[0]['runner_name'], 'controller_sha': sha, 'workflow': workflow,
             'partition': partition, 'github_hosted': True}
+
+
+def public_work_api(endpoint):
+    """Read native public metadata without carrying credentials beside the worker."""
+    connection = HTTPSConnection('api.github.com', timeout=20)
+    try:
+        connection.request('GET', '/repos/open-hax/axxium/' + endpoint,
+                           headers={'User-Agent': 'axxium-work-qualification',
+                                    'Accept': 'application/vnd.github+json',
+                                    'X-GitHub-Api-Version': '2022-11-28'})
+        response = connection.getresponse()
+        require(response.status == 200, 'Public native metadata is unavailable')
+        limit = 2 * 1024 * 1024
+        raw = response.read(limit + 1)
+        require(len(raw) <= limit, 'Public native metadata exceeds bounds')
+        return json.loads(raw)
+    finally:
+        connection.close()
+
+
+def verify_work_adoption(origin, *, api=public_work_api):
+    """Bind the Work lane to merged native source and the exact running controller."""
+    revision = origin['controller_sha']
+    require(origin['workflow'] == work_campaign.WORKFLOW and collector.HEX40.fullmatch(revision),
+            'Unexpected Work controller revision')
+    application = api('pulls/'+str(work_campaign.APPLICATION_PR))
+    require(collector.accepted_pr(application, 'd138923acdcd036fd7d1f4be3dbc964daf590f28')
+            and application['merge_commit_sha'] == work_campaign.APPLICATION, 'Work application adoption differs')
+    scanner = api('pulls/'+str(work_campaign.SCANNER_PR))
+    scanner_head = work_campaign.SCANNER_HEAD
+    require(collector.accepted_pr(scanner, scanner_head), 'Work scanner adoption differs')
+    for accepted in {work_campaign.APPLICATION, work_campaign.SCANNER, scanner_head, scanner['merge_commit_sha'], revision}:
+        require(api('compare/'+accepted+'...main').get('merge_base_commit', {}).get('sha') == accepted,
+                'Work evidence source is outside native main')
+    pulls = api('commits/'+revision+'/pulls?per_page=100')
+    require(isinstance(pulls, list) and len(pulls) < 100, 'Work controller native adoption is incomplete')
+    adopted = []
+    for pull in pulls:
+        if not isinstance(pull, dict) or type(pull.get('number')) is not int or pull['number'] <= 0:
+            continue
+        pr = api('pulls/'+str(pull['number']))
+        head = pr.get('head', {}).get('sha')
+        if (isinstance(head, str) and collector.HEX40.fullmatch(head)
+                and collector.accepted_pr(pr, head) and pr['merge_commit_sha'] == revision):
+            adopted.append(pr)
+    require(len(adopted) == 1, 'Work controller requires one native merged-main PR')
+    collector_path = 'qualification/collect_mutation_evidence.py'
+    require(Path(collector.__file__).absolute() == CONTROLLER/collector_path
+            and Path(work_campaign.__file__).absolute() == CONTROLLER/work_campaign.ENTRYPOINT,
+            'Imported Work controller inputs came from another checkout')
+    paths = (work_campaign.WORKFLOW, work_campaign.ENTRYPOINT, 'qualification/native_campaign_job.py',
+             collector_path, *('qualification/'+name for name in collector.RUNTIME_FILES))
+    hashes = {}
+    for relative in paths:
+        path = CONTROLLER/relative
+        raw = path.read_bytes()
+        require(path.is_file() and not path.is_symlink() and path.stat().st_nlink == 1
+                and all(raw == subprocess.check_output(['git','show',commit+':'+relative],cwd=CONTROLLER)
+                        for commit in (revision, adopted[0]['head']['sha'])), 'Work controller input differs from its adopted PR')
+        hashes[relative] = collector.sha(raw)
+    scanner_path = 'qualification/mutation_campaign.py'
+    require(all(hashes[scanner_path] == collector.sha(subprocess.check_output(
+            ['git','show',commit+':'+scanner_path],cwd=CONTROLLER))
+            for commit in (work_campaign.SCANNER, scanner_head, scanner['merge_commit_sha'])),
+            'Work scanner bytes differ from #53')
+    require(collector.verify_evaluator_custody(revision) == {name:hashes['qualification/'+name]
+            for name in collector.RUNTIME_FILES}, 'Imported Work evaluator custody differs')
+    return {'producer_revision':revision, 'controller_pr':adopted[0]['number'],
+            'controller_pr_head':adopted[0]['head']['sha'], 'controller_file_sha256':hashes,
+            'application_pr':work_campaign.APPLICATION_PR, 'application_sha':work_campaign.APPLICATION,
+            'scanner_pr':work_campaign.SCANNER_PR, 'scanner_revision':work_campaign.SCANNER,
+            'scanner_pr_head':scanner_head,
+            'scanner_merge_sha':scanner['merge_commit_sha'], 'harness_sha':work_campaign.APPLICATION,
+            'native_adoption_verified':True}
 
 
 def system_properties(unit, *, command=run):
@@ -98,7 +177,7 @@ def system_properties(unit, *, command=run):
     return dict(line.split('=', 1) for line in raw.splitlines())
 
 
-def active_caps(unit, root, gate, expected_environment, index, *, command=run, proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
+def active_caps(unit, root, gate, expected_environment, index, *, work=False, command=run, proc=Path('/proc'), cgroups=Path('/sys/fs/cgroup')):
     props = system_properties(unit, command=command)
     require(props.get('ActiveState') == 'active' and int(props.get('MainPID', '0')) > 0,
             'Native cap gate is not active')
@@ -116,7 +195,7 @@ def active_caps(unit, root, gate, expected_environment, index, *, command=run, p
     require(quota == 4*period and pid in native['cgroup.procs'].splitlines(), 'Native CPU or PID cap differs')
     require((proc/pid/'cwd').resolve() == root, 'Native gate working directory differs')
     argv = (proc/pid/'cmdline').read_bytes().split(b'\0')
-    expected_argv=['/bin/bash','--noprofile','--norc','-c',GATE,'qualification-native-cap-gate',str(gate),*cli(root,index)]
+    expected_argv=['/bin/bash','--noprofile','--norc','-c',GATE,'qualification-native-cap-gate',str(gate),*cli(root,index,work=work)]
     require(argv == [arg.encode() for arg in expected_argv]+[b''], 'Native gate command differs')
     actual_environment=dict(item.split(b'=',1) for item in (proc/pid/'environ').read_bytes().split(b'\0') if item)
     require(actual_environment == {key.encode():value.encode() for key,value in expected_environment.items()},
@@ -128,7 +207,8 @@ def active_caps(unit, root, gate, expected_environment, index, *, command=run, p
 
 def closed(unit, *, witness, command=run, cgroups=Path('/sys/fs/cgroup'), proc=Path('/proc')):
     """Bind origin SYSTEM-bus closure to the previously observed active invocation."""
-    require(unit in [unit_name(index) for index in PARTITIONS], 'Unexpected native partition unit')
+    require(unit in [unit_name(index) for index in PARTITIONS]
+            or unit in [unit_name(index,work=True) for index in work_campaign.PARTITIONS], 'Unexpected native partition unit')
     require(isinstance(witness,dict) and witness.get('unit')==unit
             and witness.get('properties',{}).get('ActiveState')=='active'
             and witness['properties'].get('InvocationID'), 'Origin active invocation witness is missing')
@@ -151,11 +231,15 @@ def closed(unit, *, witness, command=run, cgroups=Path('/sys/fs/cgroup'), proc=P
             'origin_only':True, 'limitation':'Independent acknowledgement is still required after any containment abort.'}
 
 
-def unit_name(index):
+def unit_name(index, *, work=False):
+    if work:
+        return 'axxium-qual-work-4805-batch'+str(index)+'.service'
     return 'axxium-qual582-standard-v2-v5-worker'+str(index % 2)+'-batch'+str(index)+'.service'
 
 
-def cli(root, index):
+def cli(root, index, *, work=False):
+    if work:
+        return ['/usr/bin/python3','-E','-B','-u',str(CONTROLLER/work_campaign.ENTRYPOINT),'--partition',str(index)]
     return ['/usr/bin/python3','-B','-u','qualification/mutation_campaign.py','--path-prefix','src/cljs/',
         '--profile',collector.PROFILE,'--operator-id','github-native/partition'+str(index),
         '--external-harness-sha',collector.HARNESS,'--producer-revision',collector.PRODUCER,
@@ -196,9 +280,14 @@ def verify_runtime(environment, node, root, *, command=run):
             'canonical_lookup_verified_before_gate':True}
 
 
-def progress(root, report, candidates, selection, producer, harness):
+def evidence_context(root, work):
+    # The incumbent workflow loads the original sealed collector and evaluators.
+    return collector.worker_context(root, **({'work': True} if work else {}))
+
+
+def progress(root, report, candidates, selection, producer, harness, *, work=False):
     """Monitoring only: rehash completed raw rows and call accepted classifiers/guard."""
-    with collector.worker_context(root):
+    with evidence_context(root, work):
         m, l = collector.campaign, collector.lineage
         reference = l._document(m, report)
         data = reference['document']
@@ -274,14 +363,20 @@ def snapshot(root, destination, origin, *, quiescence_verified=True):
 
 def execute(index, root, unit, destination, origin, adoption, state):
     global STAGE
+    work = origin.get('workflow') == work_campaign.WORKFLOW
+    base = WORK_BASE if work else BASE
+    application = work_campaign.APPLICATION if work else collector.APPLICATION
+    harness_revision = application if work else collector.HARNESS
+    producer_revision = adoption['producer_revision'] if work else collector.PRODUCER
     STAGE='worker-source-preparation'
-    subprocess.run(['sudo','mkdir','-p',str(BASE)],check=True,capture_output=True)
-    subprocess.run(['sudo','chown',str(os.getuid())+':'+str(os.getgid()),str(BASE)],check=True,capture_output=True)
+    subprocess.run(['sudo','mkdir','-p',str(base)],check=True,capture_output=True)
+    subprocess.run(['sudo','chown',str(os.getuid())+':'+str(os.getgid()),str(base)],check=True,capture_output=True)
     subprocess.run(['git','clone','--no-hardlinks','--no-checkout',str(CONTROLLER),str(root)],check=True,capture_output=True)
-    subprocess.run(['git','checkout','--detach',collector.APPLICATION],cwd=root,check=True,capture_output=True)
-    for name in collector.RUNTIME_FILES:
-        path=root/'qualification'/name;path.parent.mkdir(mode=0o700,exist_ok=True)
-        write(path,subprocess.check_output(['git','show',collector.PRODUCER+':qualification/'+name],cwd=root))
+    subprocess.run(['git','checkout','--detach',application],cwd=root,check=True,capture_output=True)
+    if not work:
+        for name in collector.RUNTIME_FILES:
+            path=root/'qualification'/name;path.parent.mkdir(mode=0o700,exist_ok=True)
+            write(path,subprocess.check_output(['git','show',producer_revision+':qualification/'+name],cwd=root))
     STAGE='stripped-runtime-preflight'
     home=Path.home();node=Path(run(['volta','run','--node','22.23.3','node','-p','process.execPath']))
     require(node.is_absolute() and run([str(node),'--version']) == 'v22.23.3','Pinned native Node is unavailable')
@@ -303,26 +398,33 @@ def execute(index, root, unit, destination, origin, adoption, state):
         '--property=CPUQuota=200%','--property=TasksMax=96','--property=RuntimeMaxSec=600',
         '/usr/bin/env','-i',*[k+'='+v for k,v in environment.items()],str(node.parent/'npm'),'ci','--ignore-scripts','--no-audit','--no-fund'],check=True)
     STAGE='immutable-input-preparation'
-    with collector.worker_context(root):
+    with evidence_context(root,work):
         m,l,h=collector.campaign,collector.lineage,collector.external_harness
         m.require_unchanged_tree();m.prepare_evidence_directories()
-        harness=h.prepare(root,collector.APPLICATION,collector.HARNESS);h.validate(root,harness)
-        producer=m.producer_custody(collector.PRODUCER,external=True)
-        candidates,selection=l.select_candidates(m,profile=collector.PROFILE,path_prefix='src/cljs/',batch_index=index,sample_seed=collector.SEED)
-        require(len(candidates)==PARTITIONS[index][0] and selection['selection_sha256']==PARTITIONS[index][1]
-                and selection['inventory_sha256']==INVENTORY and len(selection['inventory_fingerprints'])==2852,
-                'Native whole selection differs')
-        require(len(harness['files'])==130 and harness['test_support_paths']==sorted(h.TEST_SUPPORT_PATHS),'Native harness differs')
-    gate=root/'qualification/results/.native-launch-ready';report=root/'qualification/results/native-standard-v2-v5/report.json'
+        harness=h.prepare(root,application,harness_revision);h.validate(root,harness)
+        producer=m.producer_custody(producer_revision,external=True)
+        if work:
+            candidates,selection=work_campaign.select(m,l,index)
+            require(not harness['changed_test_paths'] and harness['application_sha']==harness['harness_sha']==application,
+                    'Native Work harness must retain the exact tracked tests')
+        else:
+            candidates,selection=l.select_candidates(m,profile=collector.PROFILE,path_prefix='src/cljs/',batch_index=index,sample_seed=collector.SEED)
+            require(len(candidates)==PARTITIONS[index][0] and selection['selection_sha256']==PARTITIONS[index][1]
+                    and selection['inventory_sha256']==INVENTORY and len(selection['inventory_fingerprints'])==2852,
+                    'Native whole selection differs')
+            require(len(harness['files'])==130,'Native legacy harness differs')
+        require(harness['test_support_paths']==sorted(h.TEST_SUPPORT_PATHS),'Native harness test support differs')
+    gate=root/'qualification/results/.native-launch-ready'
+    report=root/'qualification/results'/(work_campaign.OUTPUT if work else 'native-standard-v2-v5')/'report.json'
     argv=['sudo','systemd-run','--unit='+unit,'--service-type=exec','--uid='+str(os.getuid()),'--gid='+str(os.getgid()),
         '--property=WorkingDirectory='+str(root),'--property=MemoryMax=5G','--property=MemoryHigh=4G',
         '--property=MemorySwapMax=0','--property=CPUQuota=400%','--property=TasksMax=192',
         '--property=KillMode=control-group','--property=OOMPolicy=stop','--property=RuntimeMaxSec=19800',
         '/usr/bin/env','-i',*[k+'='+v for k,v in environment.items()],'/bin/bash','--noprofile','--norc','-c',GATE,
-        'qualification-native-cap-gate',str(gate),*cli(root,index)]
+        'qualification-native-cap-gate',str(gate),*cli(root,index,work=work)]
     STAGE='active-resource-gate'
     subprocess.run(argv,check=True,capture_output=True)
-    caps=active_caps(unit,root,gate,environment,index)
+    caps=active_caps(unit,root,gate,environment,index,work=work)
     state['caps']=caps
     write(root/'qualification/results/native-launch.json',{'origin':origin,'adoption':adoption,'caps':caps,
         'command':argv,'runtime':runtime,'selection':selection,'producer':producer,'harness':harness,'qualification_credit':False})
@@ -335,7 +437,7 @@ def execute(index, root, unit, destination, origin, adoption, state):
     start=time.monotonic();signalled=False;summary=None;stop_reason=None
     while system_properties(unit)['ActiveState']=='active':
         if report.exists():
-            summary=progress(root,report,candidates,selection,producer,harness)
+            summary=progress(root,report,candidates,selection,producer,harness,work=work)
             print(json.dumps(summary),flush=True)
         free=os.statvfs(root)
         raw_size=sum(path.stat().st_size for path in (root/'qualification/results').rglob('*') if path.is_file())
@@ -344,21 +446,24 @@ def execute(index, root, unit, destination, origin, adoption, state):
             props=system_properties(unit);pid=int(props['MainPID'])
             require(pid>0 and Path('/proc/'+str(pid)+'/cwd').resolve()==root,'Native stop controller differs')
             actual=Path('/proc/'+str(pid)+'/cmdline').read_bytes().split(b'\0')
-            require(actual==[part.encode() for part in cli(root,index)]+[b''],'Native stop command differs')
+            require(actual==[part.encode() for part in cli(root,index,work=work)]+[b''],'Native stop command differs')
             os.kill(pid,signal.SIGUSR1);signalled=True
             stop_reason='250-strict-positive-observations' if (summary or {}).get('eligible',0)>=250 else 'resource-or-time-bound'
         time.sleep(20)
     closure=closed(unit,witness=state['caps'])
-    if report.exists():summary=progress(root,report,candidates,selection,producer,harness)
+    if report.exists():summary=progress(root,report,candidates,selection,producer,harness,work=work)
     write(root/'qualification/results/native-terminal.json',{'origin':origin,'closure':closure,'progress':summary,
         'stop_reason':stop_reason,'self_acknowledged':False,'retry_attempted':False,'qualification_credit':False})
     collected=False
     if summary and summary.get('terminal_state') in {'clean_partial','complete'} and summary.get('eligible',0)>=250:
         STAGE='origin-partition-collection'
         entry={'batch_index':index,'worker_root':str(root),'report':str(report),'unit':unit}
+        collection = {'work_producer': producer_revision} if work else {}
         with collector.read_leases([root]):
-            batch,audit=collector.collect_batch(entry,observe_unit=lambda name:closed(name,witness=state['caps']))
-        require(collector.verify_adoption(COLLECTOR)==adoption,'Collector native adoption changed')
+            batch,audit=collector.collect_batch(entry,observe_unit=lambda name:closed(name,witness=state['caps']),
+                                                **collection)
+        observed = verify_work_adoption(origin) if work else collector.verify_adoption(COLLECTOR)
+        require(observed==adoption,'Collector native adoption changed')
         write(destination/'partition.json',{'origin':origin,'adoption':adoption,'batch':batch,'audit':audit,
             'production_admitted':False,'four_partition_aggregation_and_native_artifact_custody_required':True})
         collected=True
@@ -412,14 +517,22 @@ def preserve(root, destination, origin, unit, state):
 def main():
     global STAGE
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--partition',type=int,required=True)
-    args=parser.parse_args();origin=context(args.partition)
+    parser.add_argument('--work',action='store_true')
+    args=parser.parse_args()
+    if args.work:
+        require(not (os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')),
+                'The Work controller must run without GitHub credentials')
+    origin=context(args.partition,work=args.work,api=public_work_api if args.work else collector.github)
     STAGE='native-collector-adoption'
-    adoption=collector.verify_adoption(COLLECTOR)
-    index=args.partition;root=BASE/('worker'+str(index));unit=unit_name(index)
+    adoption=verify_work_adoption(origin) if args.work else collector.verify_adoption(COLLECTOR)
+    index=args.partition;root=(WORK_BASE if args.work else BASE)/('worker'+str(index));unit=unit_name(index,work=args.work)
     destination=CONTROLLER/('native-evidence-'+str(index))
     require(not root.exists() and not destination.exists(),'Use a fresh ephemeral worker and evidence directory')
     destination.mkdir(mode=0o700)
     write(destination/'origin.json',{'origin':origin,'adoption':adoption,'production_admitted':False})
+    if args.work:
+        subprocess.run(['git','archive','--format=tar','--output='+str(destination/'producer-runtime.tar'),
+                        adoption['producer_revision'],*sorted(adoption['controller_file_sha256'])],cwd=CONTROLLER,check=True)
     state={}
     try:
         execute(index,root,unit,destination,origin,adoption,state)

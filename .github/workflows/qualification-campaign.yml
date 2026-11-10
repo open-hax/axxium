@@ -27,6 +27,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Check out the sealed incumbent evidence evaluator
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 9974c0403a1176406d8cd470745b1555f802ee36
+          path: .qualification-incumbent
+          fetch-depth: 0
+          persist-credentials: false
       - name: Install genuine pinned Volta
         uses: volta-cli/action@5c175f92dea6f48441c436471e6479dbc192e194 # v4
         with:
@@ -51,7 +58,9 @@ jobs:
           PARTITION: ${{ matrix.partition }}
         run: |
           mkdir -m 700 "$RUNNER_TEMP/qualification-python-cache"
-          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/qualification-python-cache" python3 -B -u qualification/native_campaign_job.py --partition "$PARTITION"
+          PYTHONPATH="$GITHUB_WORKSPACE/.qualification-incumbent/qualification:$GITHUB_WORKSPACE/qualification" \
+            PYTHONPYCACHEPREFIX="$RUNNER_TEMP/qualification-python-cache" \
+            python3 -P -B -u qualification/native_campaign_job.py --partition "$PARTITION"
       - name: Preserve complete origin evidence and negatives
         if: always()
         id: evidence

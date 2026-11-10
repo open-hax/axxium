@@ -435,3 +435,28 @@ limit, so the two isolated jobs can overlap the two bounded local campaigns.
 The monitor reserves space for its final raw archive and stops early rather than
 inventing missing evidence. Setup failures or resource-limited partial runs stay
 unqualified. Synthetic controller laws supply no real mutation credit.
+
+## Native Work partitions
+
+`qualification-work-campaign.yml` binds a separate manual main run to Work
+application `4805e9aa1ab574c2e517f6c156bca0c1e69696fb` and the same revision's
+tracked test and package bytes. The reviewed scanner from PR #53 freezes the
+`standard-v2` inventory and ordering seed `full-qualification-4805e9a-v1`.
+The four disjoint partitions contain 1,562, 1,582, 1,595 and 1,603 proposals.
+The isolated worker keeps the application checkout unchanged except for each
+owned temporary mutation. The producer runs from the trusted controller
+checkout, and the origin artifact includes its exact runtime archive and hashes.
+
+The Work controller reads public GitHub run, PR, and source metadata without
+an access token. Unavailable or rate-limited metadata fails the native check.
+The old workflow loads the sealed `9974c040` collector in a separate checkout,
+so Work evaluator changes do not change the old campaign's evidence contract.
+
+Each Work job tries its complete ordered partition within the existing resource
+and time limits. It emits a partition receipt only after collecting the first
+250 eligible actual test kills, verifying restoration, and observing native
+closure. A stop, timeout, or containment failure can leave a partial artifact
+and requires independent investigation before further execution. No prior
+campaign results count for Work. Four separately verified native artifacts,
+same-source integration and E2E evidence, and the Services qualification
+record are still required for production admission.
