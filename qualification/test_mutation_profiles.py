@@ -38,6 +38,22 @@ class ProfileTests(unittest.TestCase):
         self.assertTrue({identity(row) for row in old} < {identity(row) for row in current})
         self.assertEqual(len(current), len({identity(row) for row in current}))
 
+    def test_apostrophe_in_a_symbol_does_not_start_a_reader_quote(self):
+        """Keep a mailbox ledger binding intact without making real quoted code mutable."""
+        source = "(let [ledger' 64] (when true ledger')) ' (when false 42)"
+        for profile in campaign.MUTATION_PROFILES:
+            with self.subTest(profile=profile):
+                candidates = campaign.sites(source, profile)
+                self.assertEqual({row[2] for row in candidates}, {"64", "when", "true"})
+
+    def test_apostrophe_after_a_number_still_quotes_the_next_form(self):
+        """Keep the reader boundary after signed and unsigned numbers."""
+        source = "[64'(when false 42) -7'(if true 9) +5'(str \"quoted\")]"
+        for profile in campaign.MUTATION_PROFILES:
+            with self.subTest(profile=profile):
+                candidates = campaign.sites(source, profile)
+                self.assertEqual({row[2] for row in candidates}, {"64", "-7"})
+
     def test_string_replacement_keeps_exact_escaped_multiline_and_unicode_spans(self):
         source = '(def message "hé\\\"llo\nline") (str "x" "")'
         rows = self.strings(source)

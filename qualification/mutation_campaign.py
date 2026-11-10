@@ -68,6 +68,7 @@ def tokens(source: str):
     Strings, regex literals, character literals and comments remain opaque.
     The parser below rejects unbalanced forms instead of guessing mutation sites.
     """
+    number_start = re.compile(r"[+-]?[0-9]")
     out = []
     i = 0
     while i < len(source):
@@ -117,7 +118,11 @@ def tokens(source: str):
             continue
         # Regex #(), set #{}, var literals, symbolic values and ordinary atoms
         # are decoded only far enough to recognize reader and list boundaries.
-        while i < len(source) and not source[i].isspace() and source[i] not in "()[]{}\";,`'~@^":
+        # Apostrophes terminate number tokens but can occur inside symbols.
+        delimiters = "()[]{}\";,`~@^"
+        if number_start.match(source, i):
+            delimiters += "'"
+        while i < len(source) and not source[i].isspace() and source[i] not in delimiters:
             i += 1
         if i == start:
             raise ValueError(f"Unrecognized character at {i}")
