@@ -41,6 +41,7 @@ function startFixture(overrides = {}) {
   return { child, readUntil, output: () => output, error: () => error };
 }
 
+/** Observe child completion without leaving the fixture deadline timer running. */
 async function waitForExit(exited, ms) {
   let guard;
   try {
@@ -53,6 +54,7 @@ async function waitForExit(exited, ms) {
   }
 }
 
+/** Require child completion for fixtures with an expected shutdown deadline. */
 async function boundedExit(exited, ms = 28000) {
   const result = await waitForExit(exited, ms);
   if (result === null) throw new Error('child exceeded shutdown bound');
