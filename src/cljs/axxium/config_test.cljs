@@ -1,6 +1,7 @@
 (ns axxium.config-test
   (:require [axxium.config :as config]
             [axxium.db :as db]
+            [axxium.domain.kernel-fixture :as fixture]
             [axxium.extern.lifecycle :as lifecycle]
             [axxium.extern.pg :as pg]
             [cljs.test :refer [deftest is]]))
@@ -14,6 +15,18 @@
                 (catch :default _ [:refused])))))
   (doseq [invalid ["" "0" "999" "300001" "20ms" "-1" "1e4"]]
     (is (thrown? js/Error (config/parse-schema-statement-timeout-ms invalid)))))
+
+(deftest mailbox-pilot-requires-two-distinct-dids-including-the-webhook-recipient
+  (let [alice fixture/alice
+        bob fixture/bob
+        carol fixture/carol
+        pair (str alice "," bob)]
+    (is (nil? (config/mailbox-pilot-allowed-dids nil bob)))
+    (is (= #{alice bob} (config/mailbox-pilot-allowed-dids pair bob)))
+    (doseq [[input owner] [["" bob] [bob bob] [(str bob "," bob) bob]
+                           [(str pair ",") bob] [(str pair "," carol) bob]
+                           [(str "alice.example," bob) bob] [pair nil] [pair carol]]]
+      (is (thrown? js/Error (config/mailbox-pilot-allowed-dids input owner))))))
 
 (deftest schema-pool-has-only-its-own-statement-timeout
   (let [seen (atom nil)]

@@ -91,6 +91,14 @@ also be configured. Only the selected actor's live AT Protocol session
 advertises the event capability. Register that actor's mailbox before
 requesting the event catalog or subscribing.
 
+For a private two-actor pilot, set `AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS` to the
+recipient DID and the native sender DID, separated by a comma. The recipient
+must equal `AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID`. Both actors need a live verified
+AT Protocol binding. The recipient still has to grant the sender permission
+to send. An authenticated DID outside the pair receives 403 before the route
+can open a mailbox session or access the ledger. Leave the allowlist unset to
+retain the existing mailbox authentication policy.
+
 The authenticated MCP endpoint supports `events/list`, `events/subscribe`
 and `events/unsubscribe` for `message.available`. The recipient is derived
 from the session. The event carries only `message_id`, and the subscription

@@ -257,6 +257,7 @@
                                           :mailbox/ledger-file ledger
                                           :mailbox/webhook-key-file key-file
                                           :mailbox/webhook-actor-did fixture/bob
+                                          :mailbox/pilot-allowed-dids #{fixture/alice fixture/bob}
                                           :axxium/public-base-url origin
                                           (config ks)))]
         (reset! app (await (start-app! oauth)))
@@ -264,9 +265,13 @@
                                           (secrets/secure-id) fixture/alice))
               bob (await (mint-fixture! live "actor_22222222-2222-4222-8222-222222222222"
                                         (secrets/secure-id) fixture/bob))
+              carol (await (mint-fixture! live "actor_33333333-3333-4333-8333-333333333333"
+                                          (secrets/secure-id) fixture/carol))
               a (:bearer alice)
               b (:bearer bob)
               root (await (session/atproto-session-proof b))
+              rejected (await (request! @app "POST" (:bearer carol) nil (rpc "initialize") {}))
+              ledger-after-rejection (fs/readFileSync ledger "utf8")
               initialized-a (await (request! @app "POST" a nil (rpc "initialize") {}))
               initialized-b (await (request! @app "POST" b nil (rpc "initialize") {}))
               a-session (:sid initialized-a)
@@ -275,8 +280,15 @@
               send (fn [key] (request! @app "POST" a a-session
                                         (tool "send_message" {"to" fixture/bob "idempotency_key" key
                                                               "body" {"private_content" "fixture"}}) {}))]
+          (is (= 403 (:status rejected)))
+          (is (nil? (:sid rejected)))
+          (is (= "" ledger-after-rejection) "An active outsider does not initialize a mailbox session.")
           (is (= {"tools" {}} (get-in initialized-a [:data "result" "capabilities"])))
           (is (= {"tools" {} "events" {}} (get-in initialized-b [:data "result" "capabilities"])))
+          (let [before (fs/readFileSync ledger "utf8")
+                outsider-call (await (request! @app "POST" (:bearer carol) a-session (tool "register_mailbox" {}) {}))]
+            (is (= 403 (:status outsider-call)))
+            (is (= before (fs/readFileSync ledger "utf8"))))
           (reset! mailbox-grant (assoc root :oauth/grant-id "fixture-grant" :oauth/client-id "chatgpt-test"
                                            :oauth/resource audience))
           (let [metadata-path "/.well-known/oauth-protected-resource/api/mailbox/mcp"
