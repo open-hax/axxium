@@ -1,6 +1,7 @@
 (ns axxium.extern.mailbox-webhook
   "Bounded, signed outbound delivery for mailbox event callbacks."
   (:require [axxium.extern.agent-credentials :as credentials]
+            [axxium.law.mailbox-webhook :as law]
             [clojure.string :as str]
             ["@atproto-labs/fetch-node" :refer [safeFetchWrap]]
             ["node:crypto" :as crypto]))
@@ -96,12 +97,19 @@
     ;; The status suffices for delivery. Do not read an unrelated response body.
     (.catch (.cancel body) (fn [_] nil))))
 
+(defn- with-response-request-id [result response]
+  (let [request-id (some-> response .-headers (.get "x-request-id"))]
+    (cond-> result
+      (law/response-request-id? request-id) (assoc :response-request-id request-id))))
+
 (defn- transport-failure [signal error]
-  (let [status (some-> error (aget "response") (aget "status"))
+  (let [response (some-> error (aget "response"))
+        status (some-> response (aget "status"))
         name (some-> error (aget "name"))]
     (cond
       ;; Preserve terminal statuses even if safeFetchWrap rejects the response size.
-      (contains? #{410 413} status) {:status status :reason "http_error"}
+      (contains? #{410 413} status)
+      (with-response-request-id {:status status :reason "http_error"} response)
       (or (.-aborted signal) (contains? #{"AbortError" "TimeoutError"} name)) {:reason "timeout"}
       :else {:reason "unreachable"})))
 
@@ -155,6 +163,8 @@
    (let [result (await (post! fetch subscription (get event "eventId") event
                               (fn [response]
                                 (cancel-body! response)
-                                (cond-> {:accepted? (.-ok response) :status (.-status response)}
-                                  (not (.-ok response)) (assoc :reason "http_error")))))]
+                                (with-response-request-id
+                                  (cond-> {:accepted? (.-ok response) :status (.-status response)}
+                                    (not (.-ok response)) (assoc :reason "http_error"))
+                                  response))))]
      (merge {:accepted? false} result))))

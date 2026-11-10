@@ -243,7 +243,7 @@
         deliver (fn ^:async fake-callback [event]
                   (swap! deliveries conj event)
                   (when-let [f @on-delivery] (await (f)))
-                  {:accepted? true :status 202})]
+                  {:accepted? true :status 202 :response-request-id "req_work_fixture"})]
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (fs/writeFileSync key-file (.toString (js/Buffer.alloc 32 8) "base64") #js {:mode 384})
@@ -343,11 +343,18 @@
             (await (@tick))
             (is (= 1 (count @deliveries)))
             (is (= {"message_id" message-id} (get (first @deliveries) "data")))
+            (let [load-events (:load! (disk/private-ledger-storage ledger []))
+                  delivered (peek (load-events ledger))]
+              (is (= :axxium.outbox/delivered (:event/type delivered)))
+              (is (= {:status 202} (get-in delivered [:event/body :outbox/transport-receipt])))
+              (is (= "req_work_fixture" (get-in delivered [:event/body :outbox/response-request-id]))))
             (let [receipt (result (await (request! @app "POST" a a-session
                                             (tool "get_delivery" {"message_id" message-id}) {})))]
               (is (= "delivered" (get receipt "notification")))
               (is (= "unknown" (get receipt "execution")))
-              (is (false? (get receipt "acknowledged")))))
+              (is (false? (get receipt "acknowledged")))
+              (is (not (str/includes? (pr-str receipt) "req_work_fixture"))
+                  "The response request ID is private to the mailbox ledger.")))
           (swap! live dissoc (:query bob))
           (is (= "accepted" (get (result (await (send "after-revocation"))) "accepted")))
           (await (@tick))

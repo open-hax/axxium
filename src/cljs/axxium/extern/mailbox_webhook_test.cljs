@@ -125,6 +125,30 @@
         (.catch (fn [_] (is false "delivery test rejected")))
         (.finally done))))
 
+(defn- ^:async response-request-id* []
+  (doseq [[headers expected] [[#js {"X-Request-Id" "req_71af-5"
+                                    "Set-Cookie" "fixture_session=secret"}
+                               {:response-request-id "req_71af-5"}]
+                              [#js [#js ["x-request-id" "req_first"]
+                                    #js ["x-request-id" "req_second"]] {}]
+                              [#js {"x-request-id" "req_ embedded"} {}]
+                              [#js {"x-request-id" (apply str (repeat 129 "a"))} {}]
+                              [#js {"x-request-id" "whsec_wrong_header"} {}]
+                              [#js {"x-request-id" "sk-wrong-header"} {}]
+                              [#js {"x-request-id" "rk-wrong-header"} {}]]]
+    (let [fetch (webhook/guarded-fetch
+                  (fn [_ _]
+                    (js/Promise.resolve (js/Response. "private fixture body"
+                                                     #js {:status 200 :headers headers}))))]
+      (is (= (merge {:accepted? true :status 200} expected)
+             (await (webhook/deliver! fetch callback event)))))))
+
+(deftest delivery-retains-only-a-valid-response-request-id
+  (async done
+    (-> (response-request-id*)
+        (.catch (fn [_] (is false "response request ID test rejected")))
+        (.finally done))))
+
 (defn- ^:async invalid-transport* []
   (let [calls (atom 0)
         timeout-fetch (webhook/guarded-fetch
@@ -137,7 +161,8 @@
         terminal-response (webhook/guarded-fetch
                            (fn [_ _] (js/Promise.resolve
                                       (js/Response. "Gone" #js {:status 410
-                                                                :headers #js {"Content-Length" "4097"}}))))
+                                                                :headers #js {"Content-Length" "4097"
+                                                                              "X-Request-Id" "req_gone"}}))))
         malformed (webhook/guarded-fetch
                    (fn [_ _] (js/Promise.resolve (js/Response. "not-json"))))]
     (is (= {:verified? false :reason "invalid_callback"}
@@ -148,7 +173,7 @@
     (is (= {:verified? false :reason "timeout"} (await (webhook/verify! timeout-fetch callback))))
     (is (= {:verified? false :reason "unreachable"} (await (webhook/verify! large-response callback))))
     (is (= {:verified? false :reason "challenge_failed"} (await (webhook/verify! malformed callback))))
-    (is (= {:accepted? false :status 410 :reason "http_error"}
+    (is (= {:accepted? false :status 410 :reason "http_error" :response-request-id "req_gone"}
            (await (webhook/deliver! terminal-response callback event))))
     (is (= {:accepted? false :reason "payload_too_large"}
            (await (webhook/deliver! timeout-fetch callback
