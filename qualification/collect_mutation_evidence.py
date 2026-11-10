@@ -15,6 +15,7 @@ import campaign_lineage as lineage
 import external_harness
 import mutation_campaign as campaign
 import test_phase
+import work_campaign
 
 REPOSITORY = 'open-hax/axxium'
 APPLICATION = '58234df96ca86507e6cdd87f65aaa9ab35621415'
@@ -71,7 +72,7 @@ def accepted_pr(value, head):
             and HEX40.fullmatch(value['merge_commit_sha']) is not None)
 
 
-def verify_evaluator_custody():
+def verify_evaluator_custody(producer=None):
     """Bind actual collector-side evaluator files independently of their methods."""
     origins = {'mutation_campaign.py': campaign, 'campaign_lineage.py': lineage,
                'external_harness.py': external_harness, 'test_phase.py': test_phase}
@@ -85,7 +86,7 @@ def verify_evaluator_custody():
             require(Path(origins[name].__file__).absolute() == path,
                     'An imported evaluator came from another directory')
         raw = path.read_bytes()
-        expected = subprocess.check_output(['git','show',PRODUCER+':qualification/'+name],cwd=HERE.parent)
+        expected = subprocess.check_output(['git','show',(producer or PRODUCER)+':qualification/'+name],cwd=HERE.parent)
         require(raw == expected, 'Collector-side evaluator differs from the immutable producer')
         hashes[name] = sha(raw)
     return hashes
@@ -176,9 +177,10 @@ def read_leases(roots):
 
 
 @contextmanager
-def worker_context(root):
+def worker_context(root, *, work=False):
     saved = campaign.ROOT, campaign.SOURCE, campaign.SOURCE_SHA
-    campaign.ROOT, campaign.SOURCE, campaign.SOURCE_SHA = root, root / 'src/cljs', APPLICATION
+    application = work_campaign.APPLICATION if work else APPLICATION
+    campaign.ROOT, campaign.SOURCE, campaign.SOURCE_SHA = root, root / 'src/cljs', application
     try:
         yield
     finally:
@@ -247,8 +249,16 @@ def observed_corpus(history):
     return documents, observations
 
 
-def collect_batch(entry, *, observe_unit=unit_closed):
-    verify_evaluator_custody()
+def collect_batch(entry, *, observe_unit=unit_closed, work_producer=None):
+    work = work_producer is not None
+    application = work_campaign.APPLICATION if work else APPLICATION
+    producer_revision = work_producer if work else PRODUCER
+    harness_revision = application if work else HARNESS
+    require(isinstance(producer_revision, str) and HEX40.fullmatch(producer_revision), 'Invalid producer revision')
+    if work:
+        verify_evaluator_custody(producer_revision)
+    else:
+        verify_evaluator_custody()
     require(isinstance(entry, dict), 'A batch input must be an object')
     index = entry.get('batch_index')
     require(type(index) is int and index in range(4), 'Batch index is invalid')
@@ -257,32 +267,36 @@ def collect_batch(entry, *, observe_unit=unit_closed):
     root = absolute(entry['worker_root'])
     require(root.is_dir() and root.stat().st_uid == os.getuid(), 'Worker ownership is unavailable')
     closure = observe_unit(entry['unit'])
-    with worker_context(root):
+    with worker_context(root, work=work):
         campaign.require_unchanged_tree()
         campaign.require_no_containment_marker()
         require(not list((root/'qualification/results').rglob('inflight.json')), 'An inflight source mutation remains')
-        producer = campaign.producer_custody(PRODUCER, external=True)
-        for name in RUNTIME_FILES:
-            path = root/'qualification'/name
-            require(not path.is_symlink() and path.read_bytes() == campaign.git('show', PRODUCER + ':qualification/' + name),
-                    'A worker runtime differs from its adopted producer')
-        descriptor_path = root/'qualification/harness'/HARNESS/external_harness.DESCRIPTOR
+        producer = campaign.producer_custody(producer_revision, external=True)
+        if not work:
+            for name in RUNTIME_FILES:
+                path = root/'qualification'/name
+                require(not path.is_symlink() and path.read_bytes() == campaign.git('show', producer_revision + ':qualification/' + name),
+                        'A worker runtime differs from its adopted producer')
+        descriptor_path = root/'qualification/harness'/harness_revision/external_harness.DESCRIPTOR
         require(not descriptor_path.is_symlink(), 'The harness descriptor is redirected')
         harness = json.loads(descriptor_path.read_text())
         external_harness.validate(root, harness)
-        require(harness['harness_sha'] == HARNESS, 'The external harness differs')
-        fixture_bytes = campaign.git('show', HARNESS + ':scripts/oidc-protocol.fixture.mjs')
+        require(harness['harness_sha'] == harness_revision, 'The external harness differs')
+        fixture_bytes = campaign.git('show', harness_revision + ':scripts/oidc-protocol.fixture.mjs')
         require(fixture_bytes.count(b"console.log('PASS durable authority:") == 1,
                 'The immutable authority scope marker differs')
-        guard = {'schema': 'axxium-positive-evidence-eligibility/v1', 'harness_sha': HARNESS,
+        guard = {'schema': 'axxium-positive-evidence-eligibility/v1', 'harness_sha': harness_revision,
                  'fixture_path': 'scripts/oidc-protocol.fixture.mjs', 'fixture_sha256': sha(fixture_bytes),
-                 'producer_revision': PRODUCER, 'driver_sha256': producer['files']['test_phase.py'],
+                 'producer_revision': producer_revision, 'driver_sha256': producer['files']['test_phase.py'],
                  'authority_done_raw_prefix': AUTHORITY_DONE,
                  'protocol_fragment_raw_prefix': PROTOCOL_FRAGMENT, 'authority_payload_marker': AUTHORITY_PAYLOAD,
                  'framing': 'Conservatively concatenate all protocol-prefixed payload fragments before marker search.',
                  'exclusion': 'Protocol failures after authority completed have no complete query-error observer; exclude the entire row, including mixed group failures.'}
-        candidates, selection = lineage.select_candidates(campaign, profile=PROFILE,
-            path_prefix='src/cljs/', batch_index=index, sample_seed=SEED)
+        if work:
+            candidates, selection = work_campaign.select(campaign, lineage, index)
+        else:
+            candidates, selection = lineage.select_candidates(campaign, profile=PROFILE,
+                path_prefix='src/cljs/', batch_index=index, sample_seed=SEED)
         history = lineage.load_history(campaign, absolute(entry['report']), candidates=candidates,
             selection=selection, producer=producer, harness=harness)
         terminal = history['document']
@@ -335,7 +349,7 @@ def collect_batch(entry, *, observe_unit=unit_closed):
             'eligibility_guard': guard,
             'selected_ordinals': [item['ordinal'] for item in picked], 'score_claim': None,
             'meaning': 'First 250 verified positive outcomes; the complete raw corpus is not relabelled.'}
-        batch = {'source_sha': APPLICATION, 'batch_index': index, 'status': 'passed', 'baseline': 'passed',
+        batch = {'source_sha': application, 'batch_index': index, 'status': 'passed', 'baseline': 'passed',
             'warnings': [], 'timed_out': False, 'mutants': selected,
             'collection_law': 'first-250-strict-actual-test-kills-in-frozen-cumulative-order/v1',
             'raw_outcome_counts': audit['raw_outcome_counts'], 'observed_prefix_end': history['next_index'],

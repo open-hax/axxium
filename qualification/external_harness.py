@@ -14,6 +14,8 @@ import re
 import stat
 import subprocess
 
+from work_campaign import APPLICATION as WORK_APPLICATION_SHA
+
 APPLICATION_SHA = '58234df96ca86507e6cdd87f65aaa9ab35621415'
 HARNESS_SHA = '5b0e9be2170c8b79662077c612efec7bb79f21b8'
 BOUNDARY_HARNESS_SHA = '4a7ceeb948c03b9198222c27bb8a8007db2979ea'
@@ -118,15 +120,16 @@ def canonical(value):
 
 def contract(root, application_sha, harness_sha):
     root = Path(root).resolve(strict=True)
-    expected_paths = accepted_harnesses().get(harness_sha)
-    require(application_sha == APPLICATION_SHA and expected_paths is not None,
+    work = application_sha == harness_sha == WORK_APPLICATION_SHA
+    expected_paths = frozenset() if work else accepted_harnesses().get(harness_sha)
+    require(work or (application_sha == APPLICATION_SHA and expected_paths is not None),
             'Only the fixed application and accepted regression harness are supported')
     require(git(root, 'rev-parse', '--show-toplevel').decode().strip() == str(root)
-            and git(root, 'rev-parse', 'HEAD').decode().strip() == APPLICATION_SHA,
+            and git(root, 'rev-parse', 'HEAD').decode().strip() == application_sha,
             'Worker must retain the exact application Git HEAD')
     application, harness = tree(root, application_sha), tree(root, harness_sha)
-    test_support = (TEST_SUPPORT_PATHS if harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA,
-                                                       FIXTURE_ERROR_HARNESS_SHA}
+    test_support = (TEST_SUPPORT_PATHS if work or harness_sha in {PROTOCOL_HARNESS_SHA, JSON_PROTOCOL_HARNESS_SHA,
+                                                                FIXTURE_ERROR_HARNESS_SHA}
                     else frozenset())
     require(test_support <= application.keys() & harness.keys(),
             'Accepted protocol test-support inputs are missing')
@@ -184,7 +187,7 @@ def require_directory(path):
 def validate(root: Path, descriptor: dict) -> None:
     require(isinstance(descriptor, dict) and isinstance(descriptor.get('harness_sha'), str),
             'Harness descriptor identity changed')
-    root, project, expected, _ = contract(root, APPLICATION_SHA, descriptor['harness_sha'])
+    root, project, expected, _ = contract(root, descriptor.get('application_sha'), descriptor['harness_sha'])
     require(isinstance(descriptor, dict) and descriptor == expected, 'Harness descriptor identity changed')
     for directory in (root / 'qualification', root / 'qualification/harness', project, project / 'src'):
         require_directory(directory)

@@ -19,12 +19,14 @@ GROUP_ORDER = ('cljs', 'protocol', 'lifecycle', 'browser')
 PROTOCOL_MARKERS = ('PASS durable authority:', 'PASS mounted RFC8628:',
                     'PASS mounted Fastify authority:', 'PASS isolated PostgreSQL:')
 MAX_CHILD_CAPTURE = 1024 * 1024
+VENDORED_EDN_PATHS = {'src/cljs/clio/shape/canonical.cljc', 'src/cljs/clio/shape/edn.cljc'}
 
 
 def plan_for_path(path):
     value = PurePosixPath(path)
     if (value.is_absolute() or '..' in value.parts or str(value) != path or
-            not path.startswith('src/cljs/axxium/') or value.suffix not in {'.cljs', '.cljc'}):
+            not (path.startswith('src/cljs/axxium/') or path in VENDORED_EDN_PATHS)
+            or value.suffix not in {'.cljs', '.cljc'}):
         raise ValueError('Unsupported application mutation path')
     groups = {'cljs'}
     if any(part in value.stem for part in ('oidc', 'config', 'auth', 'session', 'relay', 'pg')):
