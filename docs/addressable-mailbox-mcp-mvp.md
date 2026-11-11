@@ -189,6 +189,44 @@ must be active through every ancestor and own a registered mailbox. The
 directory follows recorded parent links, including when actors use older DID
 spellings. A recipient’s explicit send revocation still takes effect.
 
+`discover_actors` never lists the caller itself. It accepts an optional
+`query`, matched against DID and name, and an optional `anchor`.
+
+### Session actors and self-advertisement
+
+Every Codex, Work or Grok Bot session can be its own actor. An agent opens
+one through the identity agent endpoint (`/api/identity/agent`, as itself)
+with `session_open`. The result is a `:session` child node named
+`<agent DID>:s-<id>`, with these limits:
+
+- Its policy is within the parent's.
+- It has a lease of at most one day, and never longer than a parent
+  session's lease.
+- It gets its own bootstrap key, shown once.
+- An optional `:actor/policy` must be a well-formed policy, or the call is
+  refused as invalid before anything is written.
+
+By default the new session also advertises itself at its parent in the same
+step, using any `:advert/tags` you pass. Pass `:session/advertise? false` to
+open it without advertising. Advertising is best-effort: if the advert is
+refused, the session is still opened and its key is still returned, and the
+result carries `:advert/error`. The session can then call `actor_advertise`
+itself.
+
+So `cred(session) = attenuate(cred(parent))`. The session authenticates to
+the mailbox as itself and registers its own mailbox at its DID. A node whose
+lease has ended is no longer live, and it drops out of discovery and
+authentication. This includes stored node proofs that are checked again
+later, such as at webhook delivery. Ended session nodes, their adverts and
+key records stay in the ledger as history; nothing deletes them.
+
+A live node advertises itself at an ancestor (or itself) with
+`actor_advertise {:advert/anchor <ancestor DID> :advert/tags [..]}`, and
+withdraws with `actor_withdraw`. The directory at an anchor is the fold of
+these ledger events. `actor_find` and `discover_actors {anchor, query}` return
+the advertised nodes at that anchor that the caller sees, meaning both are
+live in the same tree. The parent closes a session with `session_close`.
+
 `resolve_address` and `send_message` check the same relationship. The server
 checks it again for retries before returning a prior receipt. The caller acts
 as its own verified mailbox identity. This grants no sibling inbox access,

@@ -10,7 +10,8 @@
         (JSON {op, ...}; see axxium.law.identity-admin)
    POST /api/identity/agent            a host agent as itself:
         x-axxium-actor: <agent did>, authorization: Bearer <bootstrap key>;
-        only credentials_self, token_for, actor_list
+        only credentials_self, token_for, actor_list, and the session tools
+        session_open/session_close, actor_advertise/actor_withdraw, actor_find
 
    The manifest state is a signed 5-minute cookie bound to parent + child,
    so a callback can only attach an App to the child its parent chose."
@@ -267,19 +268,22 @@
 
 (defn- mailbox-bootstrap-node?
   [st did]
-  (and (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did)
-       (contains? #{:agent :bot} (gi/kind-of st did))
-       (gi/active-owner-delegation? st (:root-did (root-binding)) did)
-       (let [bindings (gi/mailbox-bindings st)]
-         (and (not (contains? bindings did))
-              (not-any? #{did} (vals bindings))))))
+  (let [root-did (:root-did (root-binding))]
+    (and (not= did root-did)
+         (gi/live? st did (js/Date.))
+         (let [kind (gi/kind-of st did)]
+           (or (and (= :session kind) (gi/lease-of st did))
+               (and (contains? #{:agent :bot} kind)
+                    (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did)
+                    (gi/active-owner-delegation? st root-did did))))
+         (let [bindings (gi/mailbox-bindings st)]
+           (and (not (contains? bindings did))
+                (not-any? #{did} (vals bindings)))))))
 
 (defn node-proof
-  "Authenticate an opted-in agent or bot at its own unbound mailbox DID."
+  "Authenticate a leased session or opted-in agent or bot at its own unbound DID."
   [did key]
-  (when (and (string? did) (string? key)
-             (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did)
-             (configured?))
+  (when (and (string? did) (string? key) (configured?))
     (let [st (current-actor-state)]
       (when (and (mailbox-bootstrap-node? st did) (mcp/authenticate st did key))
         (let [digest (gi/bootstrap-digest st did)]
@@ -287,8 +291,8 @@
             {:principal p :cred-id (pr-str ["actor-node" did digest]) :node/digest digest}))))))
 
 (defn node-proof-active?
-  "Recheck opt-in, current generation, ancestry and unbound address without
-   acquiring the identity writer. Mailbox operations already hold that writer."
+  "Recheck current generation, live ancestry and the unbound address. Long-lived
+   agents also need a current opt-in. The caller can already hold the writer."
   [{:keys [principal] :node/keys [digest]}]
   (let [st (current-actor-state)
         did (:auth/did principal)]

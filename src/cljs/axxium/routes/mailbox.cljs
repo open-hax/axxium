@@ -178,7 +178,7 @@
                                                        cred-id))
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? false
-                 :events/enabled? (and (not (:node/digest proof)) (events/enabled? runtime proof))
+                 :events/enabled? (events/enabled? runtime proof)
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
                  :mailbox/actors? (:mailbox/actors? proof)

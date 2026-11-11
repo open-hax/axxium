@@ -553,7 +553,7 @@
               open! (fn [creds] (.then (run creds nil (rpc "initialize")) (fn [r] (:sid r))))
               g (as grokbot grokbot-key)
               w (as work work-key)]
-          (is (= 401 (:status (await (run g nil (rpc "initialize"))))) "Mailbox bootstrap is off by default.")
+          (is (= 401 (:status (await (run g nil (rpc "initialize"))))) "Long-lived mailbox bootstrap is off by default.")
           (reset! allowlist #{grokbot group other})
           (is (= 401 (:status (await (run w nil (rpc "initialize"))))) "An unlisted sibling is refused.")
           (is (= 401 (:status (await (run (as other other-key) nil (rpc "initialize")))))
@@ -568,7 +568,7 @@
             (await (run g g-sid (tool "register_mailbox" {})))
             (await (run w w-sid (tool "register_mailbox" {})))
             (is (= grokbot (get (result (await (run g g-sid (tool "whoami" {})))) "did")))
-            (is (= #{work grokbot}
+            (is (= #{work}
                    (set (map #(get % "did") (get (result (await (run g g-sid (tool "discover_actors" {})))) "actors")))))
             (is (= "accepted" (get (result (await (run g g-sid (tool "send_message" {"to" work "idempotency_key" "xh-1"
                                                                                     "body" {"text" "hello work"}}))))
