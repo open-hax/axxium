@@ -50,6 +50,7 @@
              [:mailbox-client-id {:optional true} [:ref ::id]]
              [:mailbox-resource {:optional true} [:ref ::uri]]
              [:mailbox-actor-messaging? {:optional true} :boolean]
+             [:mailbox-owner-consent? {:optional true} :boolean]
              [:node-grants {:optional true} [:vector {:max 64} relay/grant-schema]]]})
 
 (defn mailbox-client?
@@ -77,6 +78,7 @@
                  (= (count (:clients config)) (count (set (map :id (:clients config)))))
                  (= (count (:clients config)) (count (set (map :secret (:clients config)))))
                  (mailbox-client-configured? config)
+                 (or (not (:mailbox-owner-consent? config)) (:mailbox-actor-messaging? config))
                  (relay/grants-valid? (get config :node-grants []) (:clients config)))
     (throw (ex-info "Invalid OIDC authority configuration" {})))
   config)

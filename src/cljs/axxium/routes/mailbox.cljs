@@ -111,7 +111,8 @@
                                   (if (await (active-proof! oauth proof))
                                     (operation lg (assoc ctx :now (secrets/now)) body)
                                     {:unauthenticated? true}))))]
-    (if (and bindings (or (nil? (:oauth/grant-id proof)) (:mailbox/actors? proof)))
+    (if (and bindings (or (nil? (:oauth/grant-id proof))
+                          (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
       ;; Identity is acquired before mailbox. Keep it through the durable append
       ;; so a completed actor suspension cannot race an authorized send.
       (:result (await (identity/with-current-actor-state!

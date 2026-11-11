@@ -108,3 +108,26 @@
     (-> (session-cred-id-is-issued-and-looked-up*)
         (.catch (fn [e] (is false (str "session-cred-id-is-issued-and-looked-up rejected: " (pr-str e)))))
         (.finally done))))
+
+(defn- ^:async work-owner-proof* []
+  (let [queries (atom [])
+        actor (atom (actor-row))]
+    (with-redefs [token/verify-token (fn [_] (js/Promise.resolve {:sub "actor_1" :cred_id cred-id}))
+                  db/query-auth-proof! (fn [query]
+                                     (swap! queries conj query)
+                                     (js/Promise.resolve @actor))]
+      (is (nil? (await (session/human-session-proof! "axx_agent_token"))))
+      (is (empty? @queries))
+      (let [proof (await (session/human-session-proof! "fixture-signed-browser-session"))]
+        (is (= "actor_1" (:actor-id proof)))
+        (is (= cred-id (:cred-id proof)))
+        (is (= (db/q-select-active-human-session "actor_1" (:token-hash proof) cred-id)
+               (first @queries))))
+      (reset! actor nil)
+      (is (nil? (await (session/human-session-proof! "fixture-signed-browser-session")))))))
+
+(deftest work-owner-proof-requires-a-current-human-browser-session
+  (async done
+    (-> (work-owner-proof*)
+        (.catch (fn [e] (is false (str "Work owner session proof rejected: " (pr-str e)))))
+        (.finally done))))

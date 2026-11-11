@@ -38,7 +38,7 @@
           #{} lg))
 
 (defn- sender-root [state bindings principal]
-  (when (= :atproto (:auth/method principal))
+  (when (contains? #{:atproto :owner-delegation} (:auth/method principal))
     (active-root state (get bindings (:auth/did principal)))))
 
 (defn- reachable-actor [state resources root revoked mailbox-did actor-did]
@@ -53,7 +53,7 @@
        :mailbox-did mailbox-did})))
 
 (defn peer
-  "Return the routable peer for this verified AT principal, or nil. An owner's
+  "Return the routable peer for this verified mailbox principal, or nil. An owner's
    explicit send revocation continues to apply until a live explicit regrant."
   [lg mailbox-state {:keys [principal now] :directory/keys [state bindings]} mailbox-did]
   (when-let [root (sender-root state bindings principal)]

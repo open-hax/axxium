@@ -8,6 +8,7 @@
             [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.token-crypto :as crypto]
             [axxium.law.did :as did]
+            [axxium.routes.github-identity :as identity]
             [cljs.reader :as reader]))
 
 (def event-methods #{"events/list" "events/subscribe" "events/unsubscribe"})
@@ -70,13 +71,25 @@
                "refreshBefore" (secrets/instant-iso (:expires subscription))
                "cursor" nil "truncated" false}))
 
-(defn- check-session! [{:keys [writer path active-proof!]} proof ctx f]
-  (queue/submit! writer path
-    (fn ^:async authorized-operation [lg]
-      (cond
-        (not (await (active-proof! proof))) {:unauthenticated? true}
-        (mailbox/session-error lg (assoc ctx :now (secrets/now))) {:session-error true}
-        :else (f lg)))))
+(defn- ^:async submit-proof!
+  [{:keys [writer path active-proof!]} proof f]
+  (let [submit (fn []
+                 (queue/submit! writer path
+                   (fn ^:async authorize-operation [lg]
+                     (if (await (active-proof! proof))
+                       (f lg)
+                       {:unauthenticated? true}))))]
+    (if (:mailbox/owner-root-did proof)
+      ;; Actor authority and mailbox writes always acquire identity first.
+      (:result (await (identity/with-current-actor-state! (fn [_] (submit)))))
+      (await (submit)))))
+
+(defn- check-session! [runtime proof ctx f]
+  (submit-proof! runtime proof
+    (fn [lg]
+      (if (mailbox/session-error lg (assoc ctx :now (secrets/now)))
+        {:session-error true}
+        (f lg)))))
 
 (defn- ^:async verify-subscription!
   [{:keys [owner key] :as runtime} proof ctx rpc-id {:keys [url secret ttl]} previous
@@ -153,15 +166,16 @@
                        (merge (select-keys out [:ledger]) (success id {})))))))
         (rpc-error id -32602 "Invalid event arguments")))))
 
-(defn- ^:async send-attempt! [{:keys [writer path active-proof!]} candidate subscription {:keys [url secret proof]}]
-  (let [attempt (await (queue/submit! writer path
-                         (fn ^:async claim [lg]
-                           (when (await (active-proof! proof))
-                             (events/attempt lg candidate (secrets/now))))))
+(defn- ^:async send-attempt! [{:keys [writer path active-proof!] :as runtime} candidate subscription {:keys [url secret proof]}]
+  (let [attempt (await (submit-proof! runtime proof
+                         (fn [lg] (events/attempt lg candidate (secrets/now)))))
+        authorized? (and (:result attempt)
+                         (or (not (:mailbox/owner-root-did proof)) (await (active-proof! proof))))
         lg (queue/current-ledger writer path)
         current (events/subscription lg (:owner candidate))
         now (secrets/now)]
-    (when (and (:result attempt) (= (:generation subscription) (:generation current))
+    (when (and authorized?
+               (= (:generation subscription) (:generation current))
                (> (inst-ms (:expires current)) (inst-ms now))
                (events/authorized? lg (:owner candidate) now))
       (let [response (await (webhook/deliver! {:id (:id subscription) :url url :secret secret}

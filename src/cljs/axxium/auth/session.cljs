@@ -36,13 +36,15 @@
   [actor did]
   (issue-session! actor #(token/create-atproto-token! %1 %2 did)))
 
+(defn- ^:async verified-claims [value]
+  (try (await (token/verify-token value))
+       (catch :default _ nil)))
+
 (defn ^:async atproto-session-proof
   "Return a proof from the signed callback DID without retaining the bearer."
   [value]
   (when-not (str/blank? value)
-    (when-let [claims (try
-                        (await (token/verify-token value))
-                        (catch :default _ nil))]
+    (when-let [claims (await (verified-claims value))]
       (when-let [p (principal/from-atproto-session (:atproto_did claims))]
         {:principal p :actor-id (:sub claims) :cred-id (:cred_id claims)
          :token-hash (secrets/token-hash value)}))))
@@ -65,12 +67,20 @@
     (await (db/query-one-sql
             (db/q-select-active-agent-credential (secrets/token-hash token))))
     :else
-    (when-let [claims (try
-                        (await (token/verify-token token))
-                        (catch :default _ nil))]
+    (when-let [claims (await (verified-claims token))]
       (await (db/query-one-sql
               (db/q-select-actor-by-session
                (:sub claims) (secrets/token-hash token) (:cred_id claims)))))))
+
+(defn ^:async human-session-proof!
+  "Read the exact live human session behind a signed browser credential."
+  [value]
+  (when (and (seq value) (not (str/starts-with? value "axx_")))
+    (when-let [{actor-id :sub cred-id :cred_id} (await (verified-claims value))]
+      (let [token-hash (secrets/token-hash value)]
+        (when-let [actor (await (db/query-auth-proof!
+                                 (db/q-select-active-human-session actor-id token-hash cred-id)))]
+          {:actor actor :actor-id actor-id :cred-id cred-id :token-hash token-hash})))))
 
 (defn delete-session!
   "Delete a session by token."

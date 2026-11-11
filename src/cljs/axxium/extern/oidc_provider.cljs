@@ -40,45 +40,58 @@
               (.has (.-resourceIndicators source) mailbox-resource)))})
 
 (defn ^:async current-mailbox-grant!
-  "Require the grant to belong to the currently selected mailbox recipient.
-   Actor messaging also requires the seeded actor DID bound at consent."
+  "Require the exact current mailbox grant, including owner authority when delegated."
   ([pool config owner grant-id account-id]
-   (await (current-mailbox-grant! pool config owner grant-id account-id nil)))
-  ([pool {:keys [mailbox-client-id mailbox-resource mailbox-actor-messaging?]} owner grant-id account-id bound-actor-did]
+   (await (current-mailbox-grant! pool config owner grant-id account-id nil nil)))
+  ([pool config owner grant-id account-id bound-actor-did]
+   (await (current-mailbox-grant! pool config owner grant-id account-id bound-actor-did nil)))
+  ([pool {:keys [mailbox-client-id mailbox-resource mailbox-actor-messaging? mailbox-owner-consent?]}
+    owner grant-id account-id bound-actor-did delegation]
    (when (or (nil? bound-actor-did)
              (and (true? mailbox-actor-messaging?) (law/mailbox-bound-actor-did? bound-actor-did)))
-     (when-let [proof (await (store/mailbox-grant-proof! pool grant-id account-id
-                                                       mailbox-client-id mailbox-resource bound-actor-did))]
-       (when (= owner (get-in proof [:principal :auth/did]))
+     (let [proof (or (if mailbox-owner-consent?
+                       (when-not bound-actor-did
+                         (await (store/mailbox-grant-proof! pool grant-id account-id
+                                  mailbox-client-id mailbox-resource nil true)))
+                       (await (store/mailbox-grant-proof! pool grant-id account-id
+                                mailbox-client-id mailbox-resource bound-actor-did)))
+                     (when (and mailbox-owner-consent? delegation
+                                (or (nil? bound-actor-did) (= bound-actor-did (:bound-actor-did delegation))))
+                       (when-let [delegated (await (store/delegated-mailbox-grant-proof! pool grant-id account-id
+                                                    mailbox-client-id mailbox-resource delegation))]
+                         (when ((:authorized? delegation)) delegated))))]
+       (when (and proof (= owner (get-in proof [:principal :auth/did])))
          (cond-> proof bound-actor-did (assoc :mailbox/actors? true)))))))
 
 (defn- current-grant!
-  "Apply the mailbox's verified-AT parent law to its dedicated client only."
-  [pool config owner verify-grant! grant-id account-id client-id]
+  "Apply the mailbox's actor/session law to its dedicated client only."
+  [pool config owner verify-grant! delegation grant-id account-id client-id]
   (if (law/mailbox-client? config client-id)
-    (current-mailbox-grant! pool config owner grant-id account-id)
+    (current-mailbox-grant! pool config owner grant-id account-id nil delegation)
     (verify-grant! grant-id account-id)))
 
 (defn ^:async mailbox-access-proof!
   "Resolve one opaque resource access token to its current mailbox grant proof."
-  [provider pool {:keys [issuer mailbox-client-id] :as config} owner bound-actor-did bearer]
-  (when (and mailbox-client-id provider (= issuer (.-issuer provider))
-             (string? bearer) (re-matches #"[A-Za-z0-9_-]{1,512}" bearer))
-    (when-let [token (await (.find (.-AccessToken provider) bearer))]
-      (let [account-id (.-accountId token)
-            grant-id (.-grantId token)
-            scope (.-scope token)
-            actor-scope? (law/mailbox-actor-scope? scope)]
-        (when (and (true? (.-isValid token))
-                   (not (.isSenderConstrained token))
-                   (or (not actor-scope?) (law/mailbox-bound-actor-did? bound-actor-did))
-                   (law/mailbox-access-claims?
-                    config {:client-id (.-clientId token)
-                            :token-issuer (some-> token (aget "extra") (aget "iss"))
-                            :audience (.-aud token) :scope scope
-                            :account-id account-id :grant-id grant-id}))
-          (await (current-mailbox-grant! pool config owner grant-id account-id
-                                         (when actor-scope? bound-actor-did))))))))
+  ([provider pool config owner bound-actor-did bearer]
+   (await (mailbox-access-proof! provider pool config owner bound-actor-did bearer nil)))
+  ([provider pool {:keys [issuer mailbox-client-id] :as config} owner bound-actor-did bearer delegation]
+   (when (and mailbox-client-id provider (= issuer (.-issuer provider))
+              (string? bearer) (re-matches #"[A-Za-z0-9_-]{1,512}" bearer))
+     (when-let [token (await (.find (.-AccessToken provider) bearer))]
+       (let [account-id (.-accountId token)
+             grant-id (.-grantId token)
+             scope (.-scope token)
+             actor-scope? (law/mailbox-actor-scope? scope)]
+         (when (and (true? (.-isValid token))
+                    (not (.isSenderConstrained token))
+                    (or (not actor-scope?) (law/mailbox-bound-actor-did? bound-actor-did))
+                    (law/mailbox-access-claims?
+                     config {:client-id (.-clientId token)
+                             :token-issuer (some-> token (aget "extra") (aget "iss"))
+                             :audience (.-aud token) :scope scope
+                             :account-id account-id :grant-id grant-id}))
+           (await (current-mailbox-grant! pool config owner grant-id account-id
+                    (when actor-scope? bound-actor-did) delegation))))))))
 
 (defn- html-escape
   "Encode labels supplied by registered clients and displayed user codes."
@@ -121,12 +134,12 @@
     (or (law/bounded-token-lifetime (aget ctx "axxiumRootExpiry") (.now js/Date) maximum-seconds)
         (throw (new (.-InvalidGrant errors) "Root session expired")))))
 
-(defn create-provider!
+(defn create-delegated-provider!
   "Construct a code+PKCE authority with opt-in durable device approval.
    The HTTP mount owns browser root-session/Origin checks; polling requires only
    the registered confidential client's protocol authentication.
    lookup-actor! returns a shaped current actor or nil; inactive actors refuse."
-  [pool config lookup-actor! verify-grant! mailbox-owner]
+  [pool config lookup-actor! verify-grant! mailbox-owner delegation]
   (law/require-config! config)
   (when-not (and (fn? lookup-actor!) (fn? verify-grant!))
     (throw (ex-info "OIDC requires current actor and parent session verification" {})))
@@ -194,7 +207,7 @@
                                                    (boolean
                                                      (and (= (.-clientId token) (.-clientId client))
                                                           (some? (.-grantId token))
-                                                          (await (current-grant! pool config mailbox-owner verify-grant!
+                                                          (await (current-grant! pool config mailbox-owner verify-grant! delegation
                                                                    (.-grantId token) (.-accountId token)
                                                                    (.-clientId client)))
                                                           (when-let [actor (await (lookup-actor! (.-accountId token)))]
@@ -245,7 +258,7 @@
                       client-id (.. oidc -client -clientId)
                       grant-id (or (some-> oidc (aget "result") (aget "consent") (aget "grantId"))
                                    (.grantIdFor session client-id))]
-                  (when (and grant-id (await (current-grant! pool config mailbox-owner verify-grant!
+                  (when (and grant-id (await (current-grant! pool config mailbox-owner verify-grant! delegation
                                                grant-id (.-accountId session) client-id)))
                     (await (.find (.. oidc -provider -Grant) grant-id)))))
               :findAccount
@@ -256,7 +269,7 @@
                       (when (and (= subject (:id actor)) (= "active" (:status actor))
                                  (or (nil? token)
                                      (when-let [grant-id (.-grantId token)]
-                                       (await (current-grant! pool config mailbox-owner verify-grant!
+                                       (await (current-grant! pool config mailbox-owner verify-grant! delegation
                                                 grant-id subject (.-clientId token))))))
                         (when token
                           (aset ctx "axxiumRootExpiry"
@@ -288,3 +301,8 @@
                          (some? (some-> ctx (aget "body") (aget "device_code"))))
                 (aset (.-body ctx) "interval" 5))))))
       provider)))
+
+(defn create-provider!
+  "Construct the shared authority without owner-delegated mailbox grants."
+  [pool config lookup-actor! verify-grant! mailbox-owner]
+  (create-delegated-provider! pool config lookup-actor! verify-grant! mailbox-owner nil))

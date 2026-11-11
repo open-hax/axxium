@@ -105,3 +105,21 @@
     (is (= [work] (mapv :actor/did (get-in (discover revoked scoped) [:result :actors]))))
     (is (= :forbidden (:error (mailbox/call revoked scoped :resolve_address {:address fx/bob}))))
     (is (true? (:replayed? (send restored scoped fx/bob))))))
+
+(deftest owner-delegation-preserves-actor-ids-and-checks-the-active-child
+  (let [{:keys [lg tree sender]} (fixture)
+        current (state/fold tree)
+        suspended (state/fold (:ledger (gi/suspend tree current root work (ids 113))))
+        delegated (-> sender
+                      (assoc-in [:principal :auth/method] :owner-delegation)
+                      (assoc :events/only? true :mailbox/actors? true)
+                      (directory-ctx tree))]
+    (is (gi/active-owner-delegation? current root work))
+    (is (not (gi/active-owner-delegation? current root root)))
+    (is (not (gi/active-owner-delegation? current other-root work)))
+    (is (not (gi/active-owner-delegation? suspended root work)))
+    (is (= root (gi/parent-of current work)))
+    (is (= #{work codex}
+           (set (map :actor/did (get-in (discover lg delegated) [:result :actors])))))
+    (is (nil? (:error (send lg delegated fx/bob))))
+    (is (= :forbidden (:error (send lg delegated fx/carol))))))
