@@ -117,7 +117,10 @@ class AxxiumIdentityManager extends HTMLElement {
       this.bootstrapError = { did, message: uncertain
         ? 'Axxium could not confirm the bootstrap key. Check its credential generation before issuing again.'
         : error.message };
-      if (uncertain) await this.refresh();
+      if (uncertain) {
+        this.render();
+        await this.refresh();
+      }
     }
     if (sessionVersion !== this.sessionVersion) return;
     this.bootstrapPending = false;
