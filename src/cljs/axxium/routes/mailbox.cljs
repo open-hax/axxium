@@ -2,16 +2,19 @@
   "Opt-in authenticated polling and selected-actor webhook transport."
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
-            [axxium.domain.github-identity :as tree]
+            [axxium.domain.github-identity :as gi]
+            [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.mailbox-events :as access]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.extern.agent-credentials :as secrets]
+            [axxium.extern.github-identity-mcp :as bootstrap]
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.ledger-queue :as queue]
             [axxium.extern.mailbox-mcp :as rpc]
             [axxium.extern.mailbox-stream :as stream]
             [axxium.law.actor :as actor-law]
+            [axxium.law.principal :as principal]
             [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox-events :as events]
             [clojure.string :as str]))
@@ -33,28 +36,54 @@
 (defn- require-auth! [reply resource-metadata]
   (http/set-header! reply "WWW-Authenticate"
                     (if resource-metadata (str "Bearer resource_metadata=\"" resource-metadata "\"") "Bearer"))
-  (http/send-secret! reply 401 {:error "A live AT Protocol session is required"}))
+  (http/send-secret! reply 401 {:error "A verified mailbox credential is required"}))
 
-(defn- active-proof! [oauth proof]
-  (if (:oauth/grant-id proof)
-    ((:active-grant? oauth) proof)
-    (session/active-atproto-session? proof)))
+(defn- active-proof!
+  "Recheck proof from the committed state without acquiring the identity writer."
+  [oauth {:keys [principal] :bootstrap/keys [digest directory] :as proof}]
+  (cond
+    (:oauth/grant-id proof) ((:active-grant? oauth) proof)
+    digest (let [st (identity/current-actor-state)
+                 did (:auth/did principal)]
+             (and (directory/bootstrap-actor? (assoc directory :directory/state st) did)
+                  (= digest (gi/bootstrap-digest st did))))
+    :else (session/active-atproto-session? proof)))
+
+(defn- bootstrap-proof [req token directory]
+  (let [did (http/header req "x-axxium-actor")]
+    (when (and (contains? (:directory/bootstrap-actors directory) did)
+               (string? token) (re-matches #"axb_[A-Za-z0-9_-]{43}" token)
+               (http/authorization req))
+      (let [st (identity/current-actor-state)]
+        (when (and (directory/bootstrap-actor? (assoc directory :directory/state st) did)
+                   (bootstrap/authenticate st did token))
+          (let [digest (gi/bootstrap-digest st did)]
+            {:principal (principal/from-actor-bootstrap did)
+             :cred-id (pr-str ["mailbox-bootstrap" did digest])
+             :bootstrap/digest digest
+             :bootstrap/directory directory}))))))
 
 (defn- authorized
-  [origin oauth resource-metadata allowed-dids handler]
+  [origin oauth resource-metadata allowed-dids directory handler]
   (fn ^:async mailbox-handler [req reply]
     (try
       (if-not (admitted-origin? req origin)
         (http/send-secret! reply 403 {:error "Mailbox origin refused"})
         (let [token (request-token req (:origin origin))
-              proof (or (await (session/atproto-session-proof token))
+              node (bootstrap-proof req token directory)
+              proof (or node
+                        (await (session/atproto-session-proof token))
                         (when (and oauth token (http/authorization req))
                           (await ((:access-proof! oauth) token))))]
           (cond
-            (not (and proof (await (active-proof! oauth proof))))
+            (not (or node (and proof (await (active-proof! oauth proof)))))
             (require-auth! reply resource-metadata)
 
             (and allowed-dids (not (contains? allowed-dids (get-in proof [:principal :auth/did]))))
+            (http/send-secret! reply 403 {:error "Mailbox access refused"})
+
+            (and (not node)
+                 (contains? (:directory/bootstrap-actors directory) (get-in proof [:principal :auth/did])))
             (http/send-secret! reply 403 {:error "Mailbox access refused"})
 
             :else (await (handler req reply proof)))))
@@ -102,23 +131,24 @@
   (and stream-runtime (nil? (:oauth/grant-id proof))))
 
 (defn- ^:async active-stream-session?
-  [writer path oauth proof ctx bindings]
-  (let [address (get-in proof [:principal :auth/did])
+  [writer path oauth proof ctx directory]
+  (let [bindings (:directory/bindings directory)
+        address (get-in proof [:principal :auth/did])
         actor (get bindings address address)
         root (:root-did (cfg/get-in-config [:identity/root-operator-binding]))]
     (and (await (active-proof! oauth proof))
          (or (contains? bindings address)
              (= :actor-bootstrap (get-in proof [:principal :auth/method])))
-         (tree/active-owner-delegation? (identity/current-actor-state) root actor)
+         (gi/active-owner-delegation? (identity/current-actor-state) root actor)
          (not (mailbox/session-error (queue/current-ledger writer path)
                                      (assoc ctx :now (secrets/now)))))))
 
 (defn- ^:async listen-inbox!
-  [writer path oauth resource bindings stream-runtime req reply proof]
+  [writer path oauth resource directory stream-runtime req reply proof]
   (let [sid (http/header req "mcp-session-id")
         version (http/header req "mcp-protocol-version")
         ctx (transport-context resource proof sid)
-        recheck #(active-stream-session? writer path oauth proof ctx bindings)]
+        recheck #(active-stream-session? writer path oauth proof ctx directory)]
     (cond
       (not (stream-eligible? stream-runtime proof))
       (do (http/set-header! reply "Allow" "POST")
@@ -163,7 +193,7 @@
         (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
 (defn- ^:async submit-operation!
-  [writer path oauth proof ctx body bindings stream-runtime]
+  [writer path oauth proof ctx body directory stream-runtime]
   (let [submit (fn ^:async commit-mailbox [ctx]
                  (let [out (await
                             (queue/submit! writer path
@@ -174,16 +204,16 @@
                    (when (and stream-runtime (:notify-to out))
                      (await (notify-inbox! writer path stream-runtime (:notify-to out))))
                    out))]
-    (if (and bindings (or (nil? (:oauth/grant-id proof))
+    (if (and directory (or (nil? (:oauth/grant-id proof))
                           (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
       ;; Identity is acquired before mailbox. Keep it through the durable append
       ;; so a completed actor suspension cannot race an authorized send.
       (:result (await (identity/with-current-actor-state!
-                       (fn [st] (submit (assoc ctx :directory/state st :directory/bindings bindings))))))
+                       (fn [st] (submit (assoc (merge ctx directory) :directory/state st))))))
       (await (submit ctx)))))
 
 (defn- ^:async post-mailbox!
-  [writer path resource runtime subscriptions-disabled? oauth bindings resource-metadata stream-runtime
+  [writer path resource runtime subscriptions-disabled? oauth directory resource-metadata stream-runtime
    req reply {:keys [principal] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
@@ -214,13 +244,13 @@
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? streaming?
                  :resources/enabled? streaming?
-                 :events/enabled? (events/enabled? runtime proof)
+                 :events/enabled? (and (not (:bootstrap/digest proof)) (events/enabled? runtime proof))
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
                  :mailbox/actors? (:mailbox/actors? proof))
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
                   (await (events/execute! runtime (dissoc proof :mailbox/actors?) ctx body))
-                  (await (submit-operation! writer path oauth proof ctx body bindings stream-runtime)))
+                  (await (submit-operation! writer path oauth proof ctx body directory stream-runtime)))
             applied? (case (:inbox-subscription out)
                        :subscribe (stream/subscribe! stream-runtime sid (:auth/did principal))
                        :unsubscribe (stream/unsubscribe! stream-runtime sid (:auth/did principal))
@@ -249,6 +279,11 @@
    (let [path (cfg/get-in-config [:mailbox/ledger-file])
          identity-path (cfg/get-in-config [:github-identity/ledger-file])
          bindings (cfg/get-in-config [:mailbox/actor-bindings])
+         bootstrap-actors (cfg/get-in-config [:mailbox/bootstrap-actor-dids])
+         root-did (:root-did (cfg/get-in-config [:identity/root-operator-binding]))
+         directory (when bindings {:directory/bindings bindings
+                                   :directory/bootstrap-actors bootstrap-actors
+                                   :directory/bootstrap-root root-did})
          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
          streaming? (cfg/get-in-config [:mailbox/stream-enabled?])
          subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))]
@@ -260,6 +295,11 @@
                                       (cfg/get-in-config [:identity/root-operator-binding]))))
        (throw (ex-info "Mailbox notifications require the owner directory with webhook subscriptions disabled"
                        {:reason :invalid-mailbox-stream-config})))
+     (when (and bootstrap-actors
+                (or (not directory) (not root-did) (contains? bootstrap-actors root-did)
+                    (some #(or (contains? bindings %) (some #{%} (vals bindings))) bootstrap-actors)))
+       (throw (ex-info "Mailbox bootstrap access requires an exact operator root and unbound actor DIDs in directory mode"
+                       {:reason :invalid-mailbox-bootstrap-config})))
      (when path
        (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
              resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
@@ -271,7 +311,7 @@
              stream-runtime (when streaming? (stream/create! app))
              runtime (when-not subscriptions-disabled?
                        (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)))
-             no-stream (authorized origin oauth resource-metadata allowed-dids
+             no-stream (authorized origin oauth resource-metadata allowed-dids directory
                                    (fn [_ reply _]
                                      (http/set-header! reply "Allow" "POST")
                                      (http/send-empty! reply 405)))]
@@ -283,12 +323,12 @@
                                                        "scopes_supported" (or (:scopes oauth) [(:scope oauth)])
                                                        "bearer_methods_supported" ["header"]}))))
          (http/post! app endpoint
-                     (authorized origin oauth resource-metadata allowed-dids
-                                 (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth bindings
+                     (authorized origin oauth resource-metadata allowed-dids directory
+                                 (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth directory
                                           resource-metadata stream-runtime)))
          (http/get! app endpoint
                     (if stream-runtime
-                      (authorized origin oauth resource-metadata allowed-dids
-                                  (partial listen-inbox! writer path oauth (:resource origin) bindings stream-runtime))
+                      (authorized origin oauth resource-metadata allowed-dids directory
+                                  (partial listen-inbox! writer path oauth (:resource origin) directory stream-runtime))
                       no-stream))
          (http/delete! app endpoint no-stream))))))

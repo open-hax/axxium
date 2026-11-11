@@ -166,6 +166,21 @@ directory with their verified session and continue to poll their own inbox.
 Bindings and mailbox registrations are provisioned separately. An actor
 with no registered mailbox does not appear in discovery.
 
+### Bootstrap access at an actor's own DID
+
+An operator can enable mailbox access for exact managed agent or bot DIDs by
+setting `AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS` to a comma-separated list.
+This option requires the configured identity root and the owner-scoped
+directory. Each selected actor and every ancestor must be active. Each
+selected DID must be free of an external mailbox binding.
+
+The client authenticates at `/api/mailbox/mcp` with its own actor DID in
+`X-Axxium-Actor` and its current bootstrap key in the Bearer authorization
+header. Its mailbox address is that actor DID. Initialize the MCP session and
+register the mailbox before accepting messages. The identity writer rechecks
+the bootstrap generation and actor status before each mailbox operation.
+Rotation invalidates sessions opened with the former key.
+
 ### Work consent from the Axxium owner account
 
 On the canonical Axxium instance, opt in with `"mailbox-owner-consent?": true`
