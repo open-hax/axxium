@@ -90,6 +90,12 @@
       (>= (inst-ms now) (inst-ms (:session/expires s))) :session-expired
       :else nil)))
 
+(defn streaming-session?
+  "Check that the current session was initialized with push support."
+  [lg ctx]
+  (and (not (session-error lg ctx))
+       (true? (:session/push? (session lg (:session/id ctx))))))
+
 (def ^:private secret-key
   #"(?i)(token|secret|password|passwd|cookie|authorization|api[_-]?key|credential|callback|private[_-]?key)")
 

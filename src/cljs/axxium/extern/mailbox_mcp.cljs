@@ -1,10 +1,13 @@
 (ns axxium.extern.mailbox-mcp
   "JSON-RPC wire adapter for the addressable mailbox."
-  (:require [axxium.domain.mailbox-mcp :as mailbox]
+  (:require [axxium.domain.mailbox-events :as access]
+            [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.law.principal :as principal]
             [clojure.string :as str]))
 
 (def protocol-version "2025-06-18")
+
+(def inbox-uri "axxium://mailbox/inbox")
 
 (def ^:private str-schema {"type" "string"})
 
@@ -77,6 +80,45 @@
 (defn- rpc-error [id code message]
   {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
 
+(defn- rpc-result [id result]
+  {"jsonrpc" "2.0" "id" id "result" result})
+
+(defn stream-access?
+  "The live session's mailbox address still has its own read grant."
+  [lg {:keys [principal now] :as ctx}]
+  (and (mailbox/streaming-session? lg ctx)
+       (access/authorized? lg (principal/address principal) now)))
+
+(def ^:private inbox-resource
+  {"uri" inbox-uri "name" "Inbox" "description" "Your unread Axxium mailbox messages."
+   "mimeType" "application/json"})
+
+(defn- resource-rpc [lg ctx id method params]
+  (let [readable? (stream-access? lg ctx)]
+    (cond
+      (= method "resources/list")
+      {:ledger lg :response (if (seq params)
+                               (rpc-error id -32602 "Invalid resource list arguments")
+                               (rpc-result id {"resources" (if readable? [inbox-resource] [])}))}
+
+      (not= params {"uri" inbox-uri})
+      {:ledger lg :response (rpc-error id -32602 "Unknown inbox resource")}
+
+      (and (not readable?) (not= method "resources/unsubscribe"))
+      {:ledger lg :response (rpc-error id -32001 "Inbox read access is required")}
+
+      (= method "resources/read")
+      (let [{:keys [ledger result error]} (mailbox/call lg ctx :read_inbox {})]
+        {:ledger ledger
+         :response (if error
+                     (rpc-error id -32001 "Inbox read access is required")
+                     (rpc-result id {"contents" [{"uri" inbox-uri "mimeType" "application/json"
+                                                   "text" (js/JSON.stringify (clj->js (->json result)))}]}))})
+
+      :else {:ledger lg
+             :inbox-subscription (if (= method "resources/subscribe") :subscribe :unsubscribe)
+             :response (rpc-result id {})})))
+
 (def ^:private error-actions
   {:unauthenticated "Sign in before calling this tool."
    :no-session "Open a session before calling this tool."
@@ -116,7 +158,12 @@
                            "result" {"protocolVersion" protocol-version
                                      "serverInfo" {"name" "axxium-mailbox" "version" "0.1.0"}
                                      "capabilities" (cond-> {"tools" {}}
+                                                      (:resources/enabled? ctx) (assoc "resources" {"subscribe" true})
                                                       (:events/enabled? ctx) (assoc "events" {}))}}}
+
+    (and (:resources/enabled? ctx)
+         (contains? #{"resources/list" "resources/read" "resources/subscribe" "resources/unsubscribe"} method))
+    (resource-rpc lg ctx id method params)
 
     (and (= method "events/list") (:events/subscriptions-disabled? ctx))
     {:ledger lg
@@ -135,15 +182,17 @@
     (let [tool-name (get params "name")
           args (into {} (map (fn [[k v]] [(arg-key k) v]))
                      (get params "arguments"))
-          {:keys [ledger result error]} (mailbox/call lg ctx (keyword tool-name) args)]
-      {:ledger ledger
+          {:keys [ledger result error replayed?]} (mailbox/call lg ctx (keyword tool-name) args)]
+      (cond-> {:ledger ledger
        :response {"jsonrpc" "2.0" "id" id
                   "result" (if error
                              {"isError" true "content" [{"type" "text" "text" (tool-error-message error)}]}
                              (let [sc (->json (cond-> result
                                                 (:message/receipt result) (assoc :accepted (get-in result [:message/receipt :receipt/status]))))]
                                {"structuredContent" sc
-                                "content" [{"type" "text" "text" (js/JSON.stringify (clj->js sc))}]}))}})
+                                "content" [{"type" "text" "text" (js/JSON.stringify (clj->js sc))}]}))}}
+        (and (= tool-name "send_message") (:message/id result) (not replayed?))
+        (assoc :notify-to (:to args))))
 
     :else {:ledger lg :response (rpc-error id -32601 "method not found")}))
 
