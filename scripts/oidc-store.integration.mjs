@@ -258,11 +258,43 @@ async function verifyWorkOwnerConsent(pool, root) {
     assert.equal(revoked.status, 200);
     assert.equal(await mounted.accessProof(issued.access_token), null, 'Disconnect revokes the original Work grant too');
     assert.equal(await ordinaryGrantActive(original.access_token), true, 'Disconnect must retain the ordinary grant');
+    const { rows: [{ t: consentAt }] } = await pool.query('SELECT clock_timestamp() AS t');
     const renewed = await exchange(client, await authorize(client, ownerCookies));
+    const workGrantEnd = async () => (await pool.query(
+      'SELECT expires_at FROM axxium_oidc_grant_sessions WHERE mailbox_principal_actor_id=$1', [work.id])).rows[0].expires_at;
+    const consentEnd = await workGrantEnd();
     await pool.query('DELETE FROM sessions WHERE token_hash=$1', [digest]);
-    assert.equal(await mounted.accessProof(renewed.access_token), null, 'Revoking the exact owner session revokes delegated access');
+    // L5: the owner's session witnessed consent only; Work's grant is its own credential.
+    assert.equal((await mounted.accessProof(renewed.access_token))?.principalDid, workDid,
+      'Ending the owner browser session does not end the Work node credential');
+    const afterLogout = await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: renewed.refresh_token, resource });
+    assert.equal(afterLogout.status, 200, 'Work refreshes tokens inside its window after the owner logs out');
+    const afterLogoutTokens = await afterLogout.json();
+    // Hard cap: the delegated row expires at most one day after consent, and
+    // refreshing never moves it.
+    const { rows: [cap] } = await pool.query(
+      "SELECT expires_at, expires_at <= $2::timestamptz + interval '1 day' AS capped" +
+      " FROM axxium_oidc_grant_sessions WHERE mailbox_principal_actor_id=$1", [work.id, consentAt]);
+    assert.equal(cap.capped, true, 'The Work grant ends no later than one day after consent');
+    assert.equal(cap.expires_at.getTime(), consentEnd.getTime(), 'Refreshing never extends the one-day cap');
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET expires_at=clock_timestamp()-interval '1 second'" +
+      ' WHERE mailbox_principal_actor_id=$1', [work.id]);
+    assert.equal(await mounted.accessProof(afterLogoutTokens.access_token), null,
+      'At the one-day cap the Work grant stops working');
     assert.equal((await form('/token', client, { grant_type: 'refresh_token',
-      refresh_token: renewed.refresh_token, resource })).status, 400, 'A logged-out owner cannot renew Work');
+      refresh_token: afterLogoutTokens.refresh_token, resource })).status, 400,
+      'At the one-day cap refresh is refused; Work needs fresh owner consent');
+    await pool.query('UPDATE axxium_oidc_grant_sessions SET expires_at=$2 WHERE mailbox_principal_actor_id=$1',
+      [work.id, cap.expires_at]);
+    await assert.rejects(authorize(client, new Map(ownerCookies)), /Consent HTTP 4\d\d/,
+      'New consent still needs a live owner session');
+    ownerMayManage = false;
+    assert.equal(await mounted.accessProof(afterLogoutTokens.access_token), null,
+      'Loss of the owner manage right still revokes the Work grant');
+    assert.equal((await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: afterLogoutTokens.refresh_token, resource })).status, 400, 'and blocks renewal');
+    ownerMayManage = true;
   } finally {
     await app.close();
   }
