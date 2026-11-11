@@ -160,3 +160,27 @@
                                   (is (not (re-find #"sk-|axb_|sealed" (:edn body))))))))))
           (.catch (fn [e] (is false (pr-str e))))
           (.finally done)))))
+
+(deftest portal-binds-and-unbinds-mailboxes-under-the-manage-right
+  (async done
+    (let [ids (counter-ids)
+          deps {:token-key (crypto/randomBytes 32) :ids ids}
+          box "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa"
+          a (fn [lg caller req] (mcp/admin (assoc deps :ledger lg) caller req {:read-edn edn/read-one :host host}))]
+      (is (= ["mailbox_bind" {:actor/did agent :mailbox/did box}]
+             (admin/request->call alice {:op "mailbox-bind" :did agent :mailbox box} edn/read-one host)))
+      (is (:error (admin/request->call alice {:op "mailbox-unbind"} edn/read-one host)))
+      (-> (a (seeded ids) agent {:op "mailbox-bind" :did agent :mailbox box})
+          (.then (fn [{:keys [status ledger]}]
+                   (is (= 403 status) "an actor cannot bind its own mailbox")
+                   (a ledger laptop {:op "mailbox-bind" :did agent :mailbox box})))
+          (.then (fn [{:keys [status ledger]}]
+                   (is (= 200 status))
+                   (is (= {box agent} (gi/mailbox-bindings (state/fold ledger))))
+                   (is (policy/decision-before-effect? ledger))
+                   (a ledger alice {:op "mailbox-unbind" :mailbox box})))
+          (.then (fn [{:keys [status ledger]}]
+                   (is (= 200 status))
+                   (is (= {} (gi/mailbox-bindings (state/fold ledger))))))
+          (.catch (fn [e] (is false (pr-str e))))
+          (.finally done)))))

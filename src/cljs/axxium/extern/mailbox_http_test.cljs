@@ -390,14 +390,17 @@
         work (str root ":work")
         codex (str root ":codex")
         policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
-        directory (atom (state/fold (:ledger (gi/seed-ledger
-                                  (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
-                                                    :nodes [{:id work :parent root :name "Work" :kind :agent :policy policy}
-                                                            {:id codex :parent root :name "Codex" :kind :agent :policy policy}]}
-                                                   "axxium.test")
-                                  (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id)
-                                          :at fixture/t0})))))
+        event-ids (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
         bindings {fixture/alice work fixture/bob codex}
+        ;; Routing reads the ledger bindings, never the env seed directly.
+        directory (atom (state/fold (:ledger (gi/seed-bindings
+                                              (:ledger (gi/seed-ledger
+                                                        (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
+                                                                          :nodes [{:id work :parent root :name "Work" :kind :agent :policy policy}
+                                                                                  {:id codex :parent root :name "Codex" :kind :agent :policy policy}]}
+                                                                         "axxium.test")
+                                                        event-ids))
+                                              bindings event-ids))))
         live (atom {})
         app (atom nil)
         config cfg/get-in-config
@@ -470,6 +473,13 @@
           (is (= [] (get (result (await (call discover))) "actors")))
           (is (true? (get-in (await (call send)) [:data "result" "isError"]))
               "A suspended recipient cannot be recovered through an accepted retry.")
+          (swap! directory assoc-in [:resources (identity-law/actor-resource-id codex)
+                                     :resource/metadata :actor/status] :active)
+          (is (= 1 (count (get (result (await (call discover))) "actors"))))
+          (swap! directory assoc-in [:resources (identity-law/binding-resource-id fixture/bob)
+                                     :resource/metadata :binding/status] :unbound)
+          (is (= [] (get (result (await (call discover))) "actors"))
+              "An unbound ledger binding stops routing although the env seed still names it.")
           (reset! scoped? false)
           (is (= ["whoami"] (list-names (await (call (rpc "tools/list"))))))))
       (finally

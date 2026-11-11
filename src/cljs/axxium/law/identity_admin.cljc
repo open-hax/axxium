@@ -19,7 +19,9 @@
    "credential-revoke" "credential_revoke"
    "bootstrap-issue" "bootstrap_issue"
    "export" "subtree_export"
-   "import" "subtree_import"})
+   "import" "subtree_import"
+   "mailbox-bind" "mailbox_bind"
+   "mailbox-unbind" "mailbox_unbind"})
 
 (def creatable-kinds #{"group" "host" "agent" "bot"})
 (def provisionable-types #{"github-app" "github-pat" "ssh-key" "api-key"})
@@ -52,7 +54,8 @@
   "Translate a portal request (keywordized JSON) made by `caller` into
    [tool args], or {:error ...}. `read-edn` parses import text;
    `host` resolves seed paths."
-  [caller {:keys [op did label kind slug name policy type secret env provider seed appId installationId] :as request}
+  [caller {:keys [op did label kind slug name policy type secret env provider seed appId installationId mailbox]
+           :as request}
    read-edn host]
   (let [tool (get ops op)]
     (case (when tool op)
@@ -90,6 +93,11 @@
       "credential-revoke"
       (if (and (string? did) (seq label)) [tool {:actor/did did :credential/label label}]
           {:error "did and label required"})
+      "mailbox-bind"
+      (if (and (string? did) (string? mailbox)) [tool {:actor/did did :mailbox/did mailbox}]
+          {:error "did and mailbox required"})
+      "mailbox-unbind"
+      (if (string? mailbox) [tool {:mailbox/did mailbox}] {:error "mailbox required"})
       "import"
       (let [parsed (try (read-edn (str seed)) (catch :default _ nil))]
         (if (map? parsed) [tool {:seed parsed :host host}] {:error "seed must be one EDN map"})))))

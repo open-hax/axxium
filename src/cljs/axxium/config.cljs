@@ -184,7 +184,10 @@
      :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
      :mailbox/webhook-actor-did webhook-actor
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
+     ;; Bootstrap seed only; the identity ledger holds the bindings.
      :mailbox/actor-bindings (mailbox-actor-bindings (env "AXXIUM_MAILBOX_ACTOR_BINDINGS"))
+     ;; Owner-directory routing over ledger bindings, with or without a seed.
+     :mailbox/directory? (env-bool "AXXIUM_MAILBOX_DIRECTORY" false)
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))

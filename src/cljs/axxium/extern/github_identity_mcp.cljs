@@ -50,7 +50,8 @@
 
 (def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke"
              "credential_provision" "credential_rotate" "credential_revoke" "token_for"
-             "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"})
+             "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"
+             "mailbox_bind" "mailbox_unbind"})
 
 (def agent-tools
   "What a bootstrap-authenticated host agent may call."
@@ -129,6 +130,10 @@
                                                           [:credential/sealed :credential/key-file]))
                                          (select-keys a public-meta) (ids))))
       "credential_revoke" (js/Promise.resolve (effect-out (gi/revoke-credential lg st caller did label (ids))))
+      "mailbox_bind" (js/Promise.resolve
+                      (effect-out (gi/bind-mailbox lg st caller (:mailbox/did a) did (ids))))
+      "mailbox_unbind" (js/Promise.resolve
+                        (effect-out (gi/unbind-mailbox lg st caller (:mailbox/did a) (ids))))
       "token_for" (token-for! deps lg st caller a)
       "bootstrap_issue"
       (let [key (str "axb_" (.toString (crypto/randomBytes 32) "base64url"))
@@ -157,7 +162,10 @@
 (defn- valid? [tool a]
   (and (map? a)
        (or (#{"actor_list" "credentials_self" "subtree_export"} tool)
-           (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a))) (string? (:actor/did a)))
+           (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a)))
+           (and (= tool "mailbox_unbind") (string? (:mailbox/did a)))
+           (string? (:actor/did a)))
+       (or (not= "mailbox_bind" tool) (string? (:mailbox/did a)))
        (or (not= "actor_provision" tool) (not (contains? a :actor/parent)) (string? (:actor/parent a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))

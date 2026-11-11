@@ -135,13 +135,27 @@ delivery for that OAuth grant.
 ### Owner-scoped actor discovery and messaging
 
 An operator can opt a mailbox deployment into owner-scoped routing with
-`AXXIUM_MAILBOX_ACTOR_BINDINGS`. Set it to an EDN vector of pairs such as
+`AXXIUM_MAILBOX_DIRECTORY=true`, or by supplying a bootstrap seed in
+`AXXIUM_MAILBOX_ACTOR_BINDINGS`. Configure the mailbox ledger and the
+identity tree ledger in the same Axxium instance.
+
+Bindings live in the identity tree ledger. A binding maps one external
+mailbox DID, such as a verified AT Protocol `did:plc`, to one actor node. It
+is recorded as a `mailbox-binding:<mailbox DID>` resource owned by that actor,
+after a policy decision. Only a strict, effectively active ancestor of the
+actor may bind or unbind it. Bindings are one-to-one while bound, and only an
+effective actor can be bound. Binding, suspension and revocation therefore
+fold from the same log and take effect without a restart.
+
+`AXXIUM_MAILBOX_ACTOR_BINDINGS` is a seed only. Set it to an EDN vector of
+pairs such as
 `[["did:plc:aaaaaaaaaaaaaaaaaaaaaaaa" "did:web:example.test:actors:owner:work"]]`.
-Each pair binds a verified AT Protocol mailbox DID to an exact existing Axxium
-actor DID. Both sides must be unique. Configure the mailbox ledger and the
-identity tree ledger in the same Axxium instance. Keep the bindings in its
-host-local configuration. Changes take effect on restart. Existing two-DID
-pilots use their original configuration.
+At startup, after the identity seed, each pair is applied once under its
+actor's tree root, but only for a mailbox the ledger has never seen. Once a
+binding exists, bound or unbound, the ledger owns it. A restart never moves a
+binding or restores one the owner unbound. A refused pair stays unbound and
+appends nothing, so routing fails closed. The directory reads only the ledger.
+Existing two-DID pilots use their original configuration.
 
 `discover_actors` lists the reachable actors in the authenticated caller’s
 human-owned tree. It returns each actor’s DID, name, kind and `mailbox_did`.
@@ -160,8 +174,11 @@ in the private OIDC authority configuration. Request `mailbox:actors`
 alongside `mailbox:events` and complete fresh consent. Work can then call
 `discover_actors`, `resolve_address`, and `send_message`. Existing event-only
 grants retain their existing tools. The new grant is pinned to the actor DID
-configured at consent. Changing that binding requires fresh consent for
-actor messaging. Direct AT Protocol clients, including Codex, can use the
+bound at consent. With owner consent, every token use checks that the ledger
+still binds the Work mailbox to that actor, so unbinding revokes delegated
+access at once.
+Binding the mailbox to a different actor requires a restart and fresh consent
+for actor messaging. Direct AT Protocol clients, including Codex, can use the
 directory with their verified session and continue to poll their own inbox.
 Bindings and mailbox registrations are provisioned separately. An actor
 with no registered mailbox does not appear in discovery.

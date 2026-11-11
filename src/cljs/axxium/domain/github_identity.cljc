@@ -216,6 +216,78 @@
                                                               :credential/generation :github/app-slug])
                                                (credentials state d))}))))
 
+;; -------------------------------------------------------- mailbox binding
+
+(defn mailbox-binding
+  "The recorded binding resource for `mailbox-did`, bound or not."
+  [state mailbox-did]
+  (let [r (get-in state [:resources (law/binding-resource-id mailbox-did)])]
+    (when (= law/binding-kind (:resource/kind r)) r)))
+
+(defn- bound-actor [state mailbox-did]
+  (let [{:binding/keys [actor status]} (:resource/metadata (mailbox-binding state mailbox-did))]
+    (when (= :bound status) actor)))
+
+(defn mailbox-bindings
+  "B1: {mailbox-did actor-did} for every current :bound binding."
+  [state]
+  (into {}
+        (keep (fn [{:resource/keys [kind metadata]}]
+                (when (and (= law/binding-kind kind) (= :bound (:binding/status metadata)))
+                  [(:binding/mailbox metadata) (:binding/actor metadata)])))
+        (vals (:resources state))))
+
+(defn- binding-node [mailbox-did actor-did status]
+  {:resource/id (law/binding-resource-id mailbox-did)
+   :resource/kind law/binding-kind
+   :resource/owner actor-did
+   :resource/store :axxium
+   :resource/metadata {:binding/mailbox mailbox-did :binding/actor actor-did
+                       :binding/status status}})
+
+(defn bind-mailbox
+  "B2/B3: a managing ancestor binds a free mailbox DID to an effective actor
+   that has no other bound mailbox. The decision is recorded either way."
+  [lg state operator mailbox-did actor-did ids]
+  (act lg state operator :bind (binding-node mailbox-did actor-did :bound)
+       (and (did-law/did? mailbox-did) (did-law/web? actor-did)
+            (not= mailbox-did actor-did)
+            (nil? (actor-node state mailbox-did))
+            (nil? (bound-actor state mailbox-did))
+            (not-any? #{actor-did} (vals (mailbox-bindings state)))
+            (effective? state actor-did)
+            (may-manage? state operator actor-did)) ids))
+
+(defn unbind-mailbox
+  "B2: a managing ancestor of the bound actor ends the binding. Terminal for
+   this pair until a new bind; the history stays in the ledger."
+  [lg state operator mailbox-did ids]
+  (let [actor (bound-actor state mailbox-did)]
+    (act lg state operator :unbind (binding-node mailbox-did (or actor operator) :unbound)
+         (and actor (may-manage? state operator actor)) ids)))
+
+(defn- tree-root [state did] (or (peek (ancestors-of state did)) did))
+
+(defn seed-bindings
+  "Apply an operator-supplied {mailbox-did actor-did} seed idempotently, each
+   pair as the actor's tree root (the same authority the identity seed uses).
+   A seed only ever introduces a mailbox the ledger has never seen: once a
+   binding resource exists, bound or unbound, the ledger owns it, so a
+   restart can never undo an owner's unbind or move a binding (:unchanged).
+   A pair B2/B3 refuse is :refused and appends nothing, so a bad seed does
+   not grow the ledger on every boot."
+  [lg pairs ids]
+  (reduce (fn [{lg :ledger :as acc} [mailbox-did actor-did]]
+            (let [st (state/fold lg)]
+              (if (mailbox-binding st mailbox-did)
+                (update acc :unchanged conj mailbox-did)
+                (let [out (bind-mailbox lg st (tree-root st actor-did) mailbox-did actor-did (ids))]
+                  (if (:effect out)
+                    (-> (assoc acc :ledger (:ledger out)) (update :created conj mailbox-did))
+                    (update acc :refused conj mailbox-did))))))
+          {:ledger lg :created [] :unchanged [] :refused []}
+          (sort pairs)))
+
 ;; ------------------------------------------------------------ bootstrap
 
 (defn issue-bootstrap
