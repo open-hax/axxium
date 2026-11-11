@@ -185,7 +185,12 @@
        (valid-key? mailbox-did)))
 
 (defn ^:async bind-delegated-mailbox-session!
-  "Bind the Work mailbox separately from the consenting human browser subject."
+  "Bind the Work mailbox separately from the consenting human browser subject.
+   L5/L4: the owner's live session only witnesses the manage right here, at
+   consent. The grant is the Work node's own attenuated credential, with its
+   own lifetime (the engine grant, at most one day), not the owner's browser
+   session. Suspension, unbinding, disconnect and loss of owner authority
+   still revoke it on the next use."
   [pool grant-id work-account {:keys [actor-id cred-id token-hash]} client-id resource
    {:keys [owner-actor-id root-did mailbox-did bound-actor-did] :as delegation}]
   (doseq [value [grant-id work-account client-id resource]] (require-key! value))
@@ -200,7 +205,7 @@
                             "(grant_id,actor_id,token_hash,expires_at,mailbox_cred_id,mailbox_did,"
                             "mailbox_client_id,mailbox_resource,mailbox_actor_did,mailbox_principal_actor_id,mailbox_owner_root_did)"
                             " SELECT $1,owner.id,s.token_hash,"
-                            " LEAST(s.expires_at,g.expires_at,clock_timestamp()+interval '1 day'),s.id,p.subject,$3,$4,$10,work.id,$11"
+                            " LEAST(g.expires_at,clock_timestamp()+interval '1 day'),s.id,p.subject,$3,$4,$10,work.id,$11"
                             " FROM actors work JOIN provider_bindings p ON p.actor_id=work.id AND p.provider='atproto' AND p.subject=$8"
                             " JOIN actors owner ON owner.id=$2 AND owner.id<>work.id AND owner.status='active'"
                             " JOIN entities e ON e.id=owner.entity_id AND e.kind='human'"
@@ -229,12 +234,11 @@
                              " JOIN provider_bindings p ON p.actor_id=work.id AND p.provider='atproto' AND p.subject=b.mailbox_did"
                              " JOIN actors owner ON owner.id=b.actor_id AND owner.id<>work.id AND owner.status='active'"
                              " JOIN entities e ON e.id=owner.entity_id AND e.kind='human'"
-                             " JOIN sessions s ON s.actor_id=owner.id AND s.id=b.mailbox_cred_id AND s.token_hash=b.token_hash"
                              mailbox-grant-join
                              (mailbox-scope-condition "$6")
                              " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
                              " AND b.mailbox_owner_root_did=$7 AND b.mailbox_actor_did=$8 AND b.mailbox_did=$9"
-                             " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()")
+                             " AND b.expires_at>clock_timestamp()")
                         [grant-id account-id client-id resource oidc/mailbox-scope oidc/mailbox-actors-scope
                          root-did bound-actor-did mailbox-did]))]
       ;; L5: the grant authenticates as the Work node itself, acting at the
@@ -255,13 +259,25 @@
                     [grant-id actor-id]))]
     (true? (:active row))))
 
+(def ^:private delegated-lifetime
+  "A root grant lives no longer than its parent session; a Work node's grant
+   has its own stored lifetime (see bind-delegated-mailbox-session!)."
+  "CASE WHEN b.mailbox_principal_actor_id IS NULL THEN LEAST(b.expires_at,s.expires_at) ELSE b.expires_at END")
+
+(def ^:private parent-session-live
+  "(b.mailbox_principal_actor_id IS NOT NULL OR s.expires_at>clock_timestamp())")
+
 (defn ^:async session-grant-expiry!
   "Read the current stored root bound; a missing/disabled/revoked parent refuses."
   [pool grant-id actor-id]
   (require-key! grant-id)
   (require-key! actor-id)
   (let [row (await (pg/query-one! pool
-                    "SELECT floor(extract(epoch from LEAST(b.expires_at,s.expires_at))*1000) AS expires_ms FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'"
+                    (str "SELECT floor(extract(epoch from " delegated-lifetime ")*1000) AS expires_ms"
+                         " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
+                         " LEFT JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash"
+                         " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.expires_at>clock_timestamp() AND a.status='active'"
+                         " AND " parent-session-live)
                     [grant-id actor-id]))]
     (when-not row
       (throw (new (.-InvalidGrant errors) "A current root session is required")))
@@ -317,13 +333,14 @@
 
 (def ^:private save-token-sql
   (str "INSERT INTO axxium_oidc_records(model,id,payload,expires_at)"
-       " SELECT $1,$2,$3::jsonb,LEAST(clock_timestamp()+$4*interval '1 second',b.expires_at,s.expires_at)"
+       " SELECT $1,$2,$3::jsonb,LEAST(clock_timestamp()+$4*interval '1 second'," delegated-lifetime ")"
        " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
-       " JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash"
+       " LEFT JOIN sessions s ON s.actor_id=b.actor_id AND s.token_hash=b.token_hash"
        " JOIN axxium_oidc_records g ON g.model='Grant' AND g.id=b.grant_id AND g.expires_at>clock_timestamp()"
-       " WHERE b.grant_id=$5 AND b.actor_id=$6 AND a.status='active' AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()"
-       " AND (b.mailbox_principal_actor_id IS NULL OR (s.id=b.mailbox_cred_id"
-       " AND EXISTS (SELECT 1 FROM entities e WHERE e.id=a.entity_id AND e.kind='human')"
+       " WHERE b.grant_id=$5 AND b.actor_id=$6 AND a.status='active' AND b.expires_at>clock_timestamp()"
+       " AND " parent-session-live
+       " AND (b.mailbox_principal_actor_id IS NULL OR ("
+       " EXISTS (SELECT 1 FROM entities e WHERE e.id=a.entity_id AND e.kind='human')"
        " AND EXISTS (SELECT 1 FROM actors work JOIN provider_bindings p ON p.actor_id=work.id"
        " WHERE work.id=b.mailbox_principal_actor_id AND work.id<>a.id AND work.status='active'"
        " AND p.provider='atproto' AND p.subject=b.mailbox_did)))"

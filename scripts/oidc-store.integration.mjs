@@ -260,9 +260,21 @@ async function verifyWorkOwnerConsent(pool, root) {
     assert.equal(await ordinaryGrantActive(original.access_token), true, 'Disconnect must retain the ordinary grant');
     const renewed = await exchange(client, await authorize(client, ownerCookies));
     await pool.query('DELETE FROM sessions WHERE token_hash=$1', [digest]);
-    assert.equal(await mounted.accessProof(renewed.access_token), null, 'Revoking the exact owner session revokes delegated access');
+    // L5: the owner's session witnessed consent only; Work's grant is its own credential.
+    assert.equal((await mounted.accessProof(renewed.access_token))?.principalDid, workDid,
+      'Ending the owner browser session does not end the Work node credential');
+    const afterLogout = await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: renewed.refresh_token, resource });
+    assert.equal(afterLogout.status, 200, 'Work renews its own grant after the owner logs out');
+    const afterLogoutTokens = await afterLogout.json();
+    await assert.rejects(authorize(client, new Map(ownerCookies)), /Consent HTTP 4\d\d/,
+      'New consent still needs a live owner session');
+    ownerMayManage = false;
+    assert.equal(await mounted.accessProof(afterLogoutTokens.access_token), null,
+      'Loss of the owner manage right still revokes the Work grant');
     assert.equal((await form('/token', client, { grant_type: 'refresh_token',
-      refresh_token: renewed.refresh_token, resource })).status, 400, 'A logged-out owner cannot renew Work');
+      refresh_token: afterLogoutTokens.refresh_token, resource })).status, 400, 'and blocks renewal');
+    ownerMayManage = true;
   } finally {
     await app.close();
   }
