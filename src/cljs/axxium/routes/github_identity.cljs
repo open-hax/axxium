@@ -284,12 +284,15 @@
 
 (defn node-proof-active?
   "Recheck a node proof against the last committed tree: the same bootstrap
-   generation, the node and every ancestor effective, and the same address."
+   generation, the node and every ancestor live (effective, no ended lease),
+   and the same address. Stored proofs rechecked later (webhook delivery)
+   therefore drop out when a session lease ends."
   [{:keys [principal] :node/keys [digest]}]
   (let [st (current-actor-state)
         n (:auth/did principal)]
     (boolean
      (and digest (= digest (gi/bootstrap-digest st n))
+          (gi/live? st n (js/Date.))
           (= (principal/address principal)
              (directory/node-address (gi/mailbox-bindings st) n))))))
 

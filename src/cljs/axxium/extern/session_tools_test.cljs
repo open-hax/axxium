@@ -20,7 +20,8 @@
 
 (defn- ^:async session-tools* []
   (let [call (fn [lg actor tool args] (mcp/call {:ledger lg :ids mcp/event-ids} {:actor actor} tool args))
-        opened (await (call (tree) codex "session_open" {:actor/name "PR 66 review" :session/lease-ms 600000}))
+        opened (await (call (tree) codex "session_open" {:actor/name "PR 66 review" :session/lease-ms 600000
+                                                         :session/advertise? false}))
         {session :actor/did key :bootstrap/key} (:result opened)
         lg (:ledger opened)]
     (is (= (str codex ":") (subs session 0 (inc (count codex)))))
@@ -42,6 +43,29 @@
                           [:result :actors])))
         (is (= :forbidden (:error (await (call lg codex "session_close" {:actor/did grokbot}))))
             "session_close only closes sessions")))))
+
+(defn- ^:async session-defaults* []
+  (let [call (fn [lg actor tool args] (mcp/call {:ledger lg :ids mcp/event-ids} {:actor actor} tool args))
+        lg (tree)
+        opened (await (call lg codex "session_open" {:advert/tags ["review"]}))
+        session (get-in opened [:result :actor/did])]
+    (is (= codex (get-in opened [:result :advert/anchor])) "S2: a new session advertises at its parent")
+    (is (= [session] (mapv :actor/did (gi/directory-at (state/fold (:ledger opened)) codex (js/Date.)))))
+    (is (= [session] (mapv :actor/did (get-in (await (call (:ledger opened) grokbot "actor_find"
+                                                            {:advert/anchor codex :query "review"}))
+                                              [:result :actors]))))
+    (is (= :invalid (:error (await (call lg codex "session_open" {:actor/policy {:policy/repos "*"}}))))
+        "a malformed policy is refused at the boundary")
+    (is (= :invalid (:error (await (call lg codex "session_open" {:advert/tags "review"})))))
+    (is (= :forbidden (:error (await (call lg codex "session_open"
+                                           {:actor/policy (assoc pol :policy/repos #{"*"})}))))
+        "G1: a wider policy is refused")))
+
+(deftest sessions-advertise-at-their-parent-by-default
+  (async done
+    (-> (session-defaults*)
+        (.catch (fn [e] (is false (str "session-defaults rejected: " (pr-str e)))))
+        (.finally done))))
 
 (deftest agents-open-advertise-and-close-their-own-sessions
   (async done

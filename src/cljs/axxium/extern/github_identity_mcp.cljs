@@ -135,6 +135,8 @@
       "credential_revoke" (js/Promise.resolve (effect-out (gi/revoke-credential lg st caller did label (ids))))
       "session_open"
       ;; S1: the child's own key is shown once; cred(s) = attenuate(cred(caller)).
+      ;; S2: unless :session/advertise? false, the session advertises itself at
+      ;; its parent in the same step, with :advert/tags.
       (let [{:keys [at] :as opened-ids} (ids)
             slug (str "s-" (subs (.toString (crypto/randomBytes 8) "hex") 0 12))
             session (str caller ":" slug)
@@ -144,12 +146,18 @@
             key (str "axb_" (.toString (crypto/randomBytes 32) "base64url"))
             issued (when (:effect opened)
                      (gi/issue-bootstrap (:ledger opened) (state/fold (:ledger opened)) caller session
-                                         (digest key) (ids)))]
+                                         (digest key) (ids)))
+            advertised (when (and (:effect issued) (not (false? (:session/advertise? a))))
+                         (let [{adv-at :at :as adv-ids} (ids)]
+                           (gi/advertise (:ledger issued) (state/fold (:ledger issued)) caller session caller
+                                         (set (:advert/tags a)) adv-at adv-ids)))]
         (js/Promise.resolve
-         (if (:effect issued)
-           {:ledger (:ledger issued)
-            :result {:actor/did session :actor/lease-until lease :bootstrap/key key}}
-           {:ledger (:ledger opened) :error :forbidden})))
+         (cond
+           (not (:effect issued)) {:ledger (:ledger opened) :error :forbidden}
+           (and advertised (not (:effect advertised))) {:ledger (:ledger issued) :error :invalid}
+           :else {:ledger (:ledger (or advertised issued))
+                  :result (cond-> {:actor/did session :actor/lease-until lease :bootstrap/key key}
+                            advertised (assoc :advert/anchor caller))})))
       "session_close"
       (js/Promise.resolve
        (if (= :session (gi/kind-of st did))
@@ -199,7 +207,11 @@
        (or (#{"actor_list" "credentials_self" "subtree_export" "actor_advertise" "actor_withdraw"} tool)
            (and (= tool "session_open")
                 (or (nil? (:session/lease-ms a)) (pos-int? (:session/lease-ms a)))
-                (or (nil? (:actor/name a)) (string? (:actor/name a))))
+                (or (nil? (:actor/name a)) (string? (:actor/name a)))
+                (or (nil? (:actor/policy a)) (law/valid-policy? (:actor/policy a)))
+                (or (nil? (:session/advertise? a)) (boolean? (:session/advertise? a)))
+                (or (nil? (:advert/tags a))
+                    (and (coll? (:advert/tags a)) (law/valid-tags? (set (:advert/tags a))))))
            (and (= tool "actor_find") (string? (:advert/anchor a))
                 (or (nil? (:query a)) (string? (:query a))))
            (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a)))
