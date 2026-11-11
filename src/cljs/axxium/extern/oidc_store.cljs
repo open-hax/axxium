@@ -261,7 +261,8 @@
 
 (def ^:private delegated-lifetime
   "A root grant lives no longer than its parent session; a Work node's grant
-   has its own stored lifetime (see bind-delegated-mailbox-session!)."
+   has its own stored lifetime, fixed at consent to at most one day and never
+   moved by refresh (see bind-delegated-mailbox-session!)."
   "CASE WHEN b.mailbox_principal_actor_id IS NULL THEN LEAST(b.expires_at,s.expires_at) ELSE b.expires_at END")
 
 (def ^:private parent-session-live
