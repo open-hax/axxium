@@ -161,17 +161,19 @@ binding or restores one the owner unbound. A refused pair stays unbound and
 appends nothing, so routing fails closed. The directory reads only the ledger.
 Existing two-DID pilots use their original configuration.
 
-In directory mode, admission is tree ancestry alone:
+In directory mode, discovery and routing require an effective actor in the tree:
 `admit(p) ⇔ ∃n. authn(p)=n ∧ n ≤ root ∧ eff(n)`. A principal is one of the
 following:
 
-- **An actor node acting as itself.** An agent such as Grok Bot sends
+- **An actor node acting as itself.** An operator can opt in an unbound agent
+  or bot under the configured human root with the comma-separated exact DIDs
+  in `AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS`. The actor sends
   `x-axxium-actor: <its actor DID>` and `Authorization: Bearer axb_…`, its own
-  bootstrap key issued by an ancestor. It needs no external account. Its
-  mailbox address is the mailbox the ledger binds to it, or its own actor DID
-  when none is bound. Each request rechecks the same key generation, the
-  node's effectiveness and the address. The configured human root never
-  authenticates this way.
+  bootstrap key issued by an ancestor. Its mailbox address is its own actor
+  DID. Every request rechecks the current key generation, active ancestry,
+  and unbound status. A binding added later ends this access. External
+  mailbox addresses continue to require their verified account or the
+  existing owner-consented OAuth path.
 - **An external account bound to a node.** This is an AT Protocol session
   whose DID the ledger binds to a node.
 - **A Work grant.** An owner-consented Work grant authenticates as the Work
