@@ -261,8 +261,17 @@ The Work client requests `mailbox:events mailbox:actors` and the owner approves
 through their existing Axxium browser session, including a session established
 through Google. The human owner uses the existing login without an AT Protocol
 account. Axxium binds mailbox access to the configured Work actor and mailbox
-DID. Work access requires the same live owner session, provider binding,
-active root-to-child relationship and granted scopes. Legacy event-only
+DID. Consent requires a live owner session, which witnesses the owner's
+manage right over the Work node. The resulting grant authenticates as the
+Work node itself. Logging out of the owner's browser session does not end
+it. The grant has a hard cap of one day from consent. Work can refresh its
+tokens inside that window, but refreshing never extends it. Once the day is
+up, Work needs a fresh owner consent, which again needs a live owner session.
+So Work needs a fresh consent every 24 hours whether or not the owner logs
+out. Every use still requires
+the provider binding, the ledger binding, the active root-to-child
+relationship and the granted scopes. Suspension, unbinding, disconnect or
+loss of the owner's manage right revokes it. Legacy event-only
 grants keep their access and renewal through the existing AT Protocol consent
 flow. Enabling owner consent ends access and renewal for older actor-messaging
 grants. Fresh owner approval issues the replacement grant.
