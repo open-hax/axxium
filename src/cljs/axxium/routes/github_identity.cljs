@@ -69,16 +69,39 @@
 (defn- serialized [f]
   (ledger-queue/submit! ledger-writer (ledger-path) f))
 
+(defonce ^:private folded (atom nil))
+
+(defn- fold-once
+  "The projection of `lg`, folded once per ledger value. The writer replaces
+   the cached ledger on every commit, so `identical?` is exact here and a
+   token check no longer re-folds the whole identity ledger."
+  [lg]
+  (let [[seen st] @folded]
+    (if (identical? seen lg)
+      st
+      (let [st (state/fold lg)]
+        (reset! folded [lg st])
+        st))))
+
 (defn current-actor-state
-  "Read the admitted actor tree without acquiring its writer."
+  "Read the last committed actor tree without acquiring its writer.
+
+   Authority window (documented, not a lock): this read never waits for the
+   identity writer, so it is safe to call from inside `with-current-actor-state!`
+   (the mailbox and webhook paths do, through `active-proof!`; taking the writer
+   again there would deadlock the queue). Inside that writer no identity write
+   can commit, so the read is serialized. Outside it (an OIDC token check or the
+   consent re-check after the grant INSERT) a suspension committed after this
+   read is seen by the next check; every mailbox effect in directory mode
+   re-checks inside the writer, so the stale read cannot authorize a send."
   []
-  (state/fold (current-ledger)))
+  (fold-once (current-ledger)))
 
 (defn with-current-actor-state!
   "Run f against the admitted actor tree before another identity write can commit."
   [f]
   (serialized (fn ^:async inspect-actor-state [lg]
-                {:result (await (f (state/fold lg)))})))
+                {:result (await (f (fold-once lg)))})))
 
 (defn- deps [lg]
   {:fetch gh/fetch! :token-key (token-key) :ledger lg :ids mcp/event-ids :cache token-cache

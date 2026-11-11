@@ -53,10 +53,13 @@
        (law/valid-policy? (policy-of state did))))
 
 (defn active-owner-delegation?
-  "The exact active human root currently manages this active child."
+  "The exact active human root currently manages this active child.
+   G3 makes `(effective? child)` cover every ancestor, root included, so
+   with the root a strict ancestor this is `may-manage?` without a second
+   check of the root's own effectiveness (already in `active-human-root?`)."
   [state root-did child-did]
   (and (active-human-root? state root-did)
-       (may-manage? state root-did child-did)
+       (ancestor? state root-did child-did)
        (effective? state child-did)))
 
 (defn- node [did parent name pol status & [kind]]
