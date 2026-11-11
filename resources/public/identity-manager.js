@@ -27,6 +27,8 @@ class AxxiumIdentityManager extends HTMLElement {
     this.message = '';
     this.unavailable = false;
     this.bootstrap = null;   // {did, key} — shown once, never refetched
+    this.bootstrapPending = false;
+    this.bootstrapError = null;
     this.exported = '';
     this.sessionVersion = 0;
     this.onSessionChanged = () => {
@@ -36,6 +38,8 @@ class AxxiumIdentityManager extends HTMLElement {
       this.message = '';
       this.unavailable = true;
       this.bootstrap = null;
+      this.bootstrapPending = false;
+      this.bootstrapError = null;
       this.exported = '';
       this.render();
       this.refresh();
@@ -57,7 +61,9 @@ class AxxiumIdentityManager extends HTMLElement {
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     let result = {};
-    try { result = await response.json(); } catch (_) { /* bodyless error */ }
+    try { result = await response.json(); } catch {
+      if (response.ok) throw new Error('The identity server returned an invalid response.');
+    }
     if (!response.ok) throw Object.assign(new Error(result.error || `HTTP ${response.status}`), { status: response.status });
     return result;
   }
@@ -90,6 +96,65 @@ class AxxiumIdentityManager extends HTMLElement {
       this.message = error.message;
     }
     await this.refresh();
+  }
+
+  async issueBootstrap(did) {
+    if (this.bootstrapPending || this.bootstrap) return;
+    const sessionVersion = this.sessionVersion;
+    this.bootstrapPending = true;
+    this.bootstrapError = null;
+    this.render();
+    try {
+      const { bootstrapKey } = await this.admin({ op: 'bootstrap-issue', did });
+      if (sessionVersion !== this.sessionVersion) return;
+      if (typeof bootstrapKey !== 'string' || !bootstrapKey) {
+        throw new Error('The server did not return a bootstrap key.');
+      }
+      this.bootstrap = { did, key: bootstrapKey };
+    } catch (error) {
+      if (sessionVersion !== this.sessionVersion) return;
+      const uncertain = !error.status || error.status >= 500;
+      this.bootstrapError = { did, message: uncertain
+        ? 'Axxium could not confirm the bootstrap key. Check its credential generation before issuing again.'
+        : error.message };
+      if (uncertain) await this.refresh();
+    }
+    if (sessionVersion !== this.sessionVersion) return;
+    this.bootstrapPending = false;
+    this.render();
+  }
+
+  showBootstrap(content) {
+    const issued = this.bootstrap;
+    const status = el('p', { role: 'status' });
+    const dialog = el('dialog', { 'aria-labelledby': 'bootstrap-title' },
+      el('h3', { id: 'bootstrap-title' }, 'Bootstrap key'),
+      el('p', {}, 'Copy this key now. It is shown only once.'),
+      el('small', {}, issued.did),
+      el('code', {}, issued.key),
+      el('button', { autofocus: '', onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(issued.key);
+          status.textContent = 'Copied.';
+        } catch {
+          status.textContent = 'Clipboard unavailable. Select and copy the key above.';
+        }
+      } }, 'Copy'),
+      el('button', { class: 'secondary', onclick: () => dialog.close() }, 'Dismiss'),
+      status);
+    dialog.addEventListener('close', async () => {
+      if (this.bootstrap !== issued) return;
+      const sessionVersion = this.sessionVersion;
+      this.bootstrap = null;
+      this.bootstrapPending = true;
+      this.render();
+      await this.refresh();
+      if (sessionVersion !== this.sessionVersion) return;
+      this.bootstrapPending = false;
+      this.render();
+    });
+    content.append(dialog);
+    dialog.showModal();
   }
 
   async startManifest(did) {
@@ -156,20 +221,25 @@ class AxxiumIdentityManager extends HTMLElement {
 
     const act = (label, op, cls = '') => el('button', { class: cls,
       onclick: () => this.run(() => this.admin({ op, did: a.did })) }, label);
+    const hasBootstrap = a.credentials?.some(c => c.label === 'bootstrap' && c.status === 'active');
+    const bootstrapAction = el('button', { onclick: () => this.issueBootstrap(a.did) },
+      hasBootstrap ? 'Replace bootstrap key' : 'Issue bootstrap key');
+    bootstrapAction.disabled = this.bootstrapPending || Boolean(this.bootstrap);
     panel.append(el('div', { class: 'actions' },
       a.status === 'active' ? act('Suspend', 'suspend', 'secondary') : null,
       a.status === 'suspended' ? act('Resume', 'resume', 'secondary') : null,
       a.status !== 'revoked' ? act('Revoke actor', 'revoke', 'danger') : null,
-      el('button', { onclick: () => this.run(() => this.admin({ op: 'bootstrap-issue', did: a.did }), ({ bootstrapKey }) => {
-        this.bootstrap = { did: a.did, key: bootstrapKey };
-      }) }, 'Issue bootstrap key'),
+      bootstrapAction,
       el('button', { onclick: () => this.run(() => this.startManifest(a.did)) }, 'Create GitHub App')));
+    if (this.bootstrapError?.did === a.did) {
+      panel.append(el('p', { class: 'error', role: 'alert' }, this.bootstrapError.message));
+    }
     return panel;
   }
 
   render() {
     const root = this.shadowRoot;
-    root.innerHTML = `<style>
+    if (!root.getElementById('content')) root.innerHTML = `<style>
       :host { display:block; color:#e9e9f2; font:16px system-ui,sans-serif; text-align:left; }
       * { box-sizing:border-box; }
       section { background:#171827; border:1px solid #343650; border-radius:16px; padding:1.25rem; margin:1rem 0; }
@@ -183,18 +253,18 @@ class AxxiumIdentityManager extends HTMLElement {
       .row form { display:flex; gap:.3rem; align-items:center; } .row input { width:12rem; margin:0; }
       .error { color:#ffb4b4; } small { color:#a7a9c2; }
       code { display:block; overflow-wrap:anywhere; padding:1rem; background:#10111c; white-space:pre-wrap; }
-    </style><div id="content"></div>`;
+      dialog { max-width:min(38rem, calc(100% - 2rem)); color:inherit; background:#171827; border:1px solid #626581; border-radius:16px; padding:1.25rem; }
+      dialog::backdrop { background:rgba(0,0,0,.65); }
+      button:disabled { opacity:.6; cursor:default; }
+    </style><div id="content"></div><div id="bootstrap"></div>`;
     const content = root.getElementById('content');
+    const overlay = root.getElementById('bootstrap');
+    content.replaceChildren();
+    if (!this.bootstrap) overlay.replaceChildren();
+    else if (!overlay.firstElementChild) this.showBootstrap(overlay);
     if (this.unavailable) return;
     const section = el('section', {}, el('h2', {}, 'Identities'));
     if (this.message) section.append(el('p', { class: 'error' }, this.message));
-    if (this.bootstrap) {
-      section.append(el('div', {},
-        el('h3', {}, 'Bootstrap key — copy it now, it will not be shown again'),
-        el('small', {}, this.bootstrap.did), el('code', {}, this.bootstrap.key),
-        el('button', { onclick: () => navigator.clipboard.writeText(this.bootstrap.key) }, 'Copy'),
-        el('button', { class: 'secondary', onclick: () => { this.bootstrap = null; this.render(); } }, 'Dismiss')));
-    }
     for (const row of treeRows(this.actors)) {
       section.append(el('div', { style: `padding-left:${row.depth * 1.2}rem` },
         el('button', { class: 'tree', onclick: () => { this.selected = row.did; this.render(); } },
