@@ -45,17 +45,20 @@
   [st did key]
   (let [want (some-> (gi/bootstrap-digest st did) (js/Buffer.from "hex"))
         got (when (string? key) (js/Buffer.from (digest key) "hex"))]
-    (when (and want got (= (.-length want) (.-length got)) (crypto/timingSafeEqual want got))
+    (when (and want got (= (.-length want) (.-length got)) (crypto/timingSafeEqual want got)
+               (gi/live? st did (js/Date.)))
       did)))
 
 (def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke"
              "credential_provision" "credential_rotate" "credential_revoke" "token_for"
              "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"
-             "mailbox_bind" "mailbox_unbind"})
+             "mailbox_bind" "mailbox_unbind"
+             "session_open" "session_close" "actor_advertise" "actor_withdraw" "actor_find"})
 
 (def agent-tools
   "What a bootstrap-authenticated host agent may call."
-  #{"credentials_self" "token_for" "actor_list"})
+  #{"credentials_self" "token_for" "actor_list"
+    "session_open" "session_close" "actor_advertise" "actor_withdraw" "actor_find"})
 
 (defn- refuse [e] (js/Promise.resolve {:error e}))
 
@@ -130,6 +133,38 @@
                                                           [:credential/sealed :credential/key-file]))
                                          (select-keys a public-meta) (ids))))
       "credential_revoke" (js/Promise.resolve (effect-out (gi/revoke-credential lg st caller did label (ids))))
+      "session_open"
+      ;; S1: the child's own key is shown once; cred(s) = attenuate(cred(caller)).
+      (let [{:keys [at] :as opened-ids} (ids)
+            slug (str "s-" (subs (.toString (crypto/randomBytes 8) "hex") 0 12))
+            session (str caller ":" slug)
+            lease (js/Date. (+ (inst-ms at) (min law/max-lease-ms (or (:session/lease-ms a) 3600000))))
+            opened (gi/open-session lg st caller caller session (or (:actor/name a) slug)
+                                    (or (:actor/policy a) (gi/policy-of st caller)) lease at opened-ids)
+            key (str "axb_" (.toString (crypto/randomBytes 32) "base64url"))
+            issued (when (:effect opened)
+                     (gi/issue-bootstrap (:ledger opened) (state/fold (:ledger opened)) caller session
+                                         (digest key) (ids)))]
+        (js/Promise.resolve
+         (if (:effect issued)
+           {:ledger (:ledger issued)
+            :result {:actor/did session :actor/lease-until lease :bootstrap/key key}}
+           {:ledger (:ledger opened) :error :forbidden})))
+      "session_close"
+      (js/Promise.resolve
+       (if (= :session (gi/kind-of st did))
+         (effect-out (gi/revoke-actor lg st caller did (ids)))
+         {:ledger lg :error :forbidden}))
+      "actor_advertise"
+      (let [{:keys [at] :as advert-ids} (ids)
+            target (or did caller)]
+        (js/Promise.resolve
+         (effect-out (gi/advertise lg st caller target (or (:advert/anchor a) target)
+                                   (set (:advert/tags a)) at advert-ids))))
+      "actor_withdraw" (js/Promise.resolve (effect-out (gi/withdraw lg st caller (or did caller) (ids))))
+      "actor_find"
+      (js/Promise.resolve
+       {:result {:actors (gi/find-actors st caller (:advert/anchor a) (:query a) (:at (ids)))}})
       "mailbox_bind" (js/Promise.resolve
                       (effect-out (gi/bind-mailbox lg st caller (:mailbox/did a) did (ids))))
       "mailbox_unbind" (js/Promise.resolve
@@ -161,7 +196,12 @@
 
 (defn- valid? [tool a]
   (and (map? a)
-       (or (#{"actor_list" "credentials_self" "subtree_export"} tool)
+       (or (#{"actor_list" "credentials_self" "subtree_export" "actor_advertise" "actor_withdraw"} tool)
+           (and (= tool "session_open")
+                (or (nil? (:session/lease-ms a)) (pos-int? (:session/lease-ms a)))
+                (or (nil? (:actor/name a)) (string? (:actor/name a))))
+           (and (= tool "actor_find") (string? (:advert/anchor a))
+                (or (nil? (:query a)) (string? (:query a))))
            (and (= tool "subtree_import") (map? (:seed a)) (string? (:host a)))
            (and (= tool "mailbox_unbind") (string? (:mailbox/did a)))
            (string? (:actor/did a)))

@@ -16,8 +16,8 @@
   [ctx]
   (contains? ctx :directory/bindings))
 
-(defn- active-root [state did]
-  (when (identity/effective? state did)
+(defn- active-root [state did now]
+  (when (identity/live? state did now)
     (let [root (or (peek (identity/ancestors-of state did)) did)]
       (when (identity/active-human-root? state root) root))))
 
@@ -66,15 +66,16 @@
     :atproto (get bindings (:auth/did p))
     nil))
 
-(defn- sender-root [state bindings principal]
-  (some->> (authenticated-node state bindings principal) (active-root state)))
+(defn- sender-root [state bindings principal now]
+  (when-let [n (authenticated-node state bindings principal)]
+    (active-root state n now)))
 
-(defn- reachable-actor [state resources root revoked mailbox-did actor-did]
+(defn- reachable-actor [state resources root revoked now mailbox-did actor-did]
   (let [box (mailbox/stream mailbox-did)
         {:resource/keys [owner kind]} (get resources box)]
     (when (and (= mailbox-did owner) (= :resource/mailbox kind)
                (not (contains? revoked box))
-               (= root (active-root state actor-did)))
+               (= root (active-root state actor-did now)))
       {:actor/did actor-did
        :actor/name (get-in (identity/actor-node state actor-did) [:resource/metadata :actor/name])
        :actor/kind (identity/kind-of state actor-did)
@@ -84,19 +85,35 @@
   "Return the routable peer for this verified mailbox principal, or nil. An owner's
    explicit send revocation continues to apply until a live explicit regrant."
   [lg mailbox-state {:keys [principal now] :directory/keys [state bindings]} mailbox-did]
-  (when-let [root (sender-root state bindings principal)]
+  (when-let [root (sender-root state bindings principal now)]
     (reachable-actor state (:resources mailbox-state) root (revoked-mailboxes lg (principal/address principal) now)
-                     mailbox-did (address-actor state bindings mailbox-did))))
+                     now mailbox-did (address-actor state bindings mailbox-did))))
 
 (defn peers
-  "Return the same reachable peers exposed by send and address resolution.
-   Nil means the authenticated sender has no current owner-tree binding."
-  [lg mailbox-state {:keys [principal now] :directory/keys [state bindings]}]
-  (when-let [root (sender-root state bindings principal)]
-    (let [revoked (revoked-mailboxes lg (principal/address principal) now)]
-      (->> (identity/actors-under state root)
-           (keep (fn [{actor-did :actor/did}]
-                   (reachable-actor state (:resources mailbox-state) root revoked
-                                    (node-address bindings actor-did) actor-did)))
-           (sort-by :actor/did)
-           vec))))
+  "Return the same reachable peers exposed by send and address resolution,
+   never including the caller's own node. With `anchor`, only the nodes
+   advertised there that the caller sees (S2, S3); `query` matches DID, name
+   and tags. Nil means the authenticated sender has no current owner tree."
+  ([lg mailbox-state ctx] (peers lg mailbox-state ctx nil))
+  ([lg mailbox-state {:keys [principal now] :directory/keys [state bindings]} {:keys [anchor query]}]
+   (when-let [root (sender-root state bindings principal now)]
+     (let [self (authenticated-node state bindings principal)
+           revoked (revoked-mailboxes lg (principal/address principal) now)
+           found (when anchor
+                   (into {} (map (juxt :actor/did :advert/tags))
+                         (identity/find-actors state self anchor query now)))
+           candidates (if anchor
+                        (keys found)
+                        (map :actor/did (identity/actors-under state root)))]
+       (->> candidates
+            (remove #{self})
+            (keep (fn [actor-did]
+                    (some-> (reachable-actor state (:resources mailbox-state) root revoked now
+                                             (node-address bindings actor-did) actor-did)
+                            (cond-> anchor (assoc :advert/tags (get found actor-did))))))
+            (filter (fn [{:actor/keys [did name]}]
+                      (or anchor (str/blank? query)
+                          (some #(str/includes? (str/lower-case (str %)) (str/lower-case query))
+                                [did name]))))
+            (sort-by :actor/did)
+            vec)))))

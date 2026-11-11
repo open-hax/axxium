@@ -62,10 +62,10 @@
         scoped (directory-ctx sender tree)
         discovered (discover lg scoped)]
     (is (= lg (:ledger discovered)))
-    (is (= #{{:actor/did work :actor/name "Work" :actor/kind :agent :mailbox-did fx/alice}
-             {:actor/did codex :actor/name "Codex" :actor/kind :agent :mailbox-did fx/bob}}
-           (set (get-in discovered [:result :actors]))))
-    (is (= [outside] (mapv :actor/did (get-in (discover lg (directory-ctx outsider tree)) [:result :actors]))))
+    (is (= [{:actor/did codex :actor/name "Codex" :actor/kind :agent :mailbox-did fx/bob}]
+           (get-in discovered [:result :actors]))
+        "the caller is never its own peer")
+    (is (= [] (mapv :actor/did (get-in (discover lg (directory-ctx outsider tree)) [:result :actors]))))
     (is (= :forbidden (:error (discover lg (assoc scoped :directory/bindings {})))))
     (is (= :forbidden (:error (discover lg (dissoc scoped :directory/state)))))
     (is (= :unknown-tool (:error (discover lg sender))))))
@@ -101,9 +101,9 @@
         revoked (:ledger (mailbox/call accepted recipient :revoke_send {:to fx/alice}))
         restored (:ledger (mailbox/call revoked recipient :grant_send {:to fx/alice}))]
     (is (= :forbidden (:error (send accepted (directory-ctx sender suspended) fx/bob))))
-    (is (= [work] (mapv :actor/did (get-in (discover accepted (directory-ctx sender suspended)) [:result :actors]))))
+    (is (= [] (mapv :actor/did (get-in (discover accepted (directory-ctx sender suspended)) [:result :actors]))))
     (is (= :forbidden (:error (send revoked scoped fx/bob))))
-    (is (= [work] (mapv :actor/did (get-in (discover revoked scoped) [:result :actors]))))
+    (is (= [] (mapv :actor/did (get-in (discover revoked scoped) [:result :actors]))))
     (is (= :forbidden (:error (mailbox/call revoked scoped :resolve_address {:address fx/bob}))))
     (is (true? (:replayed? (send restored scoped fx/bob))))))
 
@@ -120,7 +120,7 @@
     (is (not (gi/active-owner-delegation? current other-root work)))
     (is (not (gi/active-owner-delegation? suspended root work)))
     (is (= root (gi/parent-of current work)))
-    (is (= #{work codex}
+    (is (= #{codex}
            (set (map :actor/did (get-in (discover lg delegated) [:result :actors])))))
     (is (nil? (:error (send lg delegated fx/bob))))
     (is (= :forbidden (:error (send lg delegated fx/carol))))))
@@ -136,9 +136,10 @@
         node (assoc node :session/id sid)
         lg (:ledger (mailbox/call lg node :register_mailbox {}))
         scoped (directory-ctx node tree)]
-    (is (= #{work codex grokbot} (set (map :actor/did (get-in (discover lg scoped) [:result :actors])))))
+    (is (= #{work codex} (set (map :actor/did (get-in (discover lg scoped) [:result :actors])))))
     (is (= grokbot (:mailbox-did (some #(when (= grokbot (:actor/did %)) %)
-                                       (get-in (discover lg scoped) [:result :actors])))))
+                                       (get-in (discover lg (directory-ctx (:sender (fixture)) tree))
+                                               [:result :actors])))))
     (is (nil? (:error (send lg scoped fx/alice))) "L6: admitted by ancestry alone, no grant")
     (is (= :forbidden (:error (send lg scoped fx/carol))) "S3: never across trees")
     (testing "a node cannot claim a mailbox the ledger does not bind to it"

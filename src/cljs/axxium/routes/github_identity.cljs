@@ -10,7 +10,8 @@
         (JSON {op, ...}; see axxium.law.identity-admin)
    POST /api/identity/agent            a host agent as itself:
         x-axxium-actor: <agent did>, authorization: Bearer <bootstrap key>;
-        only credentials_self, token_for, actor_list
+        only credentials_self, token_for, actor_list, and the session tools
+        session_open/session_close, actor_advertise/actor_withdraw, actor_find
 
    The manifest state is a signed 5-minute cookie bound to parent + child,
    so a callback can only attach an App to the child its parent chose."

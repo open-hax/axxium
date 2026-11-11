@@ -1,0 +1,50 @@
+(ns axxium.extern.session-tools-test
+  "An agent opens its own session through the identity tools; the session
+   authenticates with its own key, self-advertises, and is found."
+  (:require [axxium.domain.github-identity :as gi]
+            [axxium.domain.policy :as policy]
+            [axxium.domain.state :as state]
+            [axxium.extern.github-identity-mcp :as mcp]
+            [cljs.test :refer [async deftest is]]))
+
+(def ^:private root "did:web:axxium.example:actors:owner")
+(def ^:private codex (str root ":codex"))
+(def ^:private grokbot (str root ":grokbot"))
+(def ^:private pol {:policy/repos #{"fixture/a"} :policy/permissions {"contents" "read"}
+                    :policy/actions #{:read} :policy/forbid #{}})
+
+(defn- tree []
+  (let [lg (:ledger (gi/register-root [] state/empty-state root "Owner" pol (mcp/event-ids)))
+        lg (:ledger (gi/provision-actor lg (state/fold lg) root codex "Codex" pol :agent (mcp/event-ids)))]
+    (:ledger (gi/provision-actor lg (state/fold lg) root grokbot "Grok Bot" pol :agent (mcp/event-ids)))))
+
+(defn- ^:async session-tools* []
+  (let [call (fn [lg actor tool args] (mcp/call {:ledger lg :ids mcp/event-ids} {:actor actor} tool args))
+        opened (await (call (tree) codex "session_open" {:actor/name "PR 66 review" :session/lease-ms 600000}))
+        {session :actor/did key :bootstrap/key} (:result opened)
+        lg (:ledger opened)]
+    (is (= (str codex ":") (subs session 0 (inc (count codex)))))
+    (is (= session (mcp/authenticate (state/fold lg) session key)) "S1: the session holds its own key")
+    (is (nil? (mcp/authenticate (state/fold lg) codex key)) "it is not the parent's key")
+    (is (policy/decision-before-effect? lg))
+    (let [long-lease (await (call lg codex "session_open" {:session/lease-ms 172800000}))]
+      (is (<= (- (inst-ms (get-in long-lease [:result :actor/lease-until])) (js/Date.now)) 86400000)
+          "a requested lease beyond a day is clamped to a day"))
+    (let [advertised (await (call lg session "actor_advertise" {:advert/anchor root :advert/tags ["review" "pr-66"]}))
+          lg (:ledger advertised)
+          found (await (call lg grokbot "actor_find" {:advert/anchor root :query "review"}))]
+      (is (some? (:result advertised)))
+      (is (= [session] (mapv :actor/did (get-in found [:result :actors]))))
+      (let [closed (await (call lg codex "session_close" {:actor/did session}))]
+        (is (some? (:result closed)))
+        (is (nil? (mcp/authenticate (state/fold (:ledger closed)) session key)) "closing revokes the session")
+        (is (= [] (get-in (await (call (:ledger closed) grokbot "actor_find" {:advert/anchor root}))
+                          [:result :actors])))
+        (is (= :forbidden (:error (await (call lg codex "session_close" {:actor/did grokbot}))))
+            "session_close only closes sessions")))))
+
+(deftest agents-open-advertise-and-close-their-own-sessions
+  (async done
+    (-> (session-tools*)
+        (.catch (fn [e] (is false (str "session-tools rejected: " (pr-str e)))))
+        (.finally done))))
