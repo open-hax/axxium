@@ -1,5 +1,5 @@
 (ns axxium.routes.mailbox
-  "Opt-in authenticated polling and selected-actor webhook transport."
+  "Authenticated mailbox MCP with optional inbox streams and webhooks."
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.domain.github-identity :as gi]
@@ -131,7 +131,9 @@
 (defn- stream-eligible? [stream-runtime proof st bindings]
   (and stream-runtime (nil? (:oauth/grant-id proof))
        (when-let [actor (stream-actor proof bindings)]
-         (gi/active-owner-delegation? st (:root-did (cfg/get-in-config [:identity/root-operator-binding])) actor))))
+         (and (gi/live? st actor (secrets/now))
+              (gi/active-owner-delegation?
+               st (:root-did (cfg/get-in-config [:identity/root-operator-binding])) actor)))))
 
 (defn- ^:async active-stream-session?
   [writer path oauth proof ctx]
