@@ -1,15 +1,18 @@
 (ns axxium.routes.mailbox
-  "Opt-in authenticated polling and selected-actor webhook transport."
+  "Authenticated mailbox MCP with optional inbox streams and webhooks."
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.domain.github-identity :as gi]
+            [axxium.domain.mailbox-events :as access]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.ledger-queue :as queue]
             [axxium.extern.mailbox-mcp :as rpc]
+            [axxium.extern.mailbox-stream :as stream]
             [axxium.law.actor :as actor-law]
+            [axxium.law.principal :as principal]
             [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox-events :as events]
             [clojure.string :as str]))
@@ -105,10 +108,71 @@
 
       :else true)))
 
-(defn- accept-json? [req]
+(defn- accepts? [req content-type]
   (let [accept (or (http/header req "accept") "")]
-    (some #{"application/json"}
+    (some #{content-type}
           (map #(first (str/split (str/trim %) #";" 2)) (str/split accept #",")))))
+
+(defn- transport-context [resource proof sid]
+  (let [{:keys [principal cred-id]} proof]
+    {:principal principal
+     :session/id sid
+     :session/binding (secrets/token-hash (if-let [grant (:oauth/grant-id proof)]
+                                          (pr-str ["oauth" (:oauth/client-id proof) resource grant])
+                                          cred-id))
+     :audience resource}))
+
+(defn- stream-actor [proof bindings]
+  (let [{:auth/keys [did method]} (:principal proof)]
+    (if (= method :actor-node)
+      did
+      (get bindings did))))
+
+(defn- stream-eligible? [stream-runtime proof st bindings]
+  (and stream-runtime (nil? (:oauth/grant-id proof))
+       (when-let [actor (stream-actor proof bindings)]
+         (and (gi/live? st actor (secrets/now))
+              (gi/active-owner-delegation?
+               st (:root-did (cfg/get-in-config [:identity/root-operator-binding])) actor)))))
+
+(defn- ^:async active-stream-session?
+  [writer path oauth proof ctx]
+  (and (await (active-proof! oauth proof))
+       (let [st (identity/current-actor-state)]
+         (stream-eligible? true proof st (gi/mailbox-bindings st)))
+       (mailbox/streaming-session? (queue/current-ledger writer path)
+                                   (assoc ctx :now (secrets/now)))))
+
+(defn- ^:async listen-inbox!
+  [writer path oauth resource stream-runtime req reply proof]
+  (let [sid (http/header req "mcp-session-id")
+        version (http/header req "mcp-protocol-version")
+        ctx (transport-context resource proof sid)
+        recheck #(active-stream-session? writer path oauth proof ctx)]
+    (cond
+      (not (and stream-runtime (nil? (:oauth/grant-id proof))))
+      (do (http/set-header! reply "Allow" "POST")
+          (http/send-empty! reply 405))
+      (not (accepts? req "text/event-stream"))
+      (http/send-secret! reply 406 {:error "Inbox notifications require text/event-stream"})
+      (and version (not= version rpc/protocol-version))
+      (http/send-secret! reply 400 {:error "Unsupported MCP protocol version"})
+      (nil? sid)
+      (http/send-secret! reply 400 {:error "Mcp-Session-Id is required"})
+      (not (and (actor-law/valid-credential-id? sid) (await (recheck))))
+      (http/send-secret! reply 404 {:error "Mailbox session not found"})
+      :else (stream/listen! stream-runtime req reply sid (principal/address (:principal proof)) recheck))))
+
+(defn- ^:async notify-inbox!
+  [writer path stream-runtime recipient]
+  (doseq [{:keys [authorize! write! close!]} (stream/subscriptions stream-runtime recipient)]
+    (try
+      (if (and (await (authorize!))
+               (access/authorized? (queue/current-ledger writer path) recipient (secrets/now)))
+        (write!)
+        (close!))
+      (catch :default _
+        (close!)))))
 
 (defn- rpc-error [reply status id code message]
   (http/send-secret! reply status
@@ -117,7 +181,8 @@
 (defn- operation [lg ctx body]
   (if (= "initialize" (get body "method"))
     (let [opened (mailbox/call lg ctx :open_session
-                              {:audience (:audience ctx) :ttl-ms 3600000})]
+                              {:audience (:audience ctx) :ttl-ms 3600000
+                               :push (:resources/enabled? ctx)})]
       (assoc (rpc/handle-rpc (:ledger opened) ctx body)
              :transport-session (get-in opened [:result :session/id])))
     (if-let [error (mailbox/session-error lg ctx)]
@@ -128,32 +193,44 @@
         (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
 (defn- ^:async submit-operation!
-  [writer path oauth proof ctx body directory?]
-  (let [submit (fn [ctx]
-                 (queue/submit! writer path
-                                (fn ^:async apply-mailbox [lg]
-                                  (if (await (active-proof! oauth proof))
-                                    (operation lg (assoc ctx :now (secrets/now)) body)
-                                    {:unauthenticated? true}))))]
+  [writer path oauth proof ctx body directory? stream-runtime]
+  (let [submit (fn ^:async commit-mailbox [ctx]
+                 (let [out (await
+                            (queue/submit! writer path
+                                           (fn ^:async apply-mailbox [lg]
+                                             (if (await (active-proof! oauth proof))
+                                               (operation lg (assoc ctx :now (secrets/now)) body)
+                                               {:unauthenticated? true}))))]
+                   (when-let [recipient (and stream-runtime (:notify-to out))]
+                     (stream/dispatch! stream-runtime recipient
+                                       #(identity/with-current-actor-state!
+                                         (fn [_] (notify-inbox! writer path stream-runtime recipient)))))
+                   out))]
     (if (and directory? (or (nil? (:oauth/grant-id proof))
                           (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
       ;; Identity is acquired before mailbox. Keep it through the durable append
       ;; so a completed actor suspension cannot race an authorized send.
       (:result (await (identity/with-current-actor-state!
-                       (fn [st] (submit (assoc ctx :directory/state st
-                                               :directory/bindings (gi/mailbox-bindings st)))))))
+                       (fn [st]
+                         (let [bindings (gi/mailbox-bindings st)
+                               streaming? (boolean (stream-eligible? stream-runtime proof st bindings))]
+                           (submit (assoc ctx
+                                          :directory/state st
+                                          :directory/bindings bindings
+                                          :session/push-supported? streaming?
+                                          :resources/enabled? streaming?)))))))
       (await (submit ctx)))))
 
 (defn- ^:async post-mailbox!
-  [writer path resource runtime subscriptions-disabled? oauth directory? resource-metadata
-   req reply {:keys [principal cred-id] :as proof}]
+  [writer path resource runtime subscriptions-disabled? oauth directory? resource-metadata stream-runtime
+   req reply {:keys [principal] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
         sid (http/header req "mcp-session-id")
         initialize? (= "initialize" (get body "method"))]
     (cond
-      (not (accept-json? req))
-      (http/send-secret! reply 406 {:error "Mailbox polling requires application/json"})
+      (not (accepts? req "application/json"))
+      (http/send-secret! reply 406 {:error "Mailbox requests require application/json"})
 
       (not (and (rpc-request? body) (supported-message? body)))
       (rpc-error reply 400 nil -32600 "Invalid request")
@@ -171,26 +248,28 @@
       (rpc-error reply 404 (get body "id") -32600 "Mailbox session not found")
 
       :else
-      (let [ctx {:principal principal
-                 :session/id sid
-                 :session/binding (secrets/token-hash (if-let [grant (:oauth/grant-id proof)]
-                                                       (pr-str ["oauth" (:oauth/client-id proof) resource grant])
-                                                       cred-id))
+      (let [ctx (assoc (transport-context resource proof sid)
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? false
                  :events/enabled? (events/enabled? runtime proof)
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
-                 :mailbox/actors? (:mailbox/actors? proof)
-                 :audience resource}
+                 :mailbox/actors? (:mailbox/actors? proof))
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
                   (await (events/execute! runtime (dissoc proof :mailbox/actors?) ctx body))
-                  (await (submit-operation! writer path oauth proof ctx body directory?)))]
+                  (await (submit-operation! writer path oauth proof ctx body directory? stream-runtime)))
+            applied? (case (:inbox-subscription out)
+                       :subscribe (stream/subscribe! stream-runtime sid (principal/address principal))
+                       :unsubscribe (stream/unsubscribe! stream-runtime sid (principal/address principal))
+                       true)]
         (cond
           (:unauthenticated? out) (require-auth! reply resource-metadata)
 
           (:session-error out)
           (rpc-error reply 404 (get body "id") -32600 "Mailbox session not found")
+
+          (not applied?)
+          (rpc-error reply 503 (get body "id") -32000 "Inbox notification subscriptions are unavailable")
 
           (:response out)
           (do (when-let [session-id (:transport-session out)]
@@ -209,20 +288,26 @@
          ;; Directory mode routes over ledger bindings; an env seed implies it.
          directory? (or (true? (cfg/get-in-config [:mailbox/directory?]))
                         (some? (cfg/get-in-config [:mailbox/actor-bindings])))
-         allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])]
+         allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
+         streaming? (cfg/get-in-config [:mailbox/stream-enabled?])
+         subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))]
      (when (or (and directory? (or (not path) allowed-dids (str/blank? identity-path)))
                (and (:actor-messaging? oauth) (not directory?)))
        (throw (ex-info "Mailbox actor messaging requires both ledgers and directory mode, outside the two-actor pilot"
                        {:reason :invalid-mailbox-actor-messaging-config})))
+     (when (and streaming? (not (and directory? subscriptions-disabled?
+                                      (cfg/get-in-config [:identity/root-operator-binding]))))
+       (throw (ex-info "Mailbox notifications require the owner directory with webhook subscriptions disabled"
+                       {:reason :invalid-mailbox-stream-config})))
      (when path
        (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
              resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
-             subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))
              owner (cfg/get-in-config [:mailbox/webhook-actor-did])
              webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
              storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file]) identity-path]
                                                   (some? owner))
              writer (queue/create storage)
+             stream-runtime (when streaming? (stream/create! app))
              runtime (when-not subscriptions-disabled?
                        (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)))
              no-stream (authorized origin oauth resource-metadata allowed-dids directory?
@@ -239,6 +324,10 @@
          (http/post! app endpoint
                      (authorized origin oauth resource-metadata allowed-dids directory?
                                  (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth directory?
-                                          resource-metadata)))
-         (http/get! app endpoint no-stream)
+                                          resource-metadata stream-runtime)))
+         (http/get! app endpoint
+                    (if stream-runtime
+                      (authorized origin oauth resource-metadata allowed-dids directory?
+                                  (partial listen-inbox! writer path oauth (:resource origin) stream-runtime))
+                      no-stream))
          (http/delete! app endpoint no-stream))))))

@@ -246,6 +246,33 @@ directory with their verified session and continue to poll their own inbox.
 Bindings and mailbox registrations are provisioned separately. An actor
 with no registered mailbox does not appear in discovery.
 
+### Native MCP inbox notifications
+
+Enable `AXXIUM_MAILBOX_STREAM_ENABLED=true` on an instance with an explicit
+actor directory and configured human root. Set
+`AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=false` to keep webhook subscriptions
+disabled. Native MCP notifications travel over the authenticated HTTP
+connection and require no callback URL.
+
+After `initialize`, an eligible client receives the `resources.subscribe`
+capability. Open an HTTP GET on the same `/api/mailbox/mcp` endpoint with
+`Accept: text/event-stream`, the negotiated protocol version, and the
+`Mcp-Session-Id` from initialization. Use the same credentials for GET and
+POST. Register the inbox once if needed, then send a `resources/subscribe`
+request for `axxium://mailbox/inbox`. A committed new message triggers
+`notifications/resources/updated` with that URI. Read the inbox on receipt
+via `resources/read` or `read_inbox`, then acknowledge messages separately.
+The notification carries no message content. Repeated idempotent sends do not
+emit another notification.
+
+Each inbox has one active stream, bound to its authenticated MCP session.
+Concurrent messages may coalesce into a single inbox-update signal.
+Reconnecting requires a fresh resource
+subscription. Read the durable inbox once after reconnecting to recover
+unread messages from the disconnected interval. The stream does not replay
+old notifications, and opening it does not by itself start a turn in the
+client's agent.
+
 ### Work consent from the Axxium owner account
 
 On the canonical Axxium instance, opt in with `"mailbox-owner-consent?": true`
