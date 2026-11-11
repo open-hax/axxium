@@ -84,7 +84,7 @@
     (cond
       (not (principal/authenticated? principal)) :unauthenticated
       (nil? s) :no-session
-      (not= (:auth/did principal) (:session/did s)) :session-mismatch
+      (not= (principal/address principal) (:session/did s)) :session-mismatch
       (not= audience (:session/aud s)) :wrong-audience
       (not= (:session/binding s) (:session/binding ctx)) :session-mismatch
       (>= (inst-ms now) (inst-ms (:session/expires s))) :session-expired
@@ -130,14 +130,14 @@
       (session-result lg (session lg (:session/id ctx))))
     :else
     (let [sid (or (:session/new-id ctx) (nid lg))
-          body (cond-> {:session/id sid :session/did (:auth/did principal)
+          body (cond-> {:session/id sid :session/did (principal/address principal)
                         :session/method (:auth/method principal) :session/aud aud
                         :session/expires (plus-ms now (min ttl-ms 86400000))
                         :session/push? (and (not= false (:session/push-supported? ctx))
                                             (true? push))}
                  (:session/binding ctx) (assoc :session/binding (:session/binding ctx)))
           [lg' _] (ledger/emit lg {:id sid :stream sessions :type :axxium.session/opened
-                                   :actor (:auth/did principal) :at now :body body})]
+                                   :actor (principal/address principal) :at now :body body})]
       (session-result lg' body))))
 
 (defn- discover-actors [lg ctx _]
@@ -179,7 +179,7 @@
     (filterv (complement revoked) owner-actions)))
 
 (defn- register-mailbox [lg {:keys [principal now]} _]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         box (mailbox/stream me)
         st (state/fold lg)
         registered? (contains? (:resources st) box)
@@ -208,7 +208,7 @@
 (defn- grant-send [lg {:keys [principal now]} {:keys [to]}]
   (if-not (did/did? to)
     (refuse :bad-address)
-    (let [me (:auth/did principal)
+    (let [me (principal/address principal)
           g {:grant/id (str "mbox-send:" (nid lg 1)) :grant/actor to
              :grant/resource (mailbox/stream me) :grant/actions [:send]}
           {lg' :ledger e :effect} (resource/issue-grant lg (state/fold lg) me g
@@ -216,7 +216,7 @@
       (if e {:ledger lg' :result {:grant/id (:grant/id g)}} (refuse lg' :forbidden)))))
 
 (defn- revoke-send [lg {:keys [principal now]} {:keys [to]}]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         rv {:revoke/id (str "mbox-revoke:" (nid lg 1)) :revoke/actor to
             :revoke/resource (mailbox/stream me) :revoke/actions [:send] :revoke/at now}
         {lg' :ledger e :effect} (resource/issue-revoke lg (state/fold lg) me rv
@@ -235,7 +235,7 @@
     (catch #?(:clj Exception :cljs :default) _ false)))
 
 (defn- send-message [lg {:keys [principal now] :as ctx} {:keys [to from idempotency-key body]}]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         scoped? (directory/enabled? ctx)
         st (delay (state/fold lg))]
     (cond
@@ -294,7 +294,7 @@
             (of-type lg (mailbox/stream did) :axxium.mailbox/accepted))))
 
 (defn- read-inbox [lg {:keys [principal now] :as ctx} {:keys [mailbox after]}]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         owner (or mailbox me)]
     (if (and (directory/enabled? ctx) (not= me owner))
       (refuse :forbidden)
@@ -317,7 +317,7 @@
                       :messages (mapv #(assoc (:event/body %) :message/seq (:event/seq %)) es)}}))))))
 
 (defn- acknowledge [lg {:keys [principal now]} {:keys [message-id]}]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         box (mailbox/stream me)
         e (message-event lg message-id)]
     (if (not= box (:event/stream e))
@@ -343,7 +343,7 @@
   (if (outbox-body lg :axxium.outbox/delivered message-id) :delivered :pending))
 
 (defn- get-delivery [lg {:keys [principal]} {:keys [message-id]}]
-  (let [me (:auth/did principal)
+  (let [me (principal/address principal)
         m (:event/body (message-event lg message-id))]
     (if-not (and m (#{(:message/from m) (:message/to m)} me))
       (refuse :not-found)

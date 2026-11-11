@@ -8,6 +8,7 @@
             [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.token-crypto :as crypto]
             [axxium.law.did :as did]
+            [axxium.law.principal :as principal]
             [axxium.routes.github-identity :as identity]
             [cljs.reader :as reader]))
 
@@ -26,7 +27,7 @@
                     "required" ["message_id"] "additionalProperties" false}})
 
 (defn enabled? [runtime proof]
-  (and runtime (= (:owner runtime) (get-in proof [:principal :auth/did]))))
+  (and runtime (= (:owner runtime) (principal/address (:principal proof)))))
 
 (defn- success [id result]
   {:response {"jsonrpc" "2.0" "id" id "result" result}})

@@ -237,7 +237,9 @@
                              " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp()")
                         [grant-id account-id client-id resource oidc/mailbox-scope oidc/mailbox-actors-scope
                          root-did bound-actor-did mailbox-did]))]
-      (when-let [proof (principal/from-owner-delegation mailbox-did)]
+      ;; L5: the grant authenticates as the Work node itself, acting at the
+      ;; mailbox the ledger binds to it; the owner only witnessed consent.
+      (when-let [proof (principal/from-actor-node bound-actor-did mailbox-did)]
         {:principal proof :actor-id account-id :cred-id mailbox_cred_id :token-hash token_hash
          :oauth/grant-id grant-id :oauth/client-id client-id :oauth/resource resource
          :mailbox/owner-root-did root-did :mailbox/bound-actor-did bound-actor-did

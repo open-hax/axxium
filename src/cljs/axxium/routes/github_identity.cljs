@@ -17,6 +17,7 @@
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.domain.github-identity :as gi]
+            [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.state :as state]
             [axxium.extern.github-app :as gh]
             [axxium.extern.github-identity-mcp :as mcp]
@@ -29,6 +30,7 @@
             [axxium.extern.token-crypto :as tc]
             [axxium.law.did :as did-law]
             [axxium.law.github-identity :as law]
+            [axxium.law.principal :as principal]
             [axxium.routes.auth-context :as auth-context]
             [clio.shape.edn :as edn]
             [clojure.string :as str]))
@@ -263,6 +265,37 @@
   [mailbox-did]
   (when (and mailbox-did (configured?))
     (get (gi/mailbox-bindings (current-actor-state)) mailbox-did)))
+
+(defn node-proof
+  "L5/L6: an agent node authenticating as itself with its own bootstrap key
+   (x-axxium-actor + Bearer axb_...). It acts at its own address: the mailbox
+   the ledger binds to it, else its own DID. The configured human root never
+   authenticates this way. The key is not retained, only its digest."
+  [did key]
+  (when (and (string? did) (string? key) (configured?)
+             (not= did (:root-did (root-binding))))
+    (let [st (current-actor-state)]
+      (when-let [self (mcp/authenticate st did key)]
+        (let [digest (mcp/digest key)]
+          (when-let [p (principal/from-actor-node
+                        self (directory/node-address (gi/mailbox-bindings st) self))]
+            {:principal p :cred-id (pr-str ["actor-node" self digest]) :node/digest digest}))))))
+
+(defn node-proof-active?
+  "Recheck a node proof against the last committed tree: the same bootstrap
+   generation, the node and every ancestor effective, and the same address."
+  [{:keys [principal] :node/keys [digest]}]
+  (let [st (current-actor-state)
+        n (:auth/did principal)]
+    (boolean
+     (and digest (= digest (gi/bootstrap-digest st n))
+          (= (principal/address principal)
+             (directory/node-address (gi/mailbox-bindings st) n))))))
+
+(defn actor-node?
+  "True when `did` names a node of the identity tree."
+  [did]
+  (boolean (and did (configured?) (gi/actor-node (current-actor-state) did))))
 
 (defn- ^:async apply-seed-safely! []
   (try

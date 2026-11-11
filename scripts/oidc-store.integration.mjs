@@ -239,7 +239,8 @@ async function verifyWorkOwnerConsent(pool, root) {
     assert.notEqual(rotated.refresh_token, issued.refresh_token);
     const workToken = rotated.access_token;
     assert.deepEqual(await mounted.accessProof(workToken), {
-      subject: owner.id, workAccount: work.id, mailboxDid, authMethod: 'owner-delegation', boundActorDid: workDid,
+      subject: owner.id, workAccount: work.id, mailboxDid, principalDid: workDid, authMethod: 'actor-node',
+      boundActorDid: workDid,
     });
     const remapped = 'did:web:axxium.example:actors:another-owner:work';
     await pool.query('UPDATE axxium_oidc_grant_sessions SET mailbox_actor_did=$1 WHERE mailbox_principal_actor_id=$2',

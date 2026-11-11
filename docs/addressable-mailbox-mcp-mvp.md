@@ -91,6 +91,10 @@ also be configured. Only the selected actor's live AT Protocol session
 advertises the event capability. Register that actor's mailbox before
 requesting the event catalog or subscribing.
 
+**Deprecated.** The two-DID fence below is a second admission rule. It only
+works outside directory mode, and startup refuses to combine the two. New
+deployments should use directory mode, where admission is tree ancestry alone.
+
 For a private two-actor pilot, set `AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS` to the
 recipient DID and the native sender DID, separated by a comma. The recipient
 must equal `AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID`. Both actors need a live verified
@@ -156,6 +160,25 @@ binding exists, bound or unbound, the ledger owns it. A restart never moves a
 binding or restores one the owner unbound. A refused pair stays unbound and
 appends nothing, so routing fails closed. The directory reads only the ledger.
 Existing two-DID pilots use their original configuration.
+
+In directory mode, admission is tree ancestry alone:
+`admit(p) ⇔ ∃n. authn(p)=n ∧ n ≤ root ∧ eff(n)`. A principal is one of the
+following:
+
+- **An actor node acting as itself.** An agent such as Grok Bot sends
+  `x-axxium-actor: <its actor DID>` and `Authorization: Bearer axb_…`, its own
+  bootstrap key issued by an ancestor. It needs no external account. Its
+  mailbox address is the mailbox the ledger binds to it, or its own actor DID
+  when none is bound. Each request rechecks the same key generation, the
+  node's effectiveness and the address. The configured human root never
+  authenticates this way.
+- **An external account bound to a node.** This is an AT Protocol session
+  whose DID the ledger binds to a node.
+- **A Work grant.** An owner-consented Work grant authenticates as the Work
+  node itself (`:actor-node`), acting at its bound mailbox. The owner's
+  session only witnesses the manage right at consent.
+
+An external account can never act at an actor node's own DID.
 
 `discover_actors` lists the reachable actors in the authenticated caller’s
 human-owned tree. It returns each actor’s DID, name, kind and `mailbox_did`.

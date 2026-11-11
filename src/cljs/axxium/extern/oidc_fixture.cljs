@@ -2,7 +2,8 @@
   "Native integration-test entry point; never mounted as an application route."
   (:require [axxium.extern.oidc-provider :as provider]
             [axxium.extern.oidc-http :as transport]
-            [axxium.extern.oidc-store :as store]))
+            [axxium.extern.oidc-store :as store]
+            [axxium.law.principal :as principal]))
 
 (defn create-provider
   "Decode synthetic native fixture data around the ordinary provider boundary."
@@ -56,6 +57,7 @@
              (when proof
                #js {:subject (:actor-id proof)
                     :workAccount (:mailbox/principal-actor-id proof)
-                    :mailboxDid (get-in proof [:principal :auth/did])
+                    :mailboxDid (principal/address (:principal proof))
+                    :principalDid (get-in proof [:principal :auth/did])
                     :authMethod (name (get-in proof [:principal :auth/method]))
                     :boundActorDid (:mailbox/bound-actor-did proof)})))}))

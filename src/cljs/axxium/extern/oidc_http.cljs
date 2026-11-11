@@ -6,6 +6,7 @@
             [axxium.extern.oidc-store :as store]
             [axxium.extern.relay :as relay]
             [axxium.law.oidc :as law]
+            [axxium.law.principal :as principal]
             [clojure.string :as str]
             ["node:crypto" :as crypto]
             ["node:fs" :as fs]))
@@ -83,7 +84,7 @@
     delegation (await (owner-interaction-root! pool (cookie-value request cookie-name) delegation))
     mailbox?
     (when-let [proof (await (session/atproto-session-proof (cookie-value request cookie-name)))]
-      (when (and (= owner (get-in proof [:principal :auth/did]))
+      (when (and (= owner (principal/address (:principal proof)))
                  (await (session/active-atproto-session? proof)))
         {:actor {:id (:actor-id proof) :display_name owner} :proof proof}))
     :else (await (current-root request cookie-name resolve-session!))))

@@ -1,6 +1,7 @@
 (ns axxium.domain.mailbox-directory-test
   (:require [axxium.domain.github-identity :as gi]
             [axxium.domain.kernel-fixture :as fx]
+            [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.domain.policy :as policy]
             [axxium.domain.state :as state]
@@ -106,12 +107,12 @@
     (is (= :forbidden (:error (mailbox/call revoked scoped :resolve_address {:address fx/bob}))))
     (is (true? (:replayed? (send restored scoped fx/bob))))))
 
-(deftest owner-delegation-preserves-actor-ids-and-checks-the-active-child
+(deftest delegated-work-acts-as-its-own-node-at-its-bound-mailbox
   (let [{:keys [lg tree sender]} (fixture)
         current (state/fold tree)
         suspended (state/fold (:ledger (gi/suspend tree current root work (ids 113))))
         delegated (-> sender
-                      (assoc-in [:principal :auth/method] :owner-delegation)
+                      (assoc :principal {:auth/did work :auth/method :actor-node :auth/mailbox fx/alice})
                       (assoc :events/only? true :mailbox/actors? true)
                       (directory-ctx tree))]
     (is (gi/active-owner-delegation? current root work))
@@ -123,3 +124,28 @@
            (set (map :actor/did (get-in (discover lg delegated) [:result :actors])))))
     (is (nil? (:error (send lg delegated fx/bob))))
     (is (= :forbidden (:error (send lg delegated fx/carol))))))
+
+(def ^:private grokbot (str root ":grokbot"))
+
+(deftest an-agent-node-uses-its-own-did-as-its-address
+  (let [{:keys [lg tree]} (fixture)
+        tree (provision tree root grokbot "Grok Bot" 121)
+        node {:principal {:auth/did grokbot :auth/method :actor-node} :audience audience :now fx/t0}
+        {lg :ledger {sid :session/id} :result} (mailbox/call lg node :open_session
+                                                             {:audience audience :ttl-ms 3600000})
+        node (assoc node :session/id sid)
+        lg (:ledger (mailbox/call lg node :register_mailbox {}))
+        scoped (directory-ctx node tree)]
+    (is (= #{work codex grokbot} (set (map :actor/did (get-in (discover lg scoped) [:result :actors])))))
+    (is (= grokbot (:mailbox-did (some #(when (= grokbot (:actor/did %)) %)
+                                       (get-in (discover lg scoped) [:result :actors])))))
+    (is (nil? (:error (send lg scoped fx/alice))) "L6: admitted by ancestry alone, no grant")
+    (is (= :forbidden (:error (send lg scoped fx/carol))) "S3: never across trees")
+    (testing "a node cannot claim a mailbox the ledger does not bind to it"
+      (let [claimed (assoc-in scoped [:principal :auth/mailbox] fx/bob)]
+        (is (some? (:error (discover lg claimed))))
+        (is (nil? (directory/peers lg (state/fold lg) claimed)))))
+    (testing "an unbound external DID cannot borrow a node's address"
+      (is (nil? (directory/peers lg (state/fold lg)
+                                 (assoc scoped :principal {:auth/did "did:plc:eeeeeeeeeeeeeeeeeeeeeeee"
+                                                           :auth/method :atproto})))))))
