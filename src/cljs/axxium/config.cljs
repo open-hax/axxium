@@ -7,6 +7,7 @@
             [axxium.law.did :as did-law]
             [axxium.law.signing :as signing-law]
             [axxium.law.token :as token-law]
+            [clio.shape.edn :as edn]
             [clojure.string :as str]))
 
 (defn- env
@@ -113,6 +114,25 @@
                         {:reason :invalid-mailbox-pilot-allowed-dids})))
       allowed)))
 
+(defn mailbox-actor-bindings
+  "Admit a one-to-one operator-supplied vector of [AT DID, actor DID] pairs."
+  [value]
+  (when (some? value)
+    (let [pairs (when (and (string? value) (<= 1 (count value) 65536))
+                  (try (edn/read-one value) (catch :default _ nil)))]
+      (when-not (and (vector? pairs) (seq pairs)
+                     (every? (fn [pair]
+                               (and (vector? pair) (= 2 (count pair))
+                                    (atproto-law/did? (first pair))
+                                    (did-law/did? (first pair))
+                                    (did-law/web? (second pair))))
+                             pairs)
+                     (= (count pairs) (count (set (map first pairs)))
+                        (count (set (map second pairs)))))
+        (throw (ex-info "AXXIUM_MAILBOX_ACTOR_BINDINGS requires unique AT Protocol and actor DID pairs"
+                        {:reason :invalid-mailbox-actor-bindings})))
+      (into {} pairs))))
+
 (def config
   (let [instance (load-instance)
         webhook-actor (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))]
@@ -163,6 +183,7 @@
      :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
      :mailbox/webhook-actor-did webhook-actor
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
+     :mailbox/actor-bindings (mailbox-actor-bindings (env "AXXIUM_MAILBOX_ACTOR_BINDINGS"))
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))

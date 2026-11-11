@@ -24,7 +24,8 @@
   #js {:getResourceServerInfo
        (fn [_ctx resource client]
          (if (and (law/mailbox-client? config (.-clientId client)) (= mailbox-resource resource))
-           #js {:scope law/mailbox-scope :audience mailbox-resource :accessTokenFormat "opaque"}
+           #js {:scope (str/join " " (law/mailbox-resource-scopes config))
+                :audience mailbox-resource :accessTokenFormat "opaque"}
            (throw (new (.-InvalidTarget errors)))))
        :defaultResource
        (fn [_ctx client requested]
@@ -39,11 +40,17 @@
               (.has (.-resourceIndicators source) mailbox-resource)))})
 
 (defn ^:async current-mailbox-grant!
-  "Require the grant to belong to the currently selected mailbox recipient."
-  [pool {:keys [mailbox-client-id mailbox-resource]} owner grant-id account-id]
-  (when-let [proof (await (store/mailbox-grant-proof! pool grant-id account-id
-                                                    mailbox-client-id mailbox-resource))]
-    (when (= owner (get-in proof [:principal :auth/did])) proof)))
+  "Require the grant to belong to the currently selected mailbox recipient.
+   Actor messaging also requires the seeded actor DID bound at consent."
+  ([pool config owner grant-id account-id]
+   (await (current-mailbox-grant! pool config owner grant-id account-id nil)))
+  ([pool {:keys [mailbox-client-id mailbox-resource mailbox-actor-messaging?]} owner grant-id account-id bound-actor-did]
+   (when (or (nil? bound-actor-did)
+             (and (true? mailbox-actor-messaging?) (law/mailbox-bound-actor-did? bound-actor-did)))
+     (when-let [proof (await (store/mailbox-grant-proof! pool grant-id account-id
+                                                       mailbox-client-id mailbox-resource bound-actor-did))]
+       (when (= owner (get-in proof [:principal :auth/did]))
+         (cond-> proof bound-actor-did (assoc :mailbox/actors? true)))))))
 
 (defn- current-grant!
   "Apply the mailbox's verified-AT parent law to its dedicated client only."
@@ -54,20 +61,24 @@
 
 (defn ^:async mailbox-access-proof!
   "Resolve one opaque resource access token to its current mailbox grant proof."
-  [provider pool {:keys [issuer mailbox-client-id] :as config} owner bearer]
+  [provider pool {:keys [issuer mailbox-client-id] :as config} owner bound-actor-did bearer]
   (when (and mailbox-client-id provider (= issuer (.-issuer provider))
              (string? bearer) (re-matches #"[A-Za-z0-9_-]{1,512}" bearer))
     (when-let [token (await (.find (.-AccessToken provider) bearer))]
       (let [account-id (.-accountId token)
-            grant-id (.-grantId token)]
+            grant-id (.-grantId token)
+            scope (.-scope token)
+            actor-scope? (law/mailbox-actor-scope? scope)]
         (when (and (true? (.-isValid token))
                    (not (.isSenderConstrained token))
+                   (or (not actor-scope?) (law/mailbox-bound-actor-did? bound-actor-did))
                    (law/mailbox-access-claims?
                     config {:client-id (.-clientId token)
                             :token-issuer (some-> token (aget "extra") (aget "iss"))
-                            :audience (.-aud token) :scope (.-scope token)
+                            :audience (.-aud token) :scope scope
                             :account-id account-id :grant-id grant-id}))
-          (await (current-mailbox-grant! pool config owner grant-id account-id)))))))
+          (await (current-mailbox-grant! pool config owner grant-id account-id
+                                         (when actor-scope? bound-actor-did))))))))
 
 (defn- html-escape
   "Encode labels supplied by registered clients and displayed user codes."

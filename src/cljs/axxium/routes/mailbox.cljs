@@ -9,6 +9,7 @@
             [axxium.extern.ledger-queue :as queue]
             [axxium.extern.mailbox-mcp :as rpc]
             [axxium.law.actor :as actor-law]
+            [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox-events :as events]
             [clojure.string :as str]))
 
@@ -102,8 +103,23 @@
         "ping" {:ledger lg :response {"jsonrpc" "2.0" "id" (get body "id") "result" {}}}
         (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
+(defn- ^:async submit-operation!
+  [writer path oauth proof ctx body bindings]
+  (let [submit (fn [ctx]
+                 (queue/submit! writer path
+                                (fn ^:async apply-mailbox [lg]
+                                  (if (await (active-proof! oauth proof))
+                                    (operation lg (assoc ctx :now (secrets/now)) body)
+                                    {:unauthenticated? true}))))]
+    (if (and bindings (or (nil? (:oauth/grant-id proof)) (:mailbox/actors? proof)))
+      ;; Identity is acquired before mailbox. Keep it through the durable append
+      ;; so a completed actor suspension cannot race an authorized send.
+      (:result (await (identity/with-current-actor-state!
+                       (fn [st] (submit (assoc ctx :directory/state st :directory/bindings bindings))))))
+      (await (submit ctx)))))
+
 (defn- ^:async post-mailbox!
-  [writer path resource runtime oauth resource-metadata req reply {:keys [principal cred-id] :as proof}]
+  [writer path resource runtime oauth bindings resource-metadata req reply {:keys [principal cred-id] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
         sid (http/header req "mcp-session-id")
@@ -137,14 +153,11 @@
                  :session/push-supported? false
                  :events/enabled? (events/enabled? runtime proof)
                  :events/only? (some? (:oauth/grant-id proof))
+                 :mailbox/actors? (:mailbox/actors? proof)
                  :audience resource}
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
-                  (await (events/execute! runtime proof ctx body))
-                  (await (queue/submit! writer path
-                           (fn ^:async apply-mailbox [lg]
-                             (if (await (active-proof! oauth proof))
-                               (operation lg (assoc ctx :now (secrets/now)) body)
-                               {:unauthenticated? true})))))]
+                  (await (events/execute! runtime (dissoc proof :mailbox/actors?) ctx body))
+                  (await (submit-operation! writer path oauth proof ctx body bindings)))]
         (cond
           (:unauthenticated? out) (require-auth! reply resource-metadata)
 
@@ -163,30 +176,37 @@
   "Mount only when a dedicated mailbox ledger is explicitly configured."
   ([app] (register-mailbox-routes! app nil))
   ([app oauth]
-  (when-let [path (cfg/get-in-config [:mailbox/ledger-file])]
-    (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
-          resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
-          owner (cfg/get-in-config [:mailbox/webhook-actor-did])
-          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
-          webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
-          storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file])
-                                                     (cfg/get-in-config [:github-identity/ledger-file])]
-                                              (some? owner))
-          writer (queue/create storage)
-          runtime (events/install! app writer path owner webhook-key-file (partial active-proof! oauth))
-          no-stream (authorized origin oauth resource-metadata allowed-dids
-                                (fn [_ reply _]
-                                  (http/set-header! reply "Allow" "POST")
-                                  (http/send-empty! reply 405)))]
-      (when oauth
-        (http/get! app resource-metadata-path
-                   (fn [_ reply]
-                     (http/send-secret! reply 200 {"resource" (:resource oauth)
-                                                    "authorization_servers" [(:issuer oauth)]
-                                                    "scopes_supported" [(:scope oauth)]
-                                                    "bearer_methods_supported" ["header"]}))))
-      (http/post! app endpoint
-                  (authorized origin oauth resource-metadata allowed-dids
-                              (partial post-mailbox! writer path (:resource origin) runtime oauth resource-metadata)))
-      (http/get! app endpoint no-stream)
-      (http/delete! app endpoint no-stream)))))
+   (let [path (cfg/get-in-config [:mailbox/ledger-file])
+         identity-path (cfg/get-in-config [:github-identity/ledger-file])
+         bindings (cfg/get-in-config [:mailbox/actor-bindings])
+         allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])]
+     (when (or (and bindings (or (not path) allowed-dids (str/blank? identity-path)))
+               (and (:actor-messaging? oauth) (not bindings)))
+       (throw (ex-info "Mailbox actor messaging requires both ledgers and explicit bindings, outside the two-actor pilot"
+                       {:reason :invalid-mailbox-actor-messaging-config})))
+     (when path
+       (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
+             resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
+             owner (cfg/get-in-config [:mailbox/webhook-actor-did])
+             webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
+             storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file]) identity-path]
+                                                  (some? owner))
+             writer (queue/create storage)
+             runtime (events/install! app writer path owner webhook-key-file (partial active-proof! oauth))
+             no-stream (authorized origin oauth resource-metadata allowed-dids
+                                   (fn [_ reply _]
+                                     (http/set-header! reply "Allow" "POST")
+                                     (http/send-empty! reply 405)))]
+         (when oauth
+           (http/get! app resource-metadata-path
+                      (fn [_ reply]
+                        (http/send-secret! reply 200 {"resource" (:resource oauth)
+                                                       "authorization_servers" [(:issuer oauth)]
+                                                       "scopes_supported" (or (:scopes oauth) [(:scope oauth)])
+                                                       "bearer_methods_supported" ["header"]}))))
+         (http/post! app endpoint
+                     (authorized origin oauth resource-metadata allowed-dids
+                                 (partial post-mailbox! writer path (:resource origin) runtime oauth bindings
+                                          resource-metadata)))
+         (http/get! app endpoint no-stream)
+         (http/delete! app endpoint no-stream))))))

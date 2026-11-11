@@ -205,22 +205,41 @@
 (defn- ^:async mailbox-proof-boundary* []
   (let [calls (atom [])
         admitted? (atom true)
+        actor-scope? (atom true)
+        pins (atom {})
         did "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa"
+        bound-actor-did "did:web:fixture.example:actors:owner:work"
         credential "00000000-0000-4000-8000-000000000001"
         digest (apply str (repeat 64 "a"))
         resource "https://fixture.example/api/mailbox/mcp"
         proof {:principal {:auth/did did :auth/method :atproto}
                :actor-id "actor" :cred-id credential :token-hash digest}
         pool #js {:query
-                  (fn [sql params]
-                    (swap! calls conj [sql (vec (array-seq params))])
-                    (js/Promise.resolve
-                     #js {:rowCount (if @admitted? 1 0)
-                          :rows (if (and @admitted? (.startsWith sql "SELECT"))
-                                  #js [#js {:mailbox_did did :mailbox_cred_id credential :token_hash digest}]
-                                  #js [])}))}
+                  (fn [query params]
+                    (let [read? (not (string? query))
+                          sql (if read? (.-text query) query)
+                          params (if read? (.-values query) params)
+                          values (vec (array-seq params))
+                          grant (first values)
+                          required-actor-did (when read? (get values 6))
+                          new-pin (when-not read? (get values 8))
+                          admitted (and @admitted?
+                                        (or (nil? required-actor-did)
+                                            (and @actor-scope? (= required-actor-did (get @pins grant))))
+                                        (or (nil? new-pin) @actor-scope?))]
+                      (when read?
+                        (is (= 2000 (.-query_timeout query))))
+                      (swap! calls conj [sql values])
+                      (when (and admitted new-pin) (swap! pins assoc grant new-pin))
+                      (js/Promise.resolve
+                       #js {:rowCount (if admitted 1 0)
+                            :rows (if (and admitted read?)
+                                    #js [#js {:mailbox_did did :mailbox_cred_id credential :token_hash digest}]
+                                    #js [])})))}
         bind! (fn [candidate] (store/bind-mailbox-session! pool "grant" candidate "client" resource))
-        read! #(store/mailbox-grant-proof! pool % "actor" "client" resource)]
+        read! #(store/mailbox-grant-proof! pool % "actor" "client" resource)
+        read-actors! #(store/mailbox-grant-proof! pool %1 "actor" "client" resource %2)
+        expected (assoc proof :oauth/grant-id "grant" :oauth/client-id "client" :oauth/resource resource)]
     (doseq [invalid [(assoc-in proof [:principal :auth/method] :service-token)
                      (assoc proof :cred-id "different")
                      (assoc proof :token-hash "raw bearer")]]
@@ -233,9 +252,25 @@
     (is (= ["grant" "actor" "client" resource "mailbox:events" credential digest did]
            (second (first @calls))))
     (is (.includes (ffirst @calls) "ON CONFLICT(grant_id) DO NOTHING"))
-    (is (= (assoc proof :oauth/grant-id "grant" :oauth/client-id "client" :oauth/resource resource)
-           (await (read! "grant"))))
+    (is (= expected (await (read! "grant"))))
     (is (= ["grant" "actor" "client" resource "mailbox:events"] (second (last @calls))))
+    (is (nil? (await (read-actors! "grant" bound-actor-did))))
+    (await (store/bind-mailbox-session! pool "scoped" proof "client" resource bound-actor-did))
+    (let [[sql params] (last @calls)]
+      (is (= ["scoped" "actor" "client" resource "mailbox:events" credential digest did
+              bound-actor-did "mailbox:actors"] params))
+      (is (.includes sql "mailbox_actor_did"))
+      (is (.includes sql "$10::text=ANY(string_to_array(g.payload->'resources'")))
+    (is (= (assoc expected :oauth/grant-id "scoped") (await (read-actors! "scoped" bound-actor-did))))
+    (let [[sql params] (last @calls)]
+      (is (= ["scoped" "actor" "client" resource "mailbox:events" "mailbox:actors" bound-actor-did] params))
+      (is (.includes sql "$6::text=ANY(string_to_array(g.payload->'resources'"))
+      (is (.includes sql "$6::text=ANY(string_to_array(g.payload->'rejected'->'resources'"))
+      (is (.includes sql "b.mailbox_actor_did=$7")))
+    (is (nil? (await (read-actors! "scoped" "did:web:fixture.example:actors:another:work"))))
+    (reset! actor-scope? false)
+    (is (nil? (await (read-actors! "scoped" bound-actor-did))))
+    (is (= expected (await (read! "grant"))))
     (doseq [[sql] @calls]
       (is (.includes sql "p.provider='atproto'"))
       (is (.includes sql "g.payload->'rejected'->'resources'"))

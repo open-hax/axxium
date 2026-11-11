@@ -69,6 +69,12 @@
 (defn- serialized [f]
   (ledger-queue/submit! ledger-writer (ledger-path) f))
 
+(defn with-current-actor-state!
+  "Run f against the admitted actor tree before another identity write can commit."
+  [f]
+  (serialized (fn ^:async inspect-actor-state [lg]
+                {:result (await (f (state/fold lg)))})))
+
 (defn- deps [lg]
   {:fetch gh/fetch! :token-key (token-key) :ledger lg :ids mcp/event-ids :cache token-cache
    :key-dir (cfg/get-in-config [:github-identity/key-dir])})

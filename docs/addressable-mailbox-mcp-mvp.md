@@ -131,3 +131,37 @@ session. The scoped bearer can discover and manage events and use `whoami`.
 Direct AT Protocol credentials continue to authorize the mailbox tools.
 Provider revocation or loss of the parent session or DID binding stops future
 delivery for that OAuth grant.
+
+### Owner-scoped actor discovery and messaging
+
+An operator can opt a mailbox deployment into owner-scoped routing with
+`AXXIUM_MAILBOX_ACTOR_BINDINGS`. Set it to an EDN vector of pairs such as
+`[["did:plc:aaaaaaaaaaaaaaaaaaaaaaaa" "did:web:example.test:actors:owner:work"]]`.
+Each pair binds a verified AT Protocol mailbox DID to an exact existing Axxium
+actor DID. Both sides must be unique. Configure the mailbox ledger and the
+identity tree ledger in the same Axxium instance. Keep the bindings in its
+host-local configuration. Changes take effect on restart. Existing two-DID
+pilots use their original configuration.
+
+`discover_actors` lists the reachable actors in the authenticated caller’s
+human-owned tree. It returns each actor’s DID, name, kind and `mailbox_did`.
+Use `mailbox_did` as the `to` argument for `send_message`. A reachable actor
+must be active through every ancestor and own a registered mailbox. The
+directory follows recorded parent links, including when actors use older DID
+spellings. A recipient’s explicit send revocation still takes effect.
+
+`resolve_address` and `send_message` check the same relationship. The server
+checks it again for retries before returning a prior receipt. The caller acts
+as its own verified mailbox identity. This grants no sibling inbox access,
+acknowledgment, credential access, or actor management.
+
+For the registered Work client, opt in with `:mailbox-actor-messaging? true`
+in the private OIDC authority configuration. Request `mailbox:actors`
+alongside `mailbox:events` and complete fresh consent. Work can then call
+`discover_actors`, `resolve_address`, and `send_message`. Existing event-only
+grants retain their existing tools. The new grant is pinned to the actor DID
+configured at consent. Changing that binding requires fresh consent for
+actor messaging. Direct AT Protocol clients, including Codex, can use the
+directory with their verified session and continue to poll their own inbox.
+Bindings and mailbox registrations are provisioned separately. An actor
+with no registered mailbox does not appear in discovery.

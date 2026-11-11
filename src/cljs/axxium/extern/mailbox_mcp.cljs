@@ -23,6 +23,8 @@
   [(tool "whoami" "The authenticated actor and session." {} [] read-hints)
    (tool "open_session" "Bind a session to this actor and audience; push only if the client declares it."
          {"audience" str-schema "ttl_ms" {"type" "integer"} "push" {"type" "boolean"}} ["audience" "ttl_ms"] {})
+   (tool "discover_actors" "List reachable mailbox actors under your human owner. Use mailbox_did to send."
+         {} [] read-hints)
    (tool "resolve_address" "Resolve a DID or mbox/<did> to a mailbox." {"address" str-schema} ["address"] read-hints)
    (tool "send_message" "Send to a mailbox. Repeating an idempotency key with the same body returns the original receipt."
          {"to" str-schema "from" str-schema "idempotency_key" str-schema "body" {"type" "object"}}
@@ -93,6 +95,15 @@
 (defn- tool-error-message [error]
   (str (name error) ": " (get error-actions error "Check the tool arguments and retry with an authorized session.")))
 
+(def ^:private actor-messaging-tools #{"discover_actors" "resolve_address" "send_message"})
+
+(defn- tool-allowed? [ctx name]
+  (let [directory? (contains? ctx :directory/bindings)]
+    (if (:events/only? ctx)
+      (or (= name "whoami")
+          (and directory? (:mailbox/actors? ctx) (contains? actor-messaging-tools name)))
+      (or directory? (not= name "discover_actors")))))
+
 (defn- rpc-request
   "Evaluate a request; the public adapter suppresses notification responses."
   [lg ctx {:strs [id method params]}]
@@ -109,12 +120,10 @@
 
     (= method "tools/list")
     {:ledger lg :response {"jsonrpc" "2.0" "id" id
-                           "result" {"tools" (if (:events/only? ctx)
-                                               (filterv #(= "whoami" (get % "name")) tool-descriptors)
-                                               tool-descriptors)}}}
+                           "result" {"tools" (filterv #(tool-allowed? ctx (get % "name")) tool-descriptors)}}}
 
-    (and (= method "tools/call") (:events/only? ctx) (not= "whoami" (get params "name")))
-    {:ledger lg :response (rpc-error id -32001 "Mailbox event scope does not grant this tool")}
+    (and (= method "tools/call") (not (tool-allowed? ctx (get params "name"))))
+    {:ledger lg :response (rpc-error id -32001 "Mailbox access does not grant this tool")}
 
     (= method "tools/call")
     (let [tool-name (get params "name")

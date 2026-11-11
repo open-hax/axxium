@@ -4,13 +4,17 @@
             [axxium.auth.token :as token]
             [axxium.config :as cfg]
             [axxium.db :as db]
+            [axxium.domain.github-identity :as gi]
             [axxium.domain.kernel-fixture :as fixture]
+            [axxium.domain.state :as state]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.fastify :as fastify]
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.signing-key :as signing]
+            [axxium.law.github-identity :as identity-law]
+            [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox :as routes]
             [clojure.string :as str]
             [cljs.test :refer [async deftest is]]
@@ -88,7 +92,7 @@
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
-                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     cfg/get-in-config (fn [ks]
                                         (case (first ks)
                                           :mailbox/ledger-file ledger
@@ -248,7 +252,7 @@
       (fs/writeFileSync ledger "" #js {:mode 384})
       (fs/writeFileSync key-file (.toString (js/Buffer.alloc 32 8) "base64") #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
-                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     http/on-interval! (fn [_ _ f] (reset! tick f))
                     webhook/verify! (fn ([_] (verify)) ([_ _] (verify)))
                     webhook/deliver! (fn ([_ event] (deliver event)) ([_ _ event] (deliver event)))
@@ -374,5 +378,89 @@
 (deftest opted-in-mailbox-webhook-survives-restart-and-rechecks-access
   (async done
     (-> (verify-webhook*)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(defn- ^:async verify-actor-messaging* []
+  (let [keys (await (signing/generate-ephemeral!))
+        dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-actors-"))
+        ledger (path/join dir "ledger.edn")
+        actor-ledger (path/join dir "actors.edn")
+        root "did:web:axxium.test:actors:owner"
+        work (str root ":work")
+        codex (str root ":codex")
+        policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
+        directory (atom (state/fold (:ledger (gi/seed-ledger
+                                  (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
+                                                    :nodes [{:id work :parent root :name "Work" :kind :agent :policy policy}
+                                                            {:id codex :parent root :name "Codex" :kind :agent :policy policy}]}
+                                                   "axxium.test")
+                                  (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id)
+                                          :at fixture/t0})))))
+        bindings {fixture/alice work fixture/bob codex}
+        live (atom {})
+        app (atom nil)
+        config cfg/get-in-config
+        scoped? (atom true)
+        proof {:principal {:auth/did fixture/alice :auth/method :atproto}
+               :oauth/grant-id "fixture" :oauth/client-id "chatgpt-fixture" :oauth/resource audience}
+        oauth {:issuer (str origin "/oidc") :resource audience :scope "mailbox:events"
+               :scopes ["mailbox:events" "mailbox:actors"] :actor-messaging? true
+               :access-proof! #(case %
+                                 "events-only" proof
+                                 "actor-access" (cond-> proof @scoped? (assoc :mailbox/actors? true))
+                                 nil)
+               :active-grant? #(or (not (:mailbox/actors? %)) @scoped?)}]
+    (try
+      (fs/writeFileSync ledger "" #js {:mode 384})
+      (with-redefs [signing/current! (constantly keys)
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
+                    identity/with-current-actor-state! (fn ^:async read-identity [f]
+                                                        {:result (await (f @directory))})
+                    cfg/get-in-config (fn [ks]
+                                        (case (first ks)
+                                          :mailbox/ledger-file ledger
+                                          :mailbox/actor-bindings bindings
+                                          :github-identity/ledger-file actor-ledger
+                                          :axxium/public-base-url origin
+                                          (config ks)))]
+        (reset! app (await (start-app! oauth)))
+        (let [bob (:bearer (await (mint-fixture! live "actor_22222222-2222-4222-8222-222222222222"
+                                                (secrets/secure-id) fixture/bob)))
+              initialize (fn [bearer] (request! @app "POST" bearer nil (rpc "initialize") {}))
+              bob-session (:sid (await (initialize bob)))
+              scoped-session (:sid (await (initialize "actor-access")))
+              run (fn [bearer sid body] (request! @app "POST" bearer sid body {}))
+              call (fn [body] (run "actor-access" scoped-session body))
+              event-call (fn [body] (run "events-only" scoped-session body))
+              list-names (fn [response] (mapv #(get % "name") (get-in response [:data "result" "tools"])))
+              discover (tool "discover_actors" {})
+              send (tool "send_message" {"to" fixture/bob "idempotency_key" "work-fixture"
+                                         "body" {"text" "hello"}})]
+          (await (run bob bob-session (tool "register_mailbox" {})))
+          (is (= ["whoami"] (list-names (await (event-call (rpc "tools/list"))))))
+          (is (= #{"whoami" "discover_actors" "resolve_address" "send_message"}
+                 (set (list-names (await (call (rpc "tools/list")))))))
+          (is (= -32001 (get-in (await (call (tool "read_inbox" {}))) [:data "error" "code"])))
+          (is (= -32001 (get-in (await (event-call send)) [:data "error" "code"])))
+          (is (= [{"did" codex "name" "Codex" "kind" "agent" "mailbox_did" fixture/bob}]
+                 (get (result (await (call discover))) "actors")))
+          (is (= "accepted" (get (result (await (call send))) "accepted")))
+          (is (= "hello" (get-in (result (await (run bob bob-session (tool "read_inbox" {}))))
+                                 ["messages" 0 "message_body" "text"])))
+          (swap! directory assoc-in [:resources (identity-law/actor-resource-id codex)
+                                     :resource/metadata :actor/status] :suspended)
+          (is (= [] (get (result (await (call discover))) "actors")))
+          (is (true? (get-in (await (call send)) [:data "result" "isError"]))
+              "A suspended recipient cannot be recovered through an accepted retry.")
+          (reset! scoped? false)
+          (is (= ["whoami"] (list-names (await (call (rpc "tools/list"))))))))
+      (finally
+        (when @app (await (.close (:app @app))))
+        (fs/rmSync dir #js {:recursive true})))))
+
+(deftest scoped-oauth-discovers-and-sends-without-acquiring-inbox-access
+  (async done
+    (-> (verify-actor-messaging*)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))

@@ -36,6 +36,14 @@
   (-> (query! conn sql-str params)
       (.then (fn [{:keys [rows]}] (first rows)))))
 
+(defn query-auth-proof!
+  "Bound a read-only authorization query on the runtime pool. A timed-out
+   query rejects and the pool discards its client."
+  [pool sql-str params]
+  (let [query #js {:text sql-str :values (into-array params) :query_timeout 2000}]
+    (-> (.query pool query)
+        (.then (fn [result] (first (:rows (keywordize-rows result))))))))
+
 (defn- ensure-active! [stopping?]
   (when (and stopping? (stopping?))
     (throw (js/Error. "Axxium schema initialization interrupted"))))

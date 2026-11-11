@@ -1,11 +1,33 @@
 (ns axxium.law.oidc
   "Registered browser-client and private signing configuration contracts."
-  (:require [axxium.law.relay :as relay]
+  (:require [axxium.law.did :as did]
+            [axxium.law.relay :as relay]
+            [clojure.string :as str]
             [malli.core :as m]))
 
 (def mailbox-scope
-  "The only resource scope granted to the dedicated mailbox client."
+  "The required event resource scope for the dedicated mailbox client."
   "mailbox:events")
+
+(def mailbox-actors-scope
+  "Opt-in discovery and messaging within the configured human's actor tree."
+  "mailbox:actors")
+
+(defn mailbox-resource-scopes
+  "Resource scopes offered by the trusted mailbox client configuration."
+  [{:keys [mailbox-actor-messaging?]}]
+  (cond-> [mailbox-scope]
+    (true? mailbox-actor-messaging?) (conj mailbox-actors-scope)))
+
+(defn mailbox-actor-scope?
+  "Check whether a space-delimited opaque token scope includes actor messaging."
+  [scope]
+  (and (string? scope) (boolean (some #{mailbox-actors-scope} (str/split scope #" ")))))
+
+(defn mailbox-bound-actor-did?
+  "Admit a bounded seeded actor DID to pin the actor-messaging grant."
+  [value]
+  (and (did/web? value) (<= (count value) 2048)))
 
 (def registry
   "Named input contracts; private keys and client secrets stay in server config."
@@ -27,6 +49,7 @@
              [:device-flow-enabled? {:optional true} :boolean]
              [:mailbox-client-id {:optional true} [:ref ::id]]
              [:mailbox-resource {:optional true} [:ref ::uri]]
+             [:mailbox-actor-messaging? {:optional true} :boolean]
              [:node-grants {:optional true} [:vector {:max 64} relay/grant-schema]]]})
 
 (defn mailbox-client?
@@ -36,8 +59,8 @@
        (= mailbox-client-id client-id)))
 
 (defn- mailbox-client-configured?
-  [{:keys [clients mailbox-client-id mailbox-resource] :as config}]
-  (or (and (nil? mailbox-client-id) (nil? mailbox-resource))
+  [{:keys [clients mailbox-client-id mailbox-resource mailbox-actor-messaging?] :as config}]
+  (or (and (nil? mailbox-client-id) (nil? mailbox-resource) (not mailbox-actor-messaging?))
       (some (fn [{:keys [id redirect-uris device-enabled?]}]
               (and (mailbox-client? config id)
                    (= 1 (count redirect-uris))
@@ -62,25 +85,28 @@
   "Admit only verified token claims for the exact client, issuer and resource."
   [{:keys [issuer mailbox-resource] :as config}
    {:keys [client-id token-issuer audience scope account-id grant-id]}]
-  (and (mailbox-client? config client-id)
-       (= issuer token-issuer)
-       (= mailbox-resource audience)
-       (= mailbox-scope scope)
-       (every? #(and (string? %) (<= 1 (count %) 2048)) [account-id grant-id])))
+  (let [scopes (when (string? scope) (set (str/split scope #" ")))]
+    (and (mailbox-client? config client-id)
+         (= issuer token-issuer)
+         (= mailbox-resource audience)
+         (contains? scopes mailbox-scope)
+         (every? (set (mailbox-resource-scopes config)) scopes)
+         (every? #(and (string? %) (<= 1 (count %) 2048)) [account-id grant-id]))))
 
 (defn- consent-scopes?
-  [scopes mailbox-client?]
+  [scopes mailbox-client? config]
   (and (vector? scopes)
        (some #{"openid"} scopes)
        (if mailbox-client?
          (and (some #{mailbox-scope} scopes)
-              (every? #{"openid" "profile" "mailbox:events"} scopes))
+              (every? (into #{"openid" "profile"} (mailbox-resource-scopes config)) scopes))
          (every? #{"openid" "profile"} scopes))))
 
 (defn interaction-admission
   "Admit only a current principal's exact interaction and bounded profile scope.
    Context contains decoded scalars, never request objects or provider handles."
-  [{:keys [expected-uid actual-uid actor-id session-actor-id prompt decision scopes claims mailbox-client?]}]
+  [{:keys [expected-uid actual-uid actor-id session-actor-id prompt decision scopes claims mailbox-client?]
+    :as context}]
   (cond
     (or (not (and (string? expected-uid) (re-matches #"[A-Za-z0-9_-]{1,128}" expected-uid)))
         (not= expected-uid actual-uid))
@@ -95,7 +121,7 @@
     (not= "consent" prompt)
     {:decision :refuse :status 409}
 
-    (not (and (consent-scopes? scopes mailbox-client?)
+    (not (and (consent-scopes? scopes mailbox-client? context)
               (vector? claims) (every? #{"sub" "name"} claims)))
     {:decision :refuse :status 403}
 

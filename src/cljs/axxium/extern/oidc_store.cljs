@@ -4,6 +4,7 @@
   (:require [axxium.extern.pg :as pg]
             [axxium.law.actor :as actor]
             [axxium.law.device-polling :as polling]
+            [axxium.law.oidc :as oidc]
             [axxium.law.principal :as principal]
             ["oidc-provider" :refer [errors]]))
 
@@ -22,7 +23,8 @@
         " ADD COLUMN IF NOT EXISTS mailbox_cred_id uuid,"
         " ADD COLUMN IF NOT EXISTS mailbox_did text,"
         " ADD COLUMN IF NOT EXISTS mailbox_client_id text,"
-        " ADD COLUMN IF NOT EXISTS mailbox_resource text")
+        " ADD COLUMN IF NOT EXISTS mailbox_resource text,"
+        " ADD COLUMN IF NOT EXISTS mailbox_actor_did text")
    "CREATE INDEX IF NOT EXISTS axxium_oidc_binding_expiry ON axxium_oidc_grant_sessions (expires_at)"])
 
 (defn ^:async cleanup-expired!
@@ -85,61 +87,77 @@
     (when-not (= 1 (:row-count result))
       (throw (new (.-InvalidGrant errors) "A current root session is required")))))
 
-(def ^:private mailbox-scope "mailbox:events")
+(defn- mailbox-scope-condition [parameter]
+  ;; oidc-provider stores resource scopes as space-delimited strings. Its
+  ;; effective scope excludes rejected entries, even when also listed as granted.
+  (str " AND " parameter "::text=ANY(string_to_array(g.payload->'resources'->>$4::text,' '))"
+       " AND NOT COALESCE(" parameter "::text=ANY(string_to_array(g.payload->'rejected'->'resources'->>$4::text,' ')),false)"))
 
 (def ^:private mailbox-grant-join
-  ;; oidc-provider persists Resource scopes as space-delimited strings keyed
-  ;; by resource. Mirror its effective scope check, including rejections.
   (str " JOIN axxium_oidc_records g ON g.model='Grant' AND g.id=$1"
        " AND g.expires_at>clock_timestamp()"
        " AND g.payload->>'accountId'=$2 AND g.payload->>'clientId'=$3"
-       " AND $5::text=ANY(string_to_array(g.payload->'resources'->>$4::text,' '))"
-       " AND NOT COALESCE($5::text=ANY(string_to_array(g.payload->'rejected'->'resources'->>$4::text,' ')),false)"))
+       (mailbox-scope-condition "$5")))
 
 (defn ^:async bind-mailbox-session!
   "Bind a fresh resource grant to the verified AT Protocol proof. Insert the
-   ordinary parent binding and the mailbox provenance in one statement."
-  [pool grant-id {:keys [principal actor-id cred-id token-hash]} client-id resource]
-  (doseq [value [grant-id actor-id client-id resource]] (require-key! value))
-  (when-not (and (principal/authenticated? principal)
-                 (= :atproto (:auth/method principal))
-                 (actor/valid-credential-id? cred-id)
-                 (string? token-hash) (re-matches #"[0-9a-f]{64}" token-hash))
-    (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required")))
-  (let [result
-        (await (pg/query! pool
-                 (str "INSERT INTO axxium_oidc_grant_sessions"
-                      "(grant_id,actor_id,token_hash,expires_at,mailbox_cred_id,mailbox_did,mailbox_client_id,mailbox_resource)"
-                      " SELECT $1,a.id,s.token_hash,"
-                      " LEAST(s.expires_at,g.expires_at,clock_timestamp()+interval '1 day'),s.id,p.subject,$3,$4"
-                      " FROM actors a JOIN sessions s ON s.actor_id=a.id"
-                      " JOIN provider_bindings p ON p.actor_id=a.id AND p.provider='atproto' AND p.subject=$8"
-                      mailbox-grant-join
-                      " WHERE a.id=$2 AND a.status='active' AND s.id=$6::uuid"
-                      " AND s.token_hash=$7 AND s.expires_at>clock_timestamp()"
-                      " LIMIT 1 ON CONFLICT(grant_id) DO NOTHING")
-                 [grant-id actor-id client-id resource mailbox-scope cred-id token-hash (:auth/did principal)]))]
-    (when-not (= 1 (:row-count result))
-      (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required")))))
+   parent binding and mailbox provenance in one statement, pinning the seeded
+   actor DID only for a grant that includes actor messaging."
+  ([pool grant-id proof client-id resource]
+   (await (bind-mailbox-session! pool grant-id proof client-id resource nil)))
+  ([pool grant-id {:keys [principal actor-id cred-id token-hash]} client-id resource bound-actor-did]
+   (doseq [value [grant-id actor-id client-id resource]] (require-key! value))
+   (when-not (and (principal/authenticated? principal)
+                  (= :atproto (:auth/method principal))
+                  (actor/valid-credential-id? cred-id)
+                  (string? token-hash) (re-matches #"[0-9a-f]{64}" token-hash)
+                  (or (nil? bound-actor-did) (oidc/mailbox-bound-actor-did? bound-actor-did)))
+     (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required")))
+   (let [result
+         (await (pg/query! pool
+                  (str "INSERT INTO axxium_oidc_grant_sessions"
+                       "(grant_id,actor_id,token_hash,expires_at,mailbox_cred_id,mailbox_did,mailbox_client_id,mailbox_resource"
+                       (when bound-actor-did ",mailbox_actor_did") ")"
+                       " SELECT $1,a.id,s.token_hash,"
+                       " LEAST(s.expires_at,g.expires_at,clock_timestamp()+interval '1 day'),s.id,p.subject,$3,$4"
+                       (when bound-actor-did ",$9")
+                       " FROM actors a JOIN sessions s ON s.actor_id=a.id"
+                       " JOIN provider_bindings p ON p.actor_id=a.id AND p.provider='atproto' AND p.subject=$8"
+                       mailbox-grant-join
+                       (when bound-actor-did (mailbox-scope-condition "$10"))
+                       " WHERE a.id=$2 AND a.status='active' AND s.id=$6::uuid"
+                       " AND s.token_hash=$7 AND s.expires_at>clock_timestamp()"
+                       " LIMIT 1 ON CONFLICT(grant_id) DO NOTHING")
+                  (cond-> [grant-id actor-id client-id resource oidc/mailbox-scope cred-id token-hash (:auth/did principal)]
+                    bound-actor-did (conj bound-actor-did oidc/mailbox-actors-scope))))]
+     (when-not (= 1 (:row-count result))
+       (throw (new (.-InvalidGrant errors) "A current AT Protocol root session is required"))))))
 
 (defn ^:async mailbox-grant-proof!
   "Read the exact current mailbox OAuth proof. Missing/revoked grants, actors,
-   root sessions or provider bindings return nil. Never load a bearer value."
-  [pool grant-id actor-id client-id resource]
-  (when (every? valid-key? [grant-id actor-id client-id resource])
-    (when-let [{:keys [mailbox_cred_id mailbox_did token_hash]}
-               (await (pg/query-one! pool
-                        (str "SELECT b.mailbox_cred_id::text AS mailbox_cred_id,b.mailbox_did,b.token_hash"
-                             " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
-                             " JOIN sessions s ON s.actor_id=b.actor_id AND s.id=b.mailbox_cred_id AND s.token_hash=b.token_hash"
-                             " JOIN provider_bindings p ON p.actor_id=b.actor_id AND p.provider='atproto' AND p.subject=b.mailbox_did"
-                             mailbox-grant-join
-                             " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
-                             " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'")
-                        [grant-id actor-id client-id resource mailbox-scope]))]
-      (when-let [proof (principal/from-atproto-session mailbox_did)]
-        {:principal proof :actor-id actor-id :cred-id mailbox_cred_id :token-hash token_hash
-         :oauth/grant-id grant-id :oauth/client-id client-id :oauth/resource resource}))))
+   root sessions or provider bindings return nil. A scoped request also needs
+   the current actor scope and the same seeded actor DID bound at consent."
+  ([pool grant-id actor-id client-id resource]
+   (await (mailbox-grant-proof! pool grant-id actor-id client-id resource nil)))
+  ([pool grant-id actor-id client-id resource bound-actor-did]
+   (when (and (every? valid-key? [grant-id actor-id client-id resource])
+              (or (nil? bound-actor-did) (oidc/mailbox-bound-actor-did? bound-actor-did)))
+     (when-let [{:keys [mailbox_cred_id mailbox_did token_hash]}
+                (await (pg/query-auth-proof! pool
+                         (str "SELECT b.mailbox_cred_id::text AS mailbox_cred_id,b.mailbox_did,b.token_hash"
+                              " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
+                              " JOIN sessions s ON s.actor_id=b.actor_id AND s.id=b.mailbox_cred_id AND s.token_hash=b.token_hash"
+                              " JOIN provider_bindings p ON p.actor_id=b.actor_id AND p.provider='atproto' AND p.subject=b.mailbox_did"
+                              mailbox-grant-join
+                              (when bound-actor-did (mailbox-scope-condition "$6"))
+                              " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
+                              " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'"
+                              (when bound-actor-did " AND b.mailbox_actor_did=$7"))
+                         (cond-> [grant-id actor-id client-id resource oidc/mailbox-scope]
+                           bound-actor-did (conj oidc/mailbox-actors-scope bound-actor-did))))]
+       (when-let [proof (principal/from-atproto-session mailbox_did)]
+         {:principal proof :actor-id actor-id :cred-id mailbox_cred_id :token-hash token_hash
+          :oauth/grant-id grant-id :oauth/client-id client-id :oauth/resource resource})))))
 
 (defn ^:async session-grant-active?
   "Check current actor and root-session state before grant reuse/introspection."

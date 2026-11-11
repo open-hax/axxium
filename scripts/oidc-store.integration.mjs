@@ -7,7 +7,7 @@ import { createServer } from 'node:net';
 import { Pool } from 'pg';
 import { runHttpFixture } from './oidc-http.fixture.mjs';
 import { runAuthorityFixture } from './oidc-protocol.fixture.mjs';
-import { initialize, adapterFactory, createProvider, bindSession, sessionGrantActive, installHttp } from '../target/oidc-store/store.js';
+import { initialize, adapterFactory, createProvider, bindSession, sessionGrantActive, installHttp, bindMailbox, mailboxGrantActive } from '../target/oidc-store/store.js';
 
 // Owned, empty cluster only. No existing service database or credentials used.
 const pgBin = process.env.AXXIUM_TEST_PG_BIN || '/usr/lib/postgresql/16/bin';
@@ -24,6 +24,58 @@ function run(command, args) {
   const result = spawnSync(join(pgBin, command), args, { encoding: 'utf8' });
   assert.equal(result.status, 0, `${command} failed: ${result.stderr || result.stdout}`);
 }
+
+async function verifyMailboxActorGrant(pool) {
+  const account = 'synthetic-mailbox-owner';
+  const client = 'synthetic-work';
+  const resource = 'https://axxium.example/api/mailbox/mcp';
+  const mailboxDid = 'did:plc:aaaaaaaaaaaaaaaaaaaaaaaa';
+  const actorDid = 'did:web:axxium.example:actors:owner:work';
+  const otherActorDid = 'did:web:axxium.example:actors:another:work';
+  const credential = '43ae8260-032c-40f3-a2eb-e4edcd8a0985';
+  const digest = 'b'.repeat(64);
+  await pool.query('ALTER TABLE sessions ADD COLUMN id uuid; CREATE TABLE provider_bindings(actor_id text,provider text,subject text)');
+  await pool.query("INSERT INTO actors VALUES($1,'active')", [account]);
+  await pool.query("INSERT INTO sessions(actor_id,token_hash,expires_at,id) VALUES($1,$2,clock_timestamp()+interval '1 hour',$3)", [account, digest, credential]);
+  await pool.query("INSERT INTO provider_bindings VALUES($1,'atproto',$2)", [account, mailboxDid]);
+
+  const Grant = new (adapterFactory(pool))('Grant');
+  const payload = scope => ({ accountId: account, clientId: client, resources: { [resource]: scope } });
+  const bind = (id, did) => bindMailbox(pool, id, account, credential, digest, mailboxDid, client, resource, did);
+  const active = (id, did) => mailboxGrantActive(pool, id, account, client, resource, did);
+  const legacy = 'mailbox-events-only';
+  const scoped = 'mailbox-actor-messaging';
+  await Grant.upsert(legacy, payload('mailbox:events'), 300);
+  await bind(legacy, null);
+  assert.equal(await active(legacy, null), true);
+  assert.equal(await active(legacy, actorDid), false);
+
+  const actorPayload = payload('mailbox:events mailbox:actors');
+  await Grant.upsert(scoped, actorPayload, 300);
+  await bind(scoped, actorDid);
+  assert.equal(await active(scoped, actorDid), true);
+  const lock = await pool.connect();
+  let deadline;
+  try {
+    await lock.query('BEGIN');
+    await lock.query('LOCK TABLE provider_bindings IN ACCESS EXCLUSIVE MODE');
+    const guard = new Promise((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('Authorization read did not return')), 5000);
+    });
+    await assert.rejects(Promise.race([active(scoped, actorDid), guard]), /Query read timeout/);
+  } finally {
+    clearTimeout(deadline);
+    await lock.query('ROLLBACK');
+    lock.release();
+  }
+  assert.equal(await active(scoped, actorDid), true, 'The pool recovers after a proof times out');
+  assert.equal(await active(scoped, otherActorDid), false, 'A remapped actor requires a new consent grant');
+  assert.equal(await active(scoped, null), true, 'Existing event proof remains valid');
+  await Grant.upsert(scoped, { ...actorPayload, rejected: { resources: { [resource]: 'mailbox:actors' } } }, 300);
+  assert.equal(await active(scoped, actorDid), false, 'Current grant rejection removes actor authority');
+  assert.equal(await active(scoped, null), true);
+}
+
 try {
   run('initdb', ['-D', data, '-A', 'trust', '-U', 'oidc_test', '--no-locale']);
   run('pg_ctl', ['-D', data, '-l', join(root, 'postgres.log'), '-o', `-h 127.0.0.1 -p ${port} -k ${root}`, '-w', 'start']);
@@ -74,6 +126,8 @@ try {
   await pool.query("DELETE FROM axxium_oidc_records WHERE model='CleanupFixture'");
   await runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive);
   await runHttpFixture(pool, installHttp, root);
+  await verifyMailboxActorGrant(pool);
+  console.log('PASS isolated PostgreSQL: actor-scoped mailbox grant, remap denial and event compatibility');
   console.log('PASS isolated PostgreSQL: model isolation, lookup, concurrent single consumption, durable state, bounded expired-record/binding reclamation, replay retention and grant revocation');
 } finally {
   if (pool) await pool.end();
