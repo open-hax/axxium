@@ -23,6 +23,8 @@
        (when actor-id
          {:owner-actor-id actor-id :root-did root-did
           :resolve-human-session! session/human-session-proof!
+          ;; Last committed tree, unlocked: see identity/current-actor-state
+          ;; for the authority window and why this must not take the writer.
           :authorized? (fn []
                          (actor-tree/active-owner-delegation? (identity/current-actor-state)
                            root-did bound-actor-did))})
