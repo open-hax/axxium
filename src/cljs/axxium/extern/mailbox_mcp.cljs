@@ -23,8 +23,10 @@
   [(tool "whoami" "The authenticated actor and session." {} [] read-hints)
    (tool "open_session" "Bind a session to this actor and audience; push only if the client declares it."
          {"audience" str-schema "ttl_ms" {"type" "integer"} "push" {"type" "boolean"}} ["audience" "ttl_ms"] {})
-   (tool "discover_actors" "List reachable mailbox actors under your human owner. Use mailbox_did to send."
-         {} [] read-hints)
+   (tool "discover_actors" (str "List reachable mailbox actors under your human owner, never yourself. "
+                                "With anchor, only actors (e.g. sessions) advertised at that ancestor; "
+                                "query matches DID, name and tags. Use mailbox_did to send.")
+         {"anchor" str-schema "query" str-schema} [] read-hints)
    (tool "resolve_address" "Resolve a DID or mbox/<did> to a mailbox." {"address" str-schema} ["address"] read-hints)
    (tool "send_message" "Send to a mailbox. Repeating an idempotency key with the same body returns the original receipt."
          {"to" str-schema "from" str-schema "idempotency_key" str-schema "body" {"type" "object"}}
