@@ -138,10 +138,13 @@
 (defn ^:async mailbox-grant-proof!
   "Read the exact current mailbox OAuth proof. Missing/revoked grants, actors,
    root sessions or provider bindings return nil. A scoped request also needs
-   the current actor scope and the same seeded actor DID bound at consent."
+   the current actor scope and the same seeded actor DID bound at consent.
+   Canonical compatibility accepts only an unpinned, event-only AT grant."
   ([pool grant-id actor-id client-id resource]
    (await (mailbox-grant-proof! pool grant-id actor-id client-id resource nil)))
   ([pool grant-id actor-id client-id resource bound-actor-did]
+   (await (mailbox-grant-proof! pool grant-id actor-id client-id resource bound-actor-did false)))
+  ([pool grant-id actor-id client-id resource bound-actor-did events-only?]
    (when (and (every? valid-key? [grant-id actor-id client-id resource])
               (or (nil? bound-actor-did) (oidc/mailbox-bound-actor-did? bound-actor-did)))
      (when-let [{:keys [mailbox_cred_id mailbox_did token_hash]}
@@ -155,6 +158,8 @@
                               " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
                               " AND b.mailbox_principal_actor_id IS NULL AND b.mailbox_owner_root_did IS NULL"
                               " AND b.expires_at>clock_timestamp() AND s.expires_at>clock_timestamp() AND a.status='active'"
+                              (when events-only?
+                                " AND b.mailbox_actor_did IS NULL AND g.payload->'resources'->>$4::text=$5::text")
                               (when bound-actor-did " AND b.mailbox_actor_did=$7"))
                          (cond-> [grant-id actor-id client-id resource oidc/mailbox-scope]
                            bound-actor-did (conj oidc/mailbox-actors-scope bound-actor-did))))]

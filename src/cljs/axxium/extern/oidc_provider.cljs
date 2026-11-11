@@ -49,8 +49,12 @@
     owner grant-id account-id bound-actor-did delegation]
    (when (or (nil? bound-actor-did)
              (and (true? mailbox-actor-messaging?) (law/mailbox-bound-actor-did? bound-actor-did)))
-     (let [proof (or (await (store/mailbox-grant-proof! pool grant-id account-id
-                             mailbox-client-id mailbox-resource bound-actor-did))
+     (let [proof (or (if mailbox-owner-consent?
+                       (when-not bound-actor-did
+                         (await (store/mailbox-grant-proof! pool grant-id account-id
+                                  mailbox-client-id mailbox-resource nil true)))
+                       (await (store/mailbox-grant-proof! pool grant-id account-id
+                                mailbox-client-id mailbox-resource bound-actor-did)))
                      (when (and mailbox-owner-consent? delegation
                                 (or (nil? bound-actor-did) (= bound-actor-did (:bound-actor-did delegation))))
                        (when-let [delegated (await (store/delegated-mailbox-grant-proof! pool grant-id account-id

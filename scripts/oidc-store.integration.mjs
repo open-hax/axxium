@@ -88,11 +88,14 @@ async function verifyWorkOwnerConsent(pool, root) {
   const token = randomBytes(32).toString('base64url');
   const digest = createHash('sha256').update(token).digest('hex');
   const credential = randomUUID();
+  const workCredential = randomUUID();
+  const workDigest = randomBytes(32).toString('hex');
   await pool.query("INSERT INTO entities VALUES('owner-consent-entity','human'),('owner-consent-outsider-entity','human')");
   await pool.query("INSERT INTO actors VALUES($1,'active','owner-consent-entity'),($2,'active','owner-consent-outsider-entity'),($3,'active',NULL)",
     [owner.id, outsider.id, work.id]);
   await pool.query("INSERT INTO provider_bindings VALUES($1,'atproto',$2)", [work.id, mailboxDid]);
-  await pool.query("INSERT INTO sessions VALUES($1,$2,clock_timestamp()+interval '1 hour',$3)", [owner.id, digest, credential]);
+  await pool.query("INSERT INTO sessions VALUES($1,$2,clock_timestamp()+interval '1 hour',$3),($4,$5,clock_timestamp()+interval '1 hour',$6)",
+    [owner.id, digest, credential, work.id, workDigest, workCredential]);
 
   const listener = createServer();
   await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
@@ -106,13 +109,29 @@ async function verifyWorkOwnerConsent(pool, root) {
     'redirect-uris': [`${origin}/ordinary-callback`] };
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const configPath = join(root, 'oidc-owner-consent.json');
-  writeFileSync(configPath, JSON.stringify({
+  const config = {
     issuer: `${origin}/oidc`, clients: [client, ordinary], 'allow-loopback?': true,
     'cookie-keys': [randomBytes(32).toString('hex')],
     jwks: { keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'work-owner', alg: 'RS256', use: 'sig' }] },
     'mailbox-client-id': client.id, 'mailbox-resource': resource, 'mailbox-actor-messaging?': true,
-    'mailbox-owner-consent?': true,
-  }), { mode: 0o600 });
+  };
+  const legacyProvider = createProvider(pool, config, id => id === work.id ? work : null);
+  async function legacyGrant(scope, actorDid) {
+    const account = { accountId: work.id, clientId: client.id };
+    const grant = new legacyProvider.Grant({ ...account, expiresIn: 300 });
+    grant.addOIDCScope('openid');
+    grant.addResourceScope(resource, scope);
+    const grantId = await grant.save();
+    await bindMailbox(pool, grantId, work.id, workCredential, workDigest, mailboxDid, client.id, resource, actorDid);
+    assert.equal(await mailboxGrantActive(pool, grantId, work.id, client.id, resource, actorDid), true);
+    const access = new legacyProvider.AccessToken({ ...account, grantId, aud: resource, scope, expiresIn: 300 });
+    const refresh = new legacyProvider.RefreshToken({ ...account, grantId, resource, scope: `openid ${scope}`, expiresIn: 300 });
+    return { access: await access.save(), refresh: await refresh.save() };
+  }
+  const legacyEvents = await legacyGrant('mailbox:events', null);
+  const legacyActors = await legacyGrant('mailbox:events mailbox:actors', workDid);
+  const legacyUnpinnedActors = await legacyGrant('mailbox:events mailbox:actors', null);
+  writeFileSync(configPath, JSON.stringify({ ...config, 'mailbox-owner-consent?': true }), { mode: 0o600 });
   const app = Fastify({ logger: false });
   app.register(cookiePlugin);
   let ownerMayManage = true;
@@ -181,10 +200,26 @@ async function verifyWorkOwnerConsent(pool, root) {
       assert.equal(claims.sub, owner.id);
       return body;
     }
-    async function ordinaryGrantActive(accessToken) {
-      const response = await form('/token/introspection', ordinary, { token: accessToken });
+    async function grantActive(selected, accessToken) {
+      const response = await form('/token/introspection', selected, { token: accessToken });
       assert.equal(response.status, 200);
       return (await response.json()).active;
+    }
+    const ordinaryGrantActive = accessToken => grantActive(ordinary, accessToken);
+    assert.equal((await mounted.accessProof(legacyEvents.access))?.authMethod, 'atproto');
+    assert.equal(await grantActive(client, legacyEvents.access), true);
+    const renewedEvents = await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: legacyEvents.refresh, resource });
+    const eventTokens = await renewedEvents.json();
+    assert.equal(renewedEvents.status, 200, JSON.stringify(eventTokens));
+    assert.equal((await mounted.accessProof(eventTokens.access_token))?.authMethod, 'atproto');
+    assert.equal(await mounted.accessProof(legacyActors.access), null, 'Legacy actor access needs fresh owner consent');
+    assert.equal(await grantActive(client, legacyActors.access), false);
+    for (const previous of [legacyActors, legacyUnpinnedActors]) {
+      const deniedRenewal = await form('/token', client, { grant_type: 'refresh_token',
+        refresh_token: previous.refresh, resource });
+      assert.equal(deniedRenewal.status, 400, 'Legacy actor grants cannot renew under canonical consent');
+      assert.equal((await deniedRenewal.json()).error, 'invalid_grant');
     }
     assert.equal(await authorize(client, new Map([['axxium_session', 'unrelated-human']])), null);
     ownerMayManage = false;

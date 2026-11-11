@@ -182,5 +182,7 @@ through their existing Axxium browser session, including a session established
 through Google. The human owner uses the existing login without an AT Protocol
 account. Axxium binds mailbox access to the configured Work actor and mailbox
 DID. Work access requires the same live owner session, provider binding,
-active root-to-child relationship and granted scopes. Legacy
-event-only requests keep the existing AT Protocol consent flow.
+active root-to-child relationship and granted scopes. Legacy event-only
+grants keep their access and renewal through the existing AT Protocol consent
+flow. Enabling owner consent ends access and renewal for older actor-messaging
+grants. Fresh owner approval issues the replacement grant.
