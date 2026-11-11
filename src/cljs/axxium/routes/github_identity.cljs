@@ -243,9 +243,30 @@
                  (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
         out))))
 
+(defn ^:async apply-binding-seed!
+  "AXXIUM_MAILBOX_ACTOR_BINDINGS is a bootstrap seed only: each pair becomes a
+   ledger binding recorded under its tree root's manage right (B1, B2). Pairs
+   the ledger already holds are untouched; a pair the ledger refuses stays
+   unbound, so the directory fails closed. The ledger is the only source the
+   mailbox directory reads."
+  []
+  (when-let [pairs (not-empty (cfg/get-in-config [:mailbox/actor-bindings]))]
+    (when (configured?)
+      (let [out (await (serialized (fn [lg] (gi/seed-bindings lg pairs mcp/event-ids))))]
+        (println "Mailbox binding seed:" (count (:created out)) "created,"
+                 (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
+        out))))
+
+(defn bound-mailbox-actor
+  "The actor the ledger currently binds `mailbox-did` to, or nil."
+  [mailbox-did]
+  (when (and mailbox-did (configured?))
+    (get (gi/mailbox-bindings (current-actor-state)) mailbox-did)))
+
 (defn- ^:async apply-seed-safely! []
   (try
     (await (apply-seed-file!))
+    (await (apply-binding-seed!))
     (catch :default e
       (println "Identity seed failed:" (ex-message e)))))
 

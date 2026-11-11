@@ -12,7 +12,10 @@
   "Mount only when the operator supplies a private OIDC configuration file."
   [app]
   (let [mailbox-did (config/get-in-config [:mailbox/webhook-actor-did])
-        bound-actor-did (get (config/get-in-config [:mailbox/actor-bindings]) mailbox-did)
+        ;; The consent pin: the ledger binding when one is recorded, else the
+        ;; bootstrap seed (applied to the ledger after routes mount).
+        bound-actor-did (or (identity/bound-mailbox-actor mailbox-did)
+                            (get (config/get-in-config [:mailbox/actor-bindings]) mailbox-did))
         {:keys [actor-id root-did]} (config/get-in-config [:identity/root-operator-binding])]
     (transport/install! app @db/pool
       {:config-file (environment/get-value "AXXIUM_OIDC_CONFIG_FILE")
@@ -25,9 +28,12 @@
           :resolve-human-session! session/human-session-proof!
           ;; Last committed tree, unlocked: see identity/current-actor-state
           ;; for the authority window and why this must not take the writer.
+          ;; B1: the ledger must still bind the Work mailbox to the pinned
+          ;; actor, so an unbind or rebind revokes delegated access at once.
           :authorized? (fn []
-                         (actor-tree/active-owner-delegation? (identity/current-actor-state)
-                           root-did bound-actor-did))})
+                         (let [st (identity/current-actor-state)]
+                           (and (= bound-actor-did (get (actor-tree/mailbox-bindings st) mailbox-did))
+                                (actor-tree/active-owner-delegation? st root-did bound-actor-did))))})
        :mailbox-available? (and (some? (config/get-in-config [:mailbox/ledger-file]))
                                 (some? (config/get-in-config [:mailbox/webhook-key-file])))
        :session-cookie-name (config/get-in-config [:session/cookie-name])}

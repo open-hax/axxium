@@ -2,6 +2,7 @@
   "Opt-in authenticated polling and selected-actor webhook transport."
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
+            [axxium.domain.github-identity :as gi]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.http :as http]
@@ -104,23 +105,24 @@
         (rpc/handle-rpc lg (assoc ctx :session/current-only? true) body)))))
 
 (defn- ^:async submit-operation!
-  [writer path oauth proof ctx body bindings]
+  [writer path oauth proof ctx body directory?]
   (let [submit (fn [ctx]
                  (queue/submit! writer path
                                 (fn ^:async apply-mailbox [lg]
                                   (if (await (active-proof! oauth proof))
                                     (operation lg (assoc ctx :now (secrets/now)) body)
                                     {:unauthenticated? true}))))]
-    (if (and bindings (or (nil? (:oauth/grant-id proof))
+    (if (and directory? (or (nil? (:oauth/grant-id proof))
                           (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
       ;; Identity is acquired before mailbox. Keep it through the durable append
       ;; so a completed actor suspension cannot race an authorized send.
       (:result (await (identity/with-current-actor-state!
-                       (fn [st] (submit (assoc ctx :directory/state st :directory/bindings bindings))))))
+                       (fn [st] (submit (assoc ctx :directory/state st
+                                               :directory/bindings (gi/mailbox-bindings st)))))))
       (await (submit ctx)))))
 
 (defn- ^:async post-mailbox!
-  [writer path resource runtime subscriptions-disabled? oauth bindings resource-metadata
+  [writer path resource runtime subscriptions-disabled? oauth directory? resource-metadata
    req reply {:keys [principal cred-id] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
@@ -160,7 +162,7 @@
                  :audience resource}
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
                   (await (events/execute! runtime (dissoc proof :mailbox/actors?) ctx body))
-                  (await (submit-operation! writer path oauth proof ctx body bindings)))]
+                  (await (submit-operation! writer path oauth proof ctx body directory?)))]
         (cond
           (:unauthenticated? out) (require-auth! reply resource-metadata)
 
@@ -181,11 +183,13 @@
   ([app oauth]
    (let [path (cfg/get-in-config [:mailbox/ledger-file])
          identity-path (cfg/get-in-config [:github-identity/ledger-file])
-         bindings (cfg/get-in-config [:mailbox/actor-bindings])
+         ;; Directory mode routes over ledger bindings; an env seed implies it.
+         directory? (or (true? (cfg/get-in-config [:mailbox/directory?]))
+                        (some? (cfg/get-in-config [:mailbox/actor-bindings])))
          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])]
-     (when (or (and bindings (or (not path) allowed-dids (str/blank? identity-path)))
-               (and (:actor-messaging? oauth) (not bindings)))
-       (throw (ex-info "Mailbox actor messaging requires both ledgers and explicit bindings, outside the two-actor pilot"
+     (when (or (and directory? (or (not path) allowed-dids (str/blank? identity-path)))
+               (and (:actor-messaging? oauth) (not directory?)))
+       (throw (ex-info "Mailbox actor messaging requires both ledgers and directory mode, outside the two-actor pilot"
                        {:reason :invalid-mailbox-actor-messaging-config})))
      (when path
        (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
@@ -211,7 +215,7 @@
                                                        "bearer_methods_supported" ["header"]}))))
          (http/post! app endpoint
                      (authorized origin oauth resource-metadata allowed-dids
-                                 (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth bindings
+                                 (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth directory?
                                           resource-metadata)))
          (http/get! app endpoint no-stream)
          (http/delete! app endpoint no-stream))))))

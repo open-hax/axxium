@@ -37,6 +37,16 @@
 (def statuses #{:active :suspended :revoked})
 
 (defn actor-resource-id [did] (str "bot-actor:" did))
+
+;; B1 a mailbox binding maps one external mailbox DID (e.g. an AT Protocol
+;;    did:plc account) to one actor node: `bind(m, n)` is a ledger resource
+;;    `mailbox-binding:<m>` owned by n, so binding, suspension and revocation
+;;    fold from the same log;
+;; B2 only a strict, effectively active ancestor of n may bind or unbind (G2);
+;; B3 bindings are one-to-one while :bound, and only an effective n is bound.
+(def binding-kind :resource/mailbox-binding)
+(def binding-statuses #{:bound :unbound})
+(defn binding-resource-id [mailbox-did] (str "mailbox-binding:" mailbox-did))
 (defn credential-resource-id [did label] (str "credential:" did ":" label))
 
 (def levels {"none" 0 "read" 1 "write" 2 "admin" 3})
