@@ -80,13 +80,13 @@
 (defn- rpc-error [id code message]
   {"jsonrpc" "2.0" "id" id "error" {"code" code "message" message}})
 
-(defn rpc-result [id result]
+(defn- rpc-result [id result]
   {"jsonrpc" "2.0" "id" id "result" result})
 
 (defn stream-access?
   "The live session's mailbox address still has its own read grant."
   [lg {:keys [principal now] :as ctx}]
-  (and (not (mailbox/session-error lg ctx))
+  (and (mailbox/streaming-session? lg ctx)
        (access/authorized? lg (:auth/did principal) now)))
 
 (def ^:private inbox-resource

@@ -1,13 +1,14 @@
 (ns axxium.extern.mailbox-stream
   "Own the sockets and opt-ins for authenticated MCP inbox notifications."
-  (:require [axxium.extern.http :as http]))
+  (:require [axxium.extern.http :as http]
+            [axxium.extern.mailbox-mcp :as rpc]))
 
 (def ^:private connection-limit 128)
 (def ^:private subscription-limit 256)
 (def ^:private subscription-ttl-ms 3600000)
 (def ^:private heartbeat-ms 15000)
 
-(def inbox-uri "axxium://mailbox/inbox")
+(def inbox-uri rpc/inbox-uri)
 
 (def ^:private inbox-update
   (str "event: message\ndata: "
@@ -59,6 +60,30 @@
                   (when (live-subscription? (get subscriptions session-id) actor-did now)
                     stream)))
           streams)))
+
+(defn dispatch!
+  "Queue an inbox update after commit. Coalesce concurrent updates per
+   recipient without blocking the sender's receipt."
+  [runtime actor-did notify!]
+  (let [{:keys [closed? pending]} @runtime]
+    (when (and (not closed?) (seq (subscriptions runtime actor-did)))
+      (cond
+        (contains? pending actor-did)
+        (swap! runtime assoc-in [:pending actor-did] true)
+
+        (< (count pending) connection-limit)
+        (letfn [(^:async deliver []
+                  (try
+                    (when-not (:closed? @runtime)
+                      (await (notify!)))
+                    (catch :default _ nil)
+                    (finally
+                      (if (true? (get-in @runtime [:pending actor-did]))
+                        (do (swap! runtime assoc-in [:pending actor-did] false)
+                            (js/queueMicrotask deliver))
+                        (swap! runtime update :pending dissoc actor-did)))))]
+          (swap! runtime assoc-in [:pending actor-did] false)
+          (js/queueMicrotask deliver))))))
 
 (defn- forget-stream! [runtime session-id stream-id]
   (when (= stream-id (get-in @runtime [:streams session-id :stream-id]))
@@ -125,8 +150,10 @@
       (or closed? (>= (count streams) connection-limit))
       (http/send-secret! reply 503 {:error "Mailbox notification streams are unavailable"})
 
-      (or (contains? streams session-id) (and existing (not= actor-did (:actor-did existing))))
-      (http/send-secret! reply 409 {:error "Mailbox session already has a notification stream"})
+      (or (contains? streams session-id)
+          (some #(= actor-did (:actor-did %)) (vals streams))
+          (and existing (not= actor-did (:actor-did existing))))
+      (http/send-secret! reply 409 {:error "Mailbox already has a notification stream"})
 
       :else
       (open-stream! runtime reply session-id actor-did authorize!))))
@@ -134,7 +161,7 @@
 (defn create!
   "Create a bounded listener and close every socket before Fastify drains."
   [app]
-  (let [runtime (atom {:streams {} :subscriptions {} :closed? false})
+  (let [runtime (atom {:streams {} :subscriptions {} :pending {} :closed? false})
         timer (js/setInterval
                (fn []
                  (let [{:keys [streams]} (prune! runtime (js/Date.now))]
@@ -145,7 +172,7 @@
     (.addHook app "preClose"
               (fn [done]
                 (js/clearInterval timer)
-                (let [{:keys [streams]} (swap! runtime assoc :closed? true :subscriptions {})]
+                (let [{:keys [streams]} (swap! runtime assoc :closed? true :subscriptions {} :pending {})]
                   (doseq [{:keys [close!]} (vals streams)]
                     (close!)))
                 (done)))

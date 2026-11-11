@@ -79,3 +79,25 @@
     (-> (smoke!)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
+
+(deftest stream-write-failure-discards-connection-and-opt-in
+  (doseq [fail-write [(constantly false) (fn [_] (throw (js/Error. "fixture write error")))]]
+    (let [shutdown (atom nil)
+          app #js {:addHook (fn [_ callback] (reset! shutdown callback))}
+          runtime (stream/create! app)
+          destroyed? (atom false)
+          response #js {:writeHead (fn [& _])
+                        :write fail-write
+                        :once (fn [& _])
+                        :destroy (fn [] (reset! destroyed? true))}
+          reply #js {:hijack (fn []) :raw response}
+          actor "did:web:fixture.test:actors:alice"]
+      (try
+        (is (stream/subscribe! runtime "one" actor))
+        (stream/listen! runtime nil reply "one" actor (constantly true))
+        (is (true? @destroyed?))
+        (is (empty? (stream/subscriptions runtime actor)))
+        (is (not (contains? (:subscriptions @runtime) "one")))
+        (is (empty? (:streams @runtime)))
+        (finally
+          (@shutdown (fn [])))))))

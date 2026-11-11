@@ -127,21 +127,23 @@
                                           cred-id))
      :audience resource}))
 
-(defn- stream-eligible? [stream-runtime proof]
-  (and stream-runtime (nil? (:oauth/grant-id proof))))
+(defn- stream-actor [proof directory]
+  (let [{:auth/keys [did method]} (:principal proof)]
+    (if (= method :actor-bootstrap)
+      did
+      (get (:directory/bindings directory) did))))
+
+(defn- stream-eligible? [stream-runtime proof directory st]
+  (and stream-runtime (nil? (:oauth/grant-id proof))
+       (when-let [actor (stream-actor proof directory)]
+         (gi/active-owner-delegation? st (:directory/bootstrap-root directory) actor))))
 
 (defn- ^:async active-stream-session?
   [writer path oauth proof ctx directory]
-  (let [bindings (:directory/bindings directory)
-        address (get-in proof [:principal :auth/did])
-        actor (get bindings address address)
-        root (:root-did (cfg/get-in-config [:identity/root-operator-binding]))]
-    (and (await (active-proof! oauth proof))
-         (or (contains? bindings address)
-             (= :actor-bootstrap (get-in proof [:principal :auth/method])))
-         (gi/active-owner-delegation? (identity/current-actor-state) root actor)
-         (not (mailbox/session-error (queue/current-ledger writer path)
-                                     (assoc ctx :now (secrets/now)))))))
+  (and (await (active-proof! oauth proof))
+       (stream-eligible? true proof directory (identity/current-actor-state))
+       (mailbox/streaming-session? (queue/current-ledger writer path)
+                                   (assoc ctx :now (secrets/now)))))
 
 (defn- ^:async listen-inbox!
   [writer path oauth resource directory stream-runtime req reply proof]
@@ -150,7 +152,7 @@
         ctx (transport-context resource proof sid)
         recheck #(active-stream-session? writer path oauth proof ctx directory)]
     (cond
-      (not (stream-eligible? stream-runtime proof))
+      (not (and stream-runtime (nil? (:oauth/grant-id proof))))
       (do (http/set-header! reply "Allow" "POST")
           (http/send-empty! reply 405))
       (not (accepts? req "text/event-stream"))
@@ -201,15 +203,22 @@
                                              (if (await (active-proof! oauth proof))
                                                (operation lg (assoc ctx :now (secrets/now)) body)
                                                {:unauthenticated? true}))))]
-                   (when (and stream-runtime (:notify-to out))
-                     (await (notify-inbox! writer path stream-runtime (:notify-to out))))
+                   (when-let [recipient (and stream-runtime (:notify-to out))]
+                     (stream/dispatch! stream-runtime recipient
+                                       #(identity/with-current-actor-state!
+                                         (fn [_] (notify-inbox! writer path stream-runtime recipient)))))
                    out))]
     (if (and directory (or (nil? (:oauth/grant-id proof))
                           (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
       ;; Identity is acquired before mailbox. Keep it through the durable append
       ;; so a completed actor suspension cannot race an authorized send.
       (:result (await (identity/with-current-actor-state!
-                       (fn [st] (submit (assoc (merge ctx directory) :directory/state st))))))
+                       (fn [st]
+                         (let [streaming? (boolean (stream-eligible? stream-runtime proof directory st))]
+                           (submit (assoc (merge ctx directory)
+                                          :directory/state st
+                                          :session/push-supported? streaming?
+                                          :resources/enabled? streaming?)))))))
       (await (submit ctx)))))
 
 (defn- ^:async post-mailbox!
@@ -239,11 +248,9 @@
       (rpc-error reply 404 (get body "id") -32600 "Mailbox session not found")
 
       :else
-      (let [streaming? (boolean (stream-eligible? stream-runtime proof))
-            ctx (assoc (transport-context resource proof sid)
+      (let [ctx (assoc (transport-context resource proof sid)
                  :session/new-id (when initialize? (secrets/secure-id))
-                 :session/push-supported? streaming?
-                 :resources/enabled? streaming?
+                 :session/push-supported? false
                  :events/enabled? (and (not (:bootstrap/digest proof)) (events/enabled? runtime proof))
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))

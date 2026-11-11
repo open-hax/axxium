@@ -136,7 +136,7 @@
 (defn mailbox-bootstrap-actor-dids
   "Admit an explicit comma-separated list of distinct actor DIDs."
   [value]
-  (when (some? value)
+  (when (and (some? value) (not= "" value))
     (let [dids (when (and (string? value) (<= 1 (count value) 65536))
                  (str/split value #"," -1))]
       (when-not (and (seq dids) (every? did-law/web? dids)
