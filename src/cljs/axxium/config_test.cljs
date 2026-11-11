@@ -39,6 +39,15 @@
                    (pr-str [[alice a] [alice b]]) (pr-str [[alice a] [bob a]])]]
       (is (thrown? js/Error (config/mailbox-actor-bindings value))))))
 
+(deftest mailbox-bootstrap-actors-are-explicit-and-distinct
+  (let [bot "did:web:axxium.test:actors:owner:grokbot"
+        agent "did:web:axxium.test:actors:owner:agent"]
+    (is (nil? (config/mailbox-bootstrap-actor-dids nil)))
+    (is (= #{bot} (config/mailbox-bootstrap-actor-dids bot)))
+    (is (= #{bot agent} (config/mailbox-bootstrap-actor-dids (str bot "," agent))))
+    (doseq [invalid ["" " " fixture/alice (str bot ",") (str bot "," bot) (str bot ", " agent)]]
+      (is (thrown? js/Error (config/mailbox-bootstrap-actor-dids invalid))))))
+
 (deftest schema-pool-has-only-its-own-statement-timeout
   (let [seen (atom nil)]
     (with-redefs [pg/create-pool! (fn [options] (reset! seen options) :schema-pool)]

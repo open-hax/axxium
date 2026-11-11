@@ -18,7 +18,6 @@
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
             [axxium.domain.github-identity :as gi]
-            [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.state :as state]
             [axxium.extern.github-app :as gh]
             [axxium.extern.github-identity-mcp :as mcp]
@@ -267,34 +266,41 @@
   (when (and mailbox-did (configured?))
     (get (gi/mailbox-bindings (current-actor-state)) mailbox-did)))
 
+(defn- mailbox-bootstrap-node?
+  [st did]
+  (let [root-did (:root-did (root-binding))]
+    (and (not= did root-did)
+         (gi/live? st did (js/Date.))
+         (let [kind (gi/kind-of st did)]
+           (or (and (= :session kind) (gi/lease-of st did))
+               (and (contains? #{:agent :bot} kind)
+                    (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did)
+                    (gi/active-owner-delegation? st root-did did))))
+         (let [bindings (gi/mailbox-bindings st)]
+           (and (not (contains? bindings did))
+                (not-any? #{did} (vals bindings)))))))
+
 (defn node-proof
-  "L5/L6: an agent node authenticating as itself with its own bootstrap key
-   (x-axxium-actor + Bearer axb_...). It acts at its own address: the mailbox
-   the ledger binds to it, else its own DID. The configured human root never
-   authenticates this way. The key is not retained, only its digest."
+  "Authenticate a leased session or opted-in agent or bot at its own unbound DID."
   [did key]
-  (when (and (string? did) (string? key) (configured?)
-             (not= did (:root-did (root-binding))))
+  (when (and (string? did) (string? key) (configured?))
     (let [st (current-actor-state)]
-      (when-let [self (mcp/authenticate st did key)]
-        (let [digest (mcp/digest key)]
-          (when-let [p (principal/from-actor-node
-                        self (directory/node-address (gi/mailbox-bindings st) self))]
-            {:principal p :cred-id (pr-str ["actor-node" self digest]) :node/digest digest}))))))
+      (when (and (mailbox-bootstrap-node? st did) (mcp/authenticate st did key))
+        (let [digest (gi/bootstrap-digest st did)]
+          (when-let [p (principal/from-actor-node did)]
+            {:principal p :cred-id (pr-str ["actor-node" did digest]) :node/digest digest}))))))
 
 (defn node-proof-active?
-  "Recheck a node proof against the last committed tree: the same bootstrap
-   generation, the node and every ancestor live (effective, no ended lease),
-   and the same address. Stored proofs rechecked later (webhook delivery)
-   therefore drop out when a session lease ends."
+  "Recheck current generation, live ancestry and the unbound address. Long-lived
+   agents also need a current opt-in. The caller can already hold the writer."
   [{:keys [principal] :node/keys [digest]}]
   (let [st (current-actor-state)
-        n (:auth/did principal)]
+        did (:auth/did principal)]
     (boolean
-     (and digest (= digest (gi/bootstrap-digest st n))
-          (gi/live? st n (js/Date.))
-          (= (principal/address principal)
-             (directory/node-address (gi/mailbox-bindings st) n))))))
+     (and digest (= :actor-node (:auth/method principal))
+          (= did (principal/address principal))
+          (mailbox-bootstrap-node? st did)
+          (= digest (gi/bootstrap-digest st did))))))
 
 (defn actor-node?
   "True when `did` names a node of the identity tree."
