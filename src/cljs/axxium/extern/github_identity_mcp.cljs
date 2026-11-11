@@ -151,10 +151,16 @@
                          (let [{adv-at :at :as adv-ids} (ids)]
                            (gi/advertise (:ledger issued) (state/fold (:ledger issued)) caller session caller
                                          (set (:advert/tags a)) adv-at adv-ids)))]
+        ;; Advertising is best-effort around a committed open: a refused advert
+        ;; never loses the issued key, so the session stays usable and the
+        ;; result reports it as unadvertised.
         (js/Promise.resolve
          (cond
            (not (:effect issued)) {:ledger (:ledger opened) :error :forbidden}
-           (and advertised (not (:effect advertised))) {:ledger (:ledger issued) :error :invalid}
+           (and advertised (not (:effect advertised)))
+           {:ledger (:ledger issued)
+            :result {:actor/did session :actor/lease-until lease :bootstrap/key key
+                     :advert/error :forbidden}}
            :else {:ledger (:ledger (or advertised issued))
                   :result (cond-> {:actor/did session :actor/lease-until lease :bootstrap/key key}
                             advertised (assoc :advert/anchor caller))})))

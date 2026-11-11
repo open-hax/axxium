@@ -61,6 +61,26 @@
                                            {:actor/policy (assoc pol :policy/repos #{"*"})}))))
         "G1: a wider policy is refused")))
 
+(defn- ^:async refused-advert* []
+  (let [opened (with-redefs [gi/advertise (fn [lg & _] {:ledger lg})]
+                 (await (mcp/call {:ledger (tree) :ids mcp/event-ids} {:actor codex}
+                                  "session_open" {:advert/tags ["review"]})))
+        {session :actor/did key :bootstrap/key :as result} (:result opened)
+        st (state/fold (:ledger opened))]
+    (is (nil? (:error opened)) "a refused default advert does not fail the open")
+    (is (string? key) "the issued key is still returned")
+    (is (= :forbidden (:advert/error result)) "the advert failure is reported")
+    (is (nil? (:advert/anchor result)))
+    (is (gi/live? st session (js/Date.)) "the session is written and live")
+    (is (empty? (gi/directory-at st codex (js/Date.))) "nothing was advertised")
+    (is (= session (mcp/authenticate st session key)) "the session authenticates with the returned key")))
+
+(deftest a-refused-default-advert-still-returns-a-usable-session
+  (async done
+    (-> (refused-advert*)
+        (.catch (fn [e] (is false (str "refused-advert rejected: " (pr-str e)))))
+        (.finally done))))
+
 (deftest sessions-advertise-at-their-parent-by-default
   (async done
     (-> (session-defaults*)

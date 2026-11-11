@@ -206,7 +206,10 @@ with `session_open`. The result is a `:session` child node named
 
 By default the new session also advertises itself at its parent in the same
 step, using any `:advert/tags` you pass. Pass `:session/advertise? false` to
-open it without advertising.
+open it without advertising. Advertising is best-effort: if the advert is
+refused, the session is still opened and its key is still returned, and the
+result carries `:advert/error`. The session can then call `actor_advertise`
+itself.
 
 So `cred(session) = attenuate(cred(parent))`. The session authenticates to
 the mailbox as itself and registers its own mailbox at its DID. A node whose
