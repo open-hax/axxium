@@ -253,6 +253,13 @@
           (let [parent-prefix (when parent (some #(when (str/starts-with? parent %) %) legacy))]
             (str (or parent-prefix canonical) path))))))
 
+(defn- remember-seed-parent [parents prefixes id did]
+  (let [path (when id
+               (if (str/starts-with? id "did:")
+                 (some #(when (str/starts-with? id %) (subs id (count %))) prefixes)
+                 id))]
+    (if path (assoc parents path did) parents)))
+
 (defn- reject-conflicting-seed-paths! [state prefixes paths planned]
   (doseq [path (distinct (remove #(or (nil? %) (str/starts-with? % "did:")) paths))]
     (let [occupied (filter #(or (contains? planned %) (actor-node state %))
@@ -272,21 +279,22 @@
                       (str/replace canonical #"%3A([0-9]+):actors:$" ":$1:actors:")]
                      distinct
                      (remove #{canonical}))
+         prefixes (cons canonical legacy)
          did #(resolve-seed-did state canonical legacy %1 %2)
          pol #(if (keyword? %) (get policies %) %)
          root-did (did (:id root) nil)
          resolved (reduce
-                   (fn [{:keys [dids] :as out} {:keys [id parent name kind policy]}]
-                     (let [parent-did (or (get dids parent) (did parent nil))
+                   (fn [{:keys [parents] :as out} {:keys [id parent name kind policy]}]
+                     (let [parent-did (or (get parents parent) (did parent nil))
                            resolved-id (did id parent-did)]
                        (-> out
-                           (assoc-in [:dids id] resolved-id)
+                           (update :parents remember-seed-parent prefixes id resolved-id)
                            (update :nodes conj {:did resolved-id :parent parent-did :name name
                                                 :kind kind :policy (pol policy)}))))
-                   {:dids {(:id root) root-did} :nodes []}
+                   {:parents (remember-seed-parent {} prefixes (:id root) root-did) :nodes []}
                    nodes)]
      (when (seq legacy)
-       (reject-conflicting-seed-paths! state (cons canonical legacy)
+       (reject-conflicting-seed-paths! state prefixes
                                        (cons (:id root) (mapcat (juxt :id :parent) nodes))
                                        (into #{root-did} (map :did) (:nodes resolved))))
      {:root (when root {:did root-did :name (:name root) :policy (pol (:policy root))})

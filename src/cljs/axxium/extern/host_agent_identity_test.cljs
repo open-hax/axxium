@@ -165,6 +165,21 @@
     (is (= [laptop-id root] (gi/ancestors-of st agent-id)))
     (is (nil? (gi/actor-node st (legacy-ported-did "alice"))))))
 
+(deftest ported-seed-resolves-relative-parents-to-explicit-legacy-dids
+  (let [mixed (-> (seed)
+                  (update-in [:root :id] legacy-ported-did)
+                  (update :nodes (fn [nodes]
+                                   (mapv #(cond-> % (= :host (:kind %))
+                                            (update :id legacy-ported-did))
+                                         nodes))))
+        resolved (gi/resolve-seed mixed ported-host)
+        {:keys [ledger refused]} (gi/seed-ledger resolved (counter-ids))
+        st (state/fold ledger)]
+    (is (empty? refused))
+    (is (= [(legacy-ported-did "alice:laptop") (legacy-ported-did "alice")]
+           (gi/ancestors-of st (legacy-ported-did "alice:laptop:coding-agent"))))
+    (is (nil? (gi/actor-node st (canonical-ported-did "alice:laptop"))))))
+
 (deftest ported-seed-preserves-the-existing-namespace
   (let [ids (counter-ids)
         legacy (gi/resolve-seed (legacy-ported-seed) ported-host)
