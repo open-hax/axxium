@@ -64,6 +64,27 @@
                     {:grant-id ""}]]
       (is (not (law/mailbox-access-claims? candidate (merge claims change)))))))
 
+(deftest mailbox-actor-messaging-requires-explicit-client-opt-in-and-events
+  (let [resource "https://identity.example.test/api/mailbox/mcp"
+        events-only (assoc config :mailbox-client-id "knoxx-stealth" :mailbox-resource resource)
+        enabled (assoc events-only :mailbox-actor-messaging? true)
+        claims {:client-id "knoxx-stealth" :token-issuer (:issuer config)
+                :audience resource :scope "mailbox:events mailbox:actors"
+                :account-id "actor" :grant-id "grant"}
+        consent {:expected-uid "interaction" :actual-uid "interaction" :actor-id "actor"
+                 :session-actor-id "actor" :prompt "consent" :decision "approve"
+                 :scopes ["openid" "mailbox:events" "mailbox:actors"]
+                 :claims [] :mailbox-client? true}]
+    (is (= enabled (admitted-config enabled)))
+    (is (nil? (admitted-config (assoc config :mailbox-actor-messaging? true))))
+    (is (not (law/mailbox-access-claims? events-only claims)))
+    (is (law/mailbox-access-claims? enabled claims))
+    (is (law/mailbox-access-claims? enabled (assoc claims :scope law/mailbox-scope)))
+    (is (not (law/mailbox-access-claims? enabled (assoc claims :scope "mailbox:actors"))))
+    (is (= {:decision :refuse :status 403} (law/interaction-admission consent)))
+    (is (= {:decision :consent}
+           (law/interaction-admission (assoc consent :mailbox-actor-messaging? true))))))
+
 (deftest unqualified-urls-and-absent-private-keys-refuse
   (doseq [candidate [(assoc config :issuer "http://identity.example.test")
                      (assoc config :issuer "https://user:pass@identity.example.test")

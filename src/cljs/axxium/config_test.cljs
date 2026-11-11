@@ -28,6 +28,17 @@
                            [(str "alice.example," bob) bob] [pair nil] [pair carol]]]
       (is (thrown? js/Error (config/mailbox-pilot-allowed-dids input owner))))))
 
+(deftest mailbox-directory-requires-unique-explicit-bindings
+  (let [alice fixture/alice
+        bob fixture/bob
+        a "did:web:127.0.0.1:18874:actors:owner:work"
+        b "did:web:127.0.0.1%3A18874:actors:owner:codex"]
+    (is (nil? (config/mailbox-actor-bindings nil)))
+    (is (= {alice a bob b} (config/mailbox-actor-bindings (pr-str [[alice a] [bob b]]))))
+    (doseq [value ["" "[]" "{}" "#unknown []" (pr-str [["alice.example" b]]) (pr-str [[alice bob]])
+                   (pr-str [[alice a] [alice b]]) (pr-str [[alice a] [bob a]])]]
+      (is (thrown? js/Error (config/mailbox-actor-bindings value))))))
+
 (deftest schema-pool-has-only-its-own-statement-timeout
   (let [seen (atom nil)]
     (with-redefs [pg/create-pool! (fn [options] (reset! seen options) :schema-pool)]

@@ -78,6 +78,8 @@
                               :adapterFactory axxium.extern.oidc-store/adapter-factory
                               :createProvider axxium.extern.oidc-fixture/create-provider
                               :bindSession axxium.extern.oidc-store/bind-session!
+                              :bindMailbox axxium.extern.oidc-fixture/bind-mailbox
+                              :mailboxGrantActive axxium.extern.oidc-fixture/mailbox-grant-active?
                               :sessionGrantActive axxium.extern.oidc-store/session-grant-active?
                               :installHttp axxium.extern.oidc-fixture/install-http}}}
    :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}

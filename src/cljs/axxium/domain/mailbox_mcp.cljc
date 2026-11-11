@@ -13,6 +13,7 @@
    nil means anonymous and every tool refuses."
   (:require [axxium.domain.ledger :as ledger]
             [axxium.domain.mailbox :as mailbox]
+            [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.policy :as policy]
             [axxium.domain.resource :as resource]
             [axxium.domain.state :as state]
@@ -25,7 +26,7 @@
 (def empty-ledger ledger/empty-ledger)
 
 (def spec-tools
-  #{"whoami" "open_session" "resolve_address" "send_message" "read_inbox"
+  #{"whoami" "open_session" "discover_actors" "resolve_address" "send_message" "read_inbox"
     "acknowledge_message" "get_delivery"})
 
 (def outbox "outbox")
@@ -139,14 +140,24 @@
                                    :actor (:auth/did principal) :at now :body body})]
       (session-result lg' body))))
 
-(defn- resolve-address [lg _ {:keys [address]}]
+(defn- discover-actors [lg ctx _]
+  (if-not (directory/enabled? ctx)
+    (refuse :unknown-tool)
+    (if-let [peers (directory/peers lg (state/fold lg) ctx)]
+      {:ledger lg :result {:actors peers}}
+      (refuse :forbidden))))
+
+(defn- resolve-address [lg ctx {:keys [address]}]
   (let [d (if (and (string? address) (str/starts-with? address mailbox/prefix))
-            (subs address (count mailbox/prefix)) address)]
-    (if (did/did? d)
-      {:ledger lg
-       :result {:address/did d :address/mailbox (mailbox/stream d)
-                :address/registered? (contains? (:resources (state/fold lg)) (mailbox/stream d))}}
-      (refuse lg :bad-address))))
+            (subs address (count mailbox/prefix)) address)
+        box (mailbox/stream d)
+        st (delay (state/fold lg))]
+    (cond
+      (not (did/did? d)) (refuse :bad-address)
+      (and (directory/enabled? ctx) (not (directory/peer lg @st ctx d))) (refuse :forbidden)
+      :else {:ledger lg
+             :result {:address/did d :address/mailbox box
+                      :address/registered? (contains? (:resources @st) box)}})))
 
 (def ^:private owner-actions [:send :read :ack])
 
@@ -223,8 +234,10 @@
     true
     (catch #?(:clj Exception :cljs :default) _ false)))
 
-(defn- send-message [lg {:keys [principal now]} {:keys [to from idempotency-key body]}]
-  (let [me (:auth/did principal)]
+(defn- send-message [lg {:keys [principal now] :as ctx} {:keys [to from idempotency-key body]}]
+  (let [me (:auth/did principal)
+        scoped? (directory/enabled? ctx)
+        st (delay (state/fold lg))]
     (cond
       (and (some? from) (not= from me)) (refuse :forged-sender)
       (not (did/did? to)) (refuse :bad-address)
@@ -232,6 +245,7 @@
                 (portable-edn? idempotency-key))) (refuse :bad-idempotency-key)
       (not (and (map? body) (portable-edn? body))) (refuse :bad-body)
       (secret? body) (refuse :secret-in-payload)
+      (and scoped? (not (directory/peer lg @st ctx to))) (refuse :forbidden)
       :else
       (if-let [prior (prior-send lg me idempotency-key)]
         (if (and (= to (:message/to prior)) (= body (:message/body prior)))
@@ -247,10 +261,11 @@
                    :message/idempotency-key idempotency-key :message/owner to
                    :message/receipt receipt}
               {lg1 :ledger e :effect}
-              (policy/act lg (state/fold lg)
+              (policy/act lg @st
                           {:actor me :resource box :action :send :at now}
                           {:stream box :type :axxium.mailbox/accepted :actor me :body msg}
-                          {:decision-id (nid lg) :effect-id mid :at now})]
+                          {:decision-id (nid lg) :effect-id mid :at now}
+                          (constantly scoped?))]
           (if-not e
             (refuse lg1 :forbidden)
             (let [[lg2 _] (ledger/emit lg1 {:id (nid lg1) :stream outbox :type :axxium.outbox/pending
@@ -278,26 +293,28 @@
             0
             (of-type lg (mailbox/stream did) :axxium.mailbox/accepted))))
 
-(defn- read-inbox [lg {:keys [principal now]} {:keys [mailbox after]}]
+(defn- read-inbox [lg {:keys [principal now] :as ctx} {:keys [mailbox after]}]
   (let [me (:auth/did principal)
-        owner (or mailbox me)
-        box (mailbox/stream owner)
-        {lg' :ledger d :decision} (policy/act lg (state/fold lg)
-                                              {:actor me :resource box :action :read :at now}
-                                              nil {:decision-id (nid lg) :at now})]
-    (if-not (get-in d [:event/body :decision/allow?])
-      (refuse lg' :forbidden)
-      (let [explicit? (int? after)
-            durable-cursor (ack-cursor lg owner)
-            cursor (if explicit? (min after durable-cursor) durable-cursor)
-            acked (if explicit? #{} (acked-ids lg owner))
-            es (->> (of-type lg box :axxium.mailbox/accepted)
-                    (filter #(> (:event/seq %) cursor))
-                    (remove #(acked (get-in % [:event/body :message/id]))))]
-        {:ledger lg'
-         :result {:cursor cursor
-                  :next-cursor (if (seq es) (:event/seq (last es)) cursor)
-                  :messages (mapv #(assoc (:event/body %) :message/seq (:event/seq %)) es)}}))))
+        owner (or mailbox me)]
+    (if (and (directory/enabled? ctx) (not= me owner))
+      (refuse :forbidden)
+      (let [box (mailbox/stream owner)
+            {lg' :ledger d :decision} (policy/act lg (state/fold lg)
+                                                  {:actor me :resource box :action :read :at now}
+                                                  nil {:decision-id (nid lg) :at now})]
+        (if-not (get-in d [:event/body :decision/allow?])
+          (refuse lg' :forbidden)
+          (let [explicit? (int? after)
+                durable-cursor (ack-cursor lg owner)
+                cursor (if explicit? (min after durable-cursor) durable-cursor)
+                acked (if explicit? #{} (acked-ids lg owner))
+                es (->> (of-type lg box :axxium.mailbox/accepted)
+                        (filter #(> (:event/seq %) cursor))
+                        (remove #(acked (get-in % [:event/body :message/id]))))]
+            {:ledger lg'
+             :result {:cursor cursor
+                      :next-cursor (if (seq es) (:event/seq (last es)) cursor)
+                      :messages (mapv #(assoc (:event/body %) :message/seq (:event/seq %)) es)}}))))))
 
 (defn- acknowledge [lg {:keys [principal now]} {:keys [message-id]}]
   (let [me (:auth/did principal)
@@ -345,7 +362,7 @@
                 :delivery/execution :unknown}})))
 
 (def ^:private tools
-  {:whoami whoami :resolve_address resolve-address :send_message send-message
+  {:whoami whoami :discover_actors discover-actors :resolve_address resolve-address :send_message send-message
    :read_inbox read-inbox :acknowledge_message acknowledge :get_delivery get-delivery
    :register_mailbox register-mailbox :grant_send grant-send :revoke_send revoke-send})
 
