@@ -37,9 +37,21 @@
               revoked))
           #{} lg))
 
-(defn- sender-root [state bindings principal]
-  (when (contains? #{:atproto :owner-delegation} (:auth/method principal))
-    (active-root state (get bindings (:auth/did principal)))))
+(defn bootstrap-actor?
+  "An opted-in active agent or bot may use only its own unbound DID."
+  [{:directory/keys [state bindings bootstrap-actors bootstrap-root]} did]
+  (and (contains? bootstrap-actors did)
+       (not (contains? bindings did))
+       (not (some #{did} (vals bindings)))
+       (contains? #{:agent :bot} (identity/kind-of state did))
+       (identity/active-owner-delegation? state bootstrap-root did)))
+
+(defn- sender-root [{:directory/keys [state bindings bootstrap-root] :as ctx}
+                    {:auth/keys [method did]}]
+  (case method
+    (:atproto :owner-delegation) (active-root state (get bindings did))
+    :actor-bootstrap (when (bootstrap-actor? ctx did) bootstrap-root)
+    nil))
 
 (defn- reachable-actor [state resources root revoked mailbox-did actor-did]
   (let [box (mailbox/stream mailbox-did)
@@ -55,18 +67,20 @@
 (defn peer
   "Return the routable peer for this verified mailbox principal, or nil. An owner's
    explicit send revocation continues to apply until a live explicit regrant."
-  [lg mailbox-state {:keys [principal now] :directory/keys [state bindings]} mailbox-did]
-  (when-let [root (sender-root state bindings principal)]
+  [lg mailbox-state {:keys [principal now] :directory/keys [state bindings] :as ctx} mailbox-did]
+  (when-let [root (sender-root ctx principal)]
     (reachable-actor state (:resources mailbox-state) root (revoked-mailboxes lg (:auth/did principal) now)
-                     mailbox-did (get bindings mailbox-did))))
+                     mailbox-did (if (bootstrap-actor? ctx mailbox-did)
+                                   mailbox-did
+                                   (get bindings mailbox-did)))))
 
 (defn peers
   "Return the same reachable peers exposed by send and address resolution.
    Nil means the authenticated sender has no current owner-tree binding."
-  [lg mailbox-state {:keys [principal now] :directory/keys [state bindings]}]
-  (when-let [root (sender-root state bindings principal)]
+  [lg mailbox-state {:keys [principal now] :directory/keys [state bindings bootstrap-actors] :as ctx}]
+  (when-let [root (sender-root ctx principal)]
     (let [revoked (revoked-mailboxes lg (:auth/did principal) now)]
-      (->> bindings
+      (->> (concat bindings (for [did bootstrap-actors :when (bootstrap-actor? ctx did)] [did did]))
            (keep (fn [[mailbox-did actor-did]]
                    (reachable-actor state (:resources mailbox-state) root revoked mailbox-did actor-did)))
            (sort-by :actor/did)

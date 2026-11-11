@@ -9,6 +9,7 @@
             [axxium.domain.state :as state]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.fastify :as fastify]
+            [axxium.extern.github-identity-mcp :as bootstrap]
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.mailbox-webhook :as webhook]
@@ -479,5 +480,123 @@
 (deftest scoped-oauth-discovers-and-sends-without-acquiring-inbox-access
   (async done
     (-> (verify-actor-messaging*)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(defn- ^:async verify-bootstrap-mailbox* []
+  (let [keys (await (signing/generate-ephemeral!))
+        dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-bootstrap-"))
+        ledger (path/join dir "ledger.edn")
+        actor-ledger (path/join dir "actors.edn")
+        root "did:web:axxium.test:actors:owner"
+        grok (str root ":grokbot")
+        codex (str root ":codex")
+        sibling (str root ":other")
+        policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
+        ids (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
+        test-key (fn [byte] (str "axb_" (.toString (js/Buffer.alloc 32 byte) "base64url")))
+        grok-key (test-key 1)
+        next-key (test-key 2)
+        other-key (test-key 3)
+        issue (fn [lg did key]
+                (:ledger (gi/issue-bootstrap lg (state/fold lg) root did (bootstrap/digest key) (ids))))
+        tree (atom (-> (:ledger (gi/seed-ledger
+                                 (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
+                                                   :nodes [{:id grok :parent root :name "Grok Bot" :kind :bot :policy policy}
+                                                           {:id codex :parent root :name "Codex" :kind :agent :policy policy}
+                                                           {:id sibling :parent root :name "Other" :kind :agent :policy policy}]}
+                                                  "axxium.test")
+                                 ids))
+                       (issue grok grok-key)
+                       (issue sibling other-key)))
+        allowlist (atom nil)
+        rotate-before-operation? (atom false)
+        live (atom {})
+        app (atom nil)
+        config cfg/get-in-config]
+    (try
+      (fs/writeFileSync ledger "" #js {:mode 384})
+      (with-redefs [signing/current! (constantly keys)
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
+                    identity/current-actor-state (fn [] (state/fold @tree))
+                    identity/with-current-actor-state! (fn ^:async locked-identity [f]
+                                                        (when @rotate-before-operation?
+                                                          (reset! rotate-before-operation? false)
+                                                          (swap! tree issue grok next-key))
+                                                        {:result (await (f (state/fold @tree)))})
+                    cfg/get-in-config (fn [ks]
+                                        (case (first ks)
+                                          :mailbox/ledger-file ledger
+                                          :mailbox/actor-bindings {fixture/bob codex}
+                                          :mailbox/bootstrap-actor-dids @allowlist
+                                          :mailbox/subscriptions-enabled? false
+                                          :github-identity/ledger-file actor-ledger
+                                          :identity/root-operator-binding {:root-did root :actor-id "actor_11111111-1111-4111-8111-111111111111"}
+                                          :axxium/public-base-url origin
+                                          (config ks)))]
+        (reset! app (await (start-app!)))
+        (let [init (rpc "initialize")
+              as-grok {"x-axxium-actor" grok}
+              request (fn [token sid body h] (request! @app "POST" token sid body h))
+              bootstrap-call (fn [sid body] (request grok-key sid body as-grok))]
+          (is (= 401 (:status (await (bootstrap-call nil init)))) "Disabled by default.")
+          (await (.close (:app @app)))
+          (reset! app nil)
+          (reset! allowlist #{grok codex})
+          (let [invalid (fastify/create-app)]
+            (is (thrown? js/Error (routes/register-mailbox-routes! invalid))
+                "Bootstrap configuration refuses a node with an external mailbox address.")
+            (await (.close invalid)))
+          (reset! allowlist #{grok})
+          (reset! app (await (start-app!)))
+          (let [codex-token (:bearer (await (mint-fixture! live "actor_22222222-2222-4222-8222-222222222222"
+                                                         (secrets/secure-id) fixture/bob)))
+                colliding-token (:bearer (await (mint-fixture! live "actor_33333333-3333-4333-8333-333333333333"
+                                                             (secrets/secure-id) grok)))
+                started (await (bootstrap-call nil init))
+                grok-sid (:sid started)
+                codex-sid (:sid (await (request codex-token nil init {})))
+                codex-call (fn [body] (request codex-token codex-sid body {}))
+                send (fn [to tag] (tool "send_message" {"to" to "idempotency_key" tag "body" {"text" tag}}))]
+            (is (= 200 (:status started)))
+            (is (= {"tools" {}} (get-in started [:data "result" "capabilities"])))
+            (is (= 401 (:status (await (request grok-key nil init {})))))
+            (is (= 401 (:status (await (request other-key nil init as-grok)))))
+            (is (= 401 (:status (await (request other-key nil init {"x-axxium-actor" sibling})))))
+            (is (= 403 (:status (await (request colliding-token nil init {}))))
+                "External authentication cannot borrow the bootstrap actor's mailbox DID.")
+            (is (= grok (get (result (await (bootstrap-call grok-sid (tool "whoami" {})))) "did")))
+            (is (= (str "mbox/" grok)
+                   (get (result (await (bootstrap-call grok-sid (tool "register_mailbox" {})))) "mailbox")))
+            (await (codex-call (tool "register_mailbox" {})))
+            (is (= #{grok codex}
+                   (set (map #(get % "did") (get (result (await (bootstrap-call grok-sid (tool "discover_actors" {})))) "actors")))))
+            (is (= "accepted" (get (result (await (bootstrap-call grok-sid (send fixture/bob "from-grok")))) "accepted")))
+            (is (= grok (get-in (result (await (codex-call (tool "read_inbox" {})))) ["messages" 0 "message_from"])))
+            (is (= "accepted" (get (result (await (codex-call (send grok "from-codex")))) "accepted")))
+            (is (= fixture/bob (get-in (result (await (bootstrap-call grok-sid (tool "read_inbox" {})))) ["messages" 0 "message_from"])))
+            (is (true? (get-in (await (bootstrap-call grok-sid (tool "read_inbox" {"mailbox" fixture/bob})))
+                               [:data "result" "isError"])))
+            (let [before (fs/readFileSync ledger "utf8")]
+              (reset! rotate-before-operation? true)
+              (is (= 401 (:status (await (bootstrap-call grok-sid (tool "read_inbox" {})))))
+                  "A rotation before the locked operation refuses a previously validated key.")
+              (is (= before (fs/readFileSync ledger "utf8"))))
+            (is (= 401 (:status (await (bootstrap-call nil init)))))
+            (is (= 404 (:status (await (request next-key grok-sid (tool "whoami" {}) as-grok)))))
+            (let [new-sid (:sid (await (request next-key nil init as-grok)))]
+              (is (string? new-sid))
+              (swap! tree #(:ledger (gi/suspend % (state/fold %) root grok (ids))))
+              (is (= 401 (:status (await (request next-key new-sid (tool "whoami" {}) as-grok))))))
+            (let [saved (fs/readFileSync ledger "utf8")]
+              (is (not (str/includes? saved grok-key)))
+              (is (not (str/includes? saved (bootstrap/digest grok-key))))))))
+      (finally
+        (when @app (await (.close (:app @app))))
+        (fs/rmSync dir #js {:recursive true})))))
+
+(deftest opted-in-bootstrap-node-uses-only-its-own-mailbox
+  (async done
+    (-> (verify-bootstrap-mailbox*)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))

@@ -133,6 +133,18 @@
                         {:reason :invalid-mailbox-actor-bindings})))
       (into {} pairs))))
 
+(defn mailbox-bootstrap-actor-dids
+  "Admit an explicit comma-separated list of distinct actor DIDs."
+  [value]
+  (when (some? value)
+    (let [dids (when (and (string? value) (<= 1 (count value) 65536))
+                 (str/split value #"," -1))]
+      (when-not (and (seq dids) (every? did-law/web? dids)
+                     (= (count dids) (count (set dids))))
+        (throw (ex-info "AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS requires distinct did:web actor DIDs"
+                        {:reason :invalid-mailbox-bootstrap-actor-dids})))
+      (set dids))))
+
 (def config
   (let [instance (load-instance)
         webhook-actor (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))]
@@ -185,6 +197,7 @@
      :mailbox/webhook-actor-did webhook-actor
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
      :mailbox/actor-bindings (mailbox-actor-bindings (env "AXXIUM_MAILBOX_ACTOR_BINDINGS"))
+     :mailbox/bootstrap-actor-dids (mailbox-bootstrap-actor-dids (env "AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS"))
      :identity/root-operator-binding
      (root-operator-binding (env "AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID")
                             (env "AXXIUM_IDENTITY_ROOT_DID"))
