@@ -118,6 +118,12 @@
                                      "capabilities" (cond-> {"tools" {}}
                                                       (:events/enabled? ctx) (assoc "events" {}))}}}
 
+    (and (= method "events/list") (:events/subscriptions-disabled? ctx))
+    {:ledger lg
+     :response (if (and (every? #{"cursor"} (keys params)) (nil? (get params "cursor")))
+                 {"jsonrpc" "2.0" "id" id "result" {"events" []}}
+                 (rpc-error id -32602 "Invalid event arguments"))}
+
     (= method "tools/list")
     {:ledger lg :response {"jsonrpc" "2.0" "id" id
                            "result" {"tools" (filterv #(tool-allowed? ctx (get % "name")) tool-descriptors)}}}

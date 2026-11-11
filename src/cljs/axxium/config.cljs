@@ -180,6 +180,7 @@
      :github-identity/key-dir (env "AXXIUM_GITHUB_IDENTITY_KEY_DIR" "")
      :identity/seed-file (env "AXXIUM_IDENTITY_SEED_FILE" "")
      :mailbox/ledger-file (present (env "AXXIUM_MAILBOX_LEDGER_FILE"))
+     :mailbox/subscriptions-enabled? (env-bool "AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED" true)
      :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
      :mailbox/webhook-actor-did webhook-actor
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
