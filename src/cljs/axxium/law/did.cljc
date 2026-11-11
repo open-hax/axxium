@@ -30,3 +30,15 @@
 
 (defn valid-did? [value]
   (m/validate Did value))
+
+(defn actor-did
+  "Construct an actor DID from an instance origin or authority. Encode the
+   authority's port separator while preserving the actor path."
+  [origin actor-path]
+  (let [authority (-> origin
+                      (str/replace #"^https?://" "")
+                      (str/replace #"/.*$" "")
+                      str/lower-case
+                      (str/replace ":" "%3A")
+                      (str/replace "%3a" "%3A"))]
+    (str "did:web:" authority ":actors:" actor-path)))

@@ -140,7 +140,7 @@
       "subtree_export" (js/Promise.resolve {:result {:seed (gi/export-subtree st caller)}})
       "subtree_import"
       (let [{:keys [ledger created unchanged refused]}
-            (gi/apply-seed lg caller (dissoc (gi/resolve-seed (:seed a) (:host a)) :root) ids)]
+            (gi/apply-seed lg caller (gi/resolve-seed (dissoc (:seed a) :root) (:host a) st) ids)]
         (js/Promise.resolve {:ledger ledger :result {:created created :unchanged unchanged
                                                      :refused refused}}))
       "credentials_self"
@@ -164,10 +164,12 @@
 
 (defn call [{:keys [ledger] :as deps} {:keys [actor]} tool args]
   (let [st (state/fold ledger)]
-    (-> (cond (nil? actor) (refuse :unauthenticated)
-              (not (contains? tools tool)) (refuse :unknown-tool)
-              (not (valid? tool args)) (refuse :invalid)
-              :else (run deps ledger st actor tool args))
+    (-> (js/Promise.resolve)
+        (.then (fn []
+                 (cond (nil? actor) (refuse :unauthenticated)
+                       (not (contains? tools tool)) (refuse :unknown-tool)
+                       (not (valid? tool args)) (refuse :invalid)
+                       :else (run deps ledger st actor tool args))))
         (.catch (fn [e] {:error (or (:axxium/error (ex-data e)) :github-unavailable)})))))
 
 (defn admin

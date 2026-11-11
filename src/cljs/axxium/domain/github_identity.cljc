@@ -9,7 +9,9 @@
   (:require [axxium.domain.ledger :as ledger]
             [axxium.domain.policy :as policy]
             [axxium.domain.state :as state]
-            [axxium.law.github-identity :as law]))
+            [axxium.law.did :as did-law]
+            [axxium.law.github-identity :as law]
+            [clojure.string :as str]))
 
 (defn actor-node [state did]
   (let [r (get-in state [:resources (law/actor-resource-id did)])]
@@ -240,18 +242,55 @@
 ;; Ids are actor paths ("alice:hosts:laptop") resolved on a host to
 ;; did:web:<host>:actors:<path>, or full DIDs used as-is.
 
-(defn- path->did [host id]
-  (if (re-find #"^did:" id) id (str "did:web:" host ":actors:" id)))
+(defn- resolve-seed-did [state canonical legacy path parent]
+  (when path
+    (if (str/starts-with? path "did:")
+      path
+      (or (some (fn [prefix]
+                  (let [did (str prefix path)]
+                    (when (actor-node state did) did)))
+                (cons canonical legacy))
+          (let [parent-prefix (when parent (some #(when (str/starts-with? parent %) %) legacy))]
+            (str (or parent-prefix canonical) path))))))
+
+(defn- reject-conflicting-seed-paths! [state prefixes paths planned]
+  (doseq [path (distinct (remove #(or (nil? %) (str/starts-with? % "did:")) paths))]
+    (let [occupied (filter #(or (contains? planned %) (actor-node state %))
+                           (map #(str % path) prefixes))]
+      (when (next occupied)
+        (throw (ex-info "Multiple actor DID spellings exist for a seed path"
+                        {:axxium/error :conflicting-actor-did}))))))
 
 (defn resolve-seed
-  "Resolve paths to DIDs and named policies to Policy maps."
-  [{:keys [policies root nodes]} host]
-  (let [did #(when % (path->did host %))
-        pol #(if (keyword? %) (get policies %) %)]
-    {:root (when root {:did (did (:id root)) :name (:name root) :policy (pol (:policy root))})
-     :nodes (mapv (fn [n] {:did (did (:id n)) :parent (did (:parent n)) :name (:name n)
-                           :kind (:kind n) :policy (pol (:policy n))})
-                  nodes)}))
+  "Resolve seed paths and named policies. With the current ledger state,
+   keep recorded DIDs and extend a legacy parent's existing namespace.
+   Refuse ambiguous relative paths before the caller appends any events."
+  ([seed host] (resolve-seed seed host nil))
+  ([{:keys [policies root nodes]} host state]
+   (let [canonical (did-law/actor-did host "")
+         legacy (->> [(str "did:web:" host ":actors:")
+                      (str/replace canonical #"%3A([0-9]+):actors:$" ":$1:actors:")]
+                     distinct
+                     (remove #{canonical}))
+         did #(resolve-seed-did state canonical legacy %1 %2)
+         pol #(if (keyword? %) (get policies %) %)
+         root-did (did (:id root) nil)
+         resolved (reduce
+                   (fn [{:keys [dids] :as out} {:keys [id parent name kind policy]}]
+                     (let [parent-did (or (get dids parent) (did parent nil))
+                           resolved-id (did id parent-did)]
+                       (-> out
+                           (assoc-in [:dids id] resolved-id)
+                           (update :nodes conj {:did resolved-id :parent parent-did :name name
+                                                :kind kind :policy (pol policy)}))))
+                   {:dids {(:id root) root-did} :nodes []}
+                   nodes)]
+     (when (seq legacy)
+       (reject-conflicting-seed-paths! state (cons canonical legacy)
+                                       (cons (:id root) (mapcat (juxt :id :parent) nodes))
+                                       (into #{root-did} (map :did) (:nodes resolved))))
+     {:root (when root {:did root-did :name (:name root) :policy (pol (:policy root))})
+      :nodes (:nodes resolved)})))
 
 (defn apply-seed
   "Idempotently apply resolved `nodes` as `operator`, through the same

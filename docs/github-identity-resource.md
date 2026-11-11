@@ -141,8 +141,13 @@ alice (:human)
 
 - `:policies` names reusable policies; a node's `:policy` is a map or one of
   those names.
-- Ids are actor paths, resolved to `did:web:<axxium host>:actors:<path>`, or
-  full DIDs.
+- IDs are actor paths, resolved to `did:web:<axxium host>:actors:<path>`, or
+  full DIDs. For a new tree on `axxium.example:18874`, the DID authority is
+  `axxium.example%3A18874`. Use the resolved root DID in the owner binding.
+- An existing actor retains its recorded DID. New seed descendants under a
+  legacy parent use that parent's namespace. If a relative path matches
+  existing actors under both spellings, Axxium refuses the seed before
+  appending events. Explicit full DIDs retain their spelling.
 - At startup the root registers itself if absent, then each node is created
   through the normal provision op as its parent (G1 applies). Existing actors
   are left untouched, so restarts are no-ops; nothing is ever deleted or
