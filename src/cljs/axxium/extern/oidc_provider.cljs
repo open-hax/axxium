@@ -2,6 +2,7 @@
   "OIDC engine boundary: registered clients, durable storage and live actors."
   (:require [axxium.extern.oidc-store :as store]
             [axxium.law.oidc :as law]
+            [axxium.law.principal :as principal]
             [clojure.string :as str]
             ["node:async_hooks" :refer [AsyncLocalStorage]]
             ["oidc-provider" :default Provider :refer [errors interactionPolicy]]))
@@ -60,7 +61,7 @@
                        (when-let [delegated (await (store/delegated-mailbox-grant-proof! pool grant-id account-id
                                                     mailbox-client-id mailbox-resource delegation))]
                          (when ((:authorized? delegation)) delegated))))]
-       (when (and proof (= owner (get-in proof [:principal :auth/did])))
+       (when (and proof (= owner (principal/address (:principal proof))))
          (cond-> proof bound-actor-did (assoc :mailbox/actors? true)))))))
 
 (defn- current-grant!

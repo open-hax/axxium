@@ -34,18 +34,38 @@
   (http/send-secret! reply 401 {:error "A live AT Protocol session is required"}))
 
 (defn- active-proof! [oauth proof]
-  (if (:oauth/grant-id proof)
-    ((:active-grant? oauth) proof)
-    (session/active-atproto-session? proof)))
+  (cond
+    (:oauth/grant-id proof) ((:active-grant? oauth) proof)
+    (:node/digest proof) (identity/node-proof-active? proof)
+    :else (session/active-atproto-session? proof)))
+
+(defn- node-credential
+  "Directory mode only: an agent node's own bootstrap credential."
+  [req directory?]
+  (when directory?
+    (let [did (http/header req "x-axxium-actor")
+          bearer (some->> (http/authorization req) (re-matches #"(?i)Bearer (axb_[^\s]+)") second)]
+      (when (and did bearer) (identity/node-proof did bearer)))))
+
+(defn- borrowed-node-did?
+  "L5: an external account may never act at an actor node's own DID."
+  [directory? proof]
+  (and directory?
+       (not= :actor-node (get-in proof [:principal :auth/method]))
+       (identity/actor-node? (get-in proof [:principal :auth/did]))))
 
 (defn- authorized
-  [origin oauth resource-metadata allowed-dids handler]
+  "Admission. In directory mode it is tree ancestry alone (L6, checked by the
+   directory per operation); `allowed-dids` is the deprecated two-DID pilot
+   fence, which startup refuses alongside directory mode."
+  [origin oauth resource-metadata allowed-dids directory? handler]
   (fn ^:async mailbox-handler [req reply]
     (try
       (if-not (admitted-origin? req origin)
         (http/send-secret! reply 403 {:error "Mailbox origin refused"})
         (let [token (request-token req (:origin origin))
-              proof (or (await (session/atproto-session-proof token))
+              proof (or (node-credential req directory?)
+                        (await (session/atproto-session-proof token))
                         (when (and oauth token (http/authorization req))
                           (await ((:access-proof! oauth) token))))]
           (cond
@@ -53,6 +73,9 @@
             (require-auth! reply resource-metadata)
 
             (and allowed-dids (not (contains? allowed-dids (get-in proof [:principal :auth/did]))))
+            (http/send-secret! reply 403 {:error "Mailbox access refused"})
+
+            (borrowed-node-did? directory? proof)
             (http/send-secret! reply 403 {:error "Mailbox access refused"})
 
             :else (await (handler req reply proof)))))
@@ -202,7 +225,7 @@
              writer (queue/create storage)
              runtime (when-not subscriptions-disabled?
                        (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)))
-             no-stream (authorized origin oauth resource-metadata allowed-dids
+             no-stream (authorized origin oauth resource-metadata allowed-dids directory?
                                    (fn [_ reply _]
                                      (http/set-header! reply "Allow" "POST")
                                      (http/send-empty! reply 405)))]
@@ -214,7 +237,7 @@
                                                        "scopes_supported" (or (:scopes oauth) [(:scope oauth)])
                                                        "bearer_methods_supported" ["header"]}))))
          (http/post! app endpoint
-                     (authorized origin oauth resource-metadata allowed-dids
+                     (authorized origin oauth resource-metadata allowed-dids directory?
                                  (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth directory?
                                           resource-metadata)))
          (http/get! app endpoint no-stream)

@@ -9,10 +9,12 @@
             [axxium.domain.state :as state]
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.fastify :as fastify]
+            [axxium.extern.github-identity-mcp :as mcp]
             [axxium.extern.http :as http]
             [axxium.extern.ledger-file :as disk]
             [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.signing-key :as signing]
+            [axxium.extern.token-crypto :as tc]
             [axxium.law.github-identity :as identity-law]
             [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox :as routes]
@@ -489,5 +491,90 @@
 (deftest scoped-oauth-discovers-and-sends-without-acquiring-inbox-access
   (async done
     (-> (verify-actor-messaging*)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(defn- ^:async verify-node-auth* []
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-nodes-"))
+        ledger (path/join dir "ledger.edn")
+        root "did:web:axxium.test:actors:owner"
+        grokbot (str root ":grokbot")
+        work (str root ":work")
+        other (str "did:web:axxium.test:actors:other:agent")
+        policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
+        event-ids (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
+        grokbot-key (str "axb_" (secrets/secure-id))
+        work-key (str "axb_" (secrets/secure-id))
+        other-key (str "axb_" (secrets/secure-id))
+        issue (fn [lg did key]
+                (:ledger (gi/issue-bootstrap lg (state/fold lg) (gi/parent-of (state/fold lg) did) did
+                                             (mcp/digest key) (event-ids))))
+        tree (atom (-> (:ledger (gi/seed-ledger
+                                 (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
+                                                   :nodes [{:id grokbot :parent root :name "Grok Bot" :kind :agent :policy policy}
+                                                           {:id work :parent root :name "Work" :kind :agent :policy policy}]}
+                                                  "axxium.test")
+                                 event-ids))
+                       (#(:ledger (gi/register-root % (state/fold %) "did:web:axxium.test:actors:other" "Other" policy (event-ids))))
+                       (#(:ledger (gi/provision-actor % (state/fold %) "did:web:axxium.test:actors:other" other "Other agent" policy :agent (event-ids))))
+                       (issue grokbot grokbot-key)
+                       (issue work work-key)
+                       (issue other other-key)))
+        app (atom nil)
+        config cfg/get-in-config]
+    (try
+      (fs/writeFileSync ledger "" #js {:mode 384})
+      (with-redefs [tc/read-key-file (constantly (js/Buffer.alloc 32))
+                    identity/current-actor-state (fn [] (state/fold @tree))
+                    identity/with-current-actor-state! (fn ^:async read-identity [f]
+                                                        {:result (await (f (state/fold @tree)))})
+                    cfg/get-in-config (fn [ks]
+                                        (case (first ks)
+                                          :mailbox/ledger-file ledger
+                                          :mailbox/directory? true
+                                          :mailbox/actor-bindings nil
+                                          :github-identity/ledger-file (path/join dir "actors.edn")
+                                          :identity/root-operator-binding nil
+                                          :axxium/public-base-url origin
+                                          (config ks)))]
+        (reset! app (await (start-app!)))
+        (let [as (fn [did key] {"x-axxium-actor" did "authorization" (str "Bearer " key)})
+              run (fn [creds sid body] (request! @app "POST" nil sid body creds))
+              open! (fn [creds] (.then (run creds nil (rpc "initialize")) (fn [r] (:sid r))))
+              g (as grokbot grokbot-key)
+              w (as work work-key)
+              o (as other other-key)
+              g-sid (await (open! g))
+              w-sid (await (open! w))
+              o-sid (await (open! o))]
+          (is (= 401 (:status (await (run (as grokbot work-key) nil (rpc "initialize"))))) "a node's key is its own")
+          (is (string? g-sid) "L5: Grok Bot authenticates as its own node")
+          (await (run g g-sid (tool "register_mailbox" {})))
+          (await (run w w-sid (tool "register_mailbox" {})))
+          (await (run o o-sid (tool "register_mailbox" {})))
+          (is (= grokbot (get (result (await (run g g-sid (tool "whoami" {})))) "did"))
+              "its mailbox address is its own DID")
+          (is (= #{work grokbot}
+                 (set (map #(get % "did") (get (result (await (run g g-sid (tool "discover_actors" {})))) "actors")))))
+          (is (= "accepted" (get (result (await (run g g-sid (tool "send_message" {"to" work "idempotency_key" "xh-1"
+                                                                                  "body" {"text" "hello work"}}))))
+                                 "accepted")))
+          (let [inbox (result (await (run w w-sid (tool "read_inbox" {}))))]
+            (is (= grokbot (get-in inbox ["messages" 0 "message_from"])))
+            (is (= "hello work" (get-in inbox ["messages" 0 "message_body" "text"]))))
+          (is (true? (get-in (await (run o o-sid (tool "send_message" {"to" work "idempotency_key" "x"
+                                                                        "body" {"text" "outside"}})))
+                             [:data "result" "isError"]))
+              "S3: another tree's node cannot reach Work")
+          (swap! tree #(:ledger (gi/suspend % (state/fold %) root grokbot (event-ids))))
+          (is (= 401 (:status (await (run g g-sid (tool "whoami" {})))))
+              "L2: a suspended node loses its own credential")))
+      (finally
+        (when @app (await (.close (:app @app))))
+        (fs/rmSync dir #js {:recursive true})))))
+
+(deftest agent-nodes-message-as-themselves
+  (async done
+    (-> (verify-node-auth*)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))

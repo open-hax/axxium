@@ -35,11 +35,11 @@
   (when-not (map? body)
     (throw (ex-info "Message body must be a map" {:axxium/error :axxium.mbox/bad-body})))
   (policy/act lg state
-              {:actor (:auth/did sender) :resource (mailbox-resource to)
+              {:actor (principal/address sender) :resource (mailbox-resource to)
                :action :send :at at}
               {:stream (stream to)
                :type :axxium.mbox/sent
-               :actor (:auth/did sender)
+               :actor (principal/address sender)
                :body (cond-> {:msg/to to
                               :msg/auth (:auth/method sender)
                               :message/body body}
@@ -53,10 +53,10 @@
   [lg state reader {:keys [decision-id at]}]
   (let [{:keys [ledger decision]}
         (policy/act lg state
-                    {:actor (:auth/did reader) :resource (mailbox-resource (:auth/did reader))
+                    {:actor (principal/address reader) :resource (mailbox-resource (principal/address reader))
                      :action :read :at at}
                     nil {:decision-id decision-id :at at} own-mailbox?)]
     {:ledger ledger
      :decision decision
      :messages (when (get-in decision [:event/body :decision/allow?])
-                 (ledger/stream ledger (stream (:auth/did reader))))}))
+                 (ledger/stream ledger (stream (principal/address reader))))}))
