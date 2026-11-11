@@ -69,6 +69,11 @@
 (defn- serialized [f]
   (ledger-queue/submit! ledger-writer (ledger-path) f))
 
+(defn current-actor-state
+  "Read the admitted actor tree without acquiring its writer."
+  []
+  (state/fold (current-ledger)))
+
 (defn with-current-actor-state!
   "Run f against the admitted actor tree before another identity write can commit."
   [f]

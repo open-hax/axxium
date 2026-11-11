@@ -20,7 +20,7 @@ export async function readProtocolJSON(response, label, allowEmpty = false) {
 }
 
 export async function runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive) {
-  await pool.query("CREATE TABLE actors(id text PRIMARY KEY,status text NOT NULL); CREATE TABLE sessions(actor_id text,token_hash text,expires_at timestamptz); INSERT INTO actors VALUES('synthetic-actor','active'); INSERT INTO sessions VALUES('synthetic-actor','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',clock_timestamp()+interval '1 hour')");
+  await pool.query("CREATE TABLE actors(id text PRIMARY KEY,status text NOT NULL,entity_id text); CREATE TABLE entities(id text PRIMARY KEY,kind text); CREATE TABLE provider_bindings(actor_id text,provider text,subject text); CREATE TABLE sessions(actor_id text,token_hash text,expires_at timestamptz,id uuid); INSERT INTO actors VALUES('synthetic-actor','active'); INSERT INTO sessions VALUES('synthetic-actor','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',clock_timestamp()+interval '1 hour')");
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const secret = randomBytes(32).toString('hex');
   const fixtureApproval = randomBytes(32).toString('hex');

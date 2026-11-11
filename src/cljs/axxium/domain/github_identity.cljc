@@ -52,6 +52,13 @@
        (effective? state did)
        (law/valid-policy? (policy-of state did))))
 
+(defn active-owner-delegation?
+  "The exact active human root currently manages this active child."
+  [state root-did child-did]
+  (and (active-human-root? state root-did)
+       (may-manage? state root-did child-did)
+       (effective? state child-did)))
+
 (defn- node [did parent name pol status & [kind]]
   {:resource/id (law/actor-resource-id did)
    :resource/kind law/actor-kind

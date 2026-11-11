@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { randomBytes, createHash, randomUUID, generateKeyPairSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import Fastify from 'fastify';
+import cookiePlugin from '@fastify/cookie';
 import { Pool } from 'pg';
 import { runHttpFixture } from './oidc-http.fixture.mjs';
 import { runAuthorityFixture } from './oidc-protocol.fixture.mjs';
-import { initialize, adapterFactory, createProvider, bindSession, sessionGrantActive, installHttp, bindMailbox, mailboxGrantActive } from '../target/oidc-store/store.js';
+import { initialize, adapterFactory, createProvider, bindSession, sessionGrantActive, installHttp, bindMailbox, mailboxGrantActive, installOwnerHttp } from '../target/oidc-store/store.js';
 
 // Owned, empty cluster only. No existing service database or credentials used.
 const pgBin = process.env.AXXIUM_TEST_PG_BIN || '/usr/lib/postgresql/16/bin';
@@ -34,7 +37,6 @@ async function verifyMailboxActorGrant(pool) {
   const otherActorDid = 'did:web:axxium.example:actors:another:work';
   const credential = '43ae8260-032c-40f3-a2eb-e4edcd8a0985';
   const digest = 'b'.repeat(64);
-  await pool.query('ALTER TABLE sessions ADD COLUMN id uuid; CREATE TABLE provider_bindings(actor_id text,provider text,subject text)');
   await pool.query("INSERT INTO actors VALUES($1,'active')", [account]);
   await pool.query("INSERT INTO sessions(actor_id,token_hash,expires_at,id) VALUES($1,$2,clock_timestamp()+interval '1 hour',$3)", [account, digest, credential]);
   await pool.query("INSERT INTO provider_bindings VALUES($1,'atproto',$2)", [account, mailboxDid]);
@@ -74,6 +76,160 @@ async function verifyMailboxActorGrant(pool) {
   await Grant.upsert(scoped, { ...actorPayload, rejected: { resources: { [resource]: 'mailbox:actors' } } }, 300);
   assert.equal(await active(scoped, actorDid), false, 'Current grant rejection removes actor authority');
   assert.equal(await active(scoped, null), true);
+}
+
+async function verifyWorkOwnerConsent(pool, root) {
+  const owner = { id: 'owner-consent-human', status: 'active', display_name: 'Existing Axxium Owner' };
+  const outsider = { id: 'owner-consent-outsider', status: 'active', display_name: 'Unrelated Human' };
+  const work = { id: 'owner-consent-work', status: 'active', display_name: 'Work actor' };
+  const rootDid = 'did:web:axxium.example:actors:existing-owner';
+  const workDid = `${rootDid}:chatgpt:work`;
+  const mailboxDid = 'did:plc:bbbbbbbbbbbbbbbbbbbbbbbb';
+  const token = randomBytes(32).toString('base64url');
+  const digest = createHash('sha256').update(token).digest('hex');
+  const credential = randomUUID();
+  await pool.query("INSERT INTO entities VALUES('owner-consent-entity','human'),('owner-consent-outsider-entity','human')");
+  await pool.query("INSERT INTO actors VALUES($1,'active','owner-consent-entity'),($2,'active','owner-consent-outsider-entity'),($3,'active',NULL)",
+    [owner.id, outsider.id, work.id]);
+  await pool.query("INSERT INTO provider_bindings VALUES($1,'atproto',$2)", [work.id, mailboxDid]);
+  await pool.query("INSERT INTO sessions VALUES($1,$2,clock_timestamp()+interval '1 hour',$3)", [owner.id, digest, credential]);
+
+  const listener = createServer();
+  await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  const origin = `http://127.0.0.1:${port}`;
+  const resource = `${origin}/api/mailbox/mcp`;
+  const client = { id: 'owner-consent-client', secret: randomBytes(32).toString('hex'),
+    'refresh-enabled?': true, 'redirect-uris': [`${origin}/work-callback`] };
+  const ordinary = { id: 'ordinary-owner-client', secret: randomBytes(32).toString('hex'),
+    'redirect-uris': [`${origin}/ordinary-callback`] };
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const configPath = join(root, 'oidc-owner-consent.json');
+  writeFileSync(configPath, JSON.stringify({
+    issuer: `${origin}/oidc`, clients: [client, ordinary], 'allow-loopback?': true,
+    'cookie-keys': [randomBytes(32).toString('hex')],
+    jwks: { keys: [{ ...privateKey.export({ format: 'jwk' }), kid: 'work-owner', alg: 'RS256', use: 'sig' }] },
+    'mailbox-client-id': client.id, 'mailbox-resource': resource, 'mailbox-actor-messaging?': true,
+    'mailbox-owner-consent?': true,
+  }), { mode: 0o600 });
+  const app = Fastify({ logger: false });
+  app.register(cookiePlugin);
+  let ownerMayManage = true;
+  const actors = { [owner.id]: owner, [outsider.id]: outsider, [work.id]: work };
+  try {
+    const mounted = await installOwnerHttp(app, pool, {
+      'config-file': configPath, 'public-base-url': origin, 'session-cookie-name': 'axxium_session',
+      'mailbox-actor-did': mailboxDid, 'mailbox-bound-actor-did': workDid, 'mailbox-available?': true,
+      'mailbox-owner-authority': { 'owner-actor-id': owner.id, 'root-did': rootDid },
+    }, value => value === token ? owner : outsider, id => actors[id],
+    value => value === token
+      ? { actor: owner, 'actor-id': owner.id, 'cred-id': credential, 'token-hash': digest }
+      : { actor: outsider, 'actor-id': outsider.id },
+    () => ownerMayManage);
+    await app.listen({ port, host: '127.0.0.1' });
+    const verifier = randomBytes(32).toString('base64url');
+    const request = (url, options) => fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(10000), ...options });
+    const ownerCookies = new Map([['axxium_session', token]]);
+    async function authorize(selected, cookies) {
+      const mailbox = selected === client;
+      const start = new URL(`${origin}/oidc/auth`);
+      start.search = new URLSearchParams({ client_id: selected.id, redirect_uri: selected['redirect-uris'][0],
+        response_type: 'code', scope: mailbox ? 'openid mailbox:events mailbox:actors' : 'openid profile',
+        ...(mailbox ? { resource } : {}), state: 'owner-consent-state',
+        code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url') });
+      const cookieHeader = () => [...cookies].map(([key, value]) => `${key}=${value}`).join('; ');
+      const remember = response => {
+        for (const item of response.headers.getSetCookie()) {
+          const [key, ...value] = item.split(';')[0].split('=');
+          if (value.join('=')) cookies.set(key, value.join('='));
+          else cookies.delete(key);
+        }
+      };
+      let url = start;
+      for (let i = 0; i < 12; i++) {
+        if (url.href.startsWith(selected['redirect-uris'][0] + '?')) return url.searchParams.get('code');
+        let response = await request(url, { headers: { cookie: cookieHeader() } });
+        remember(response);
+        if (response.status === 403) return null;
+        if (response.status === 200 && url.pathname.startsWith('/oidc/interaction/')) {
+          const html = await response.text();
+          assert.ok(html.includes(owner.display_name));
+          assert.equal(html.includes(workDid), mailbox);
+          const csrf = html.match(/name=csrf value='([^']+)'/)?.[1];
+          assert.ok(csrf);
+          response = await request(url, { method: 'POST', headers: { cookie: cookieHeader(), origin,
+            'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf, decision: 'approve' }) });
+          remember(response);
+        }
+        const location = response.headers.get('location');
+        assert.ok(location, `Consent HTTP ${response.status}: ${await response.text()}`);
+        url = new URL(location, origin);
+      }
+      assert.fail('Consent did not reach its registered callback');
+    }
+    const form = (path, selected, body) => request(`${origin}/oidc${path}`, { method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: selected.id, client_secret: selected.secret, ...body }) });
+    async function exchange(selected, code) {
+      assert.ok(code);
+      const response = await form('/token', selected, { grant_type: 'authorization_code', code,
+        code_verifier: verifier, redirect_uri: selected['redirect-uris'][0], ...(selected === client ? { resource } : {}) });
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      const claims = JSON.parse(Buffer.from(body.id_token.split('.')[1], 'base64url'));
+      assert.equal(claims.sub, owner.id);
+      return body;
+    }
+    async function ordinaryGrantActive(accessToken) {
+      const response = await form('/token/introspection', ordinary, { token: accessToken });
+      assert.equal(response.status, 200);
+      return (await response.json()).active;
+    }
+    assert.equal(await authorize(client, new Map([['axxium_session', 'unrelated-human']])), null);
+    ownerMayManage = false;
+    assert.equal(await authorize(client, new Map(ownerCookies)), null, 'An inactive actor cannot receive new consent');
+    ownerMayManage = true;
+    const original = await exchange(ordinary, await authorize(ordinary, ownerCookies));
+    assert.equal(await ordinaryGrantActive(original.access_token), true);
+    const issued = await exchange(client, await authorize(client, ownerCookies));
+    const reopened = await exchange(ordinary, await authorize(ordinary, ownerCookies));
+    assert.equal(await ordinaryGrantActive(original.access_token), true, 'Work consent must retain the preceding ordinary grant');
+    assert.equal(await ordinaryGrantActive(reopened.access_token), true);
+    assert.equal(typeof issued.refresh_token, 'string');
+    const refreshed = await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: issued.refresh_token, resource });
+    const rotated = await refreshed.json();
+    assert.equal(refreshed.status, 200, JSON.stringify(rotated));
+    assert.notEqual(rotated.refresh_token, issued.refresh_token);
+    const workToken = rotated.access_token;
+    assert.deepEqual(await mounted.accessProof(workToken), {
+      subject: owner.id, workAccount: work.id, mailboxDid, authMethod: 'owner-delegation', boundActorDid: workDid,
+    });
+    const remapped = 'did:web:axxium.example:actors:another-owner:work';
+    await pool.query('UPDATE axxium_oidc_grant_sessions SET mailbox_actor_did=$1 WHERE mailbox_principal_actor_id=$2',
+      [remapped, work.id]);
+    assert.equal(await mounted.accessProof(workToken), null, 'A changed actor mapping requires fresh consent');
+    await pool.query('UPDATE axxium_oidc_grant_sessions SET mailbox_actor_did=$1 WHERE mailbox_principal_actor_id=$2',
+      [workDid, work.id]);
+    ownerMayManage = false;
+    assert.equal(await mounted.accessProof(workToken), null, 'A suspended actor cannot reuse its grant');
+    ownerMayManage = true;
+    await pool.query("UPDATE provider_bindings SET actor_id=$1 WHERE subject=$2", [outsider.id, mailboxDid]);
+    assert.equal(await mounted.accessProof(workToken), null, 'A reassigned provider subject cannot reuse the grant');
+    await pool.query("UPDATE provider_bindings SET actor_id=$1 WHERE subject=$2", [work.id, mailboxDid]);
+    const revoked = await form('/token/revocation', client, { token: workToken, token_type_hint: 'access_token' });
+    assert.equal(revoked.status, 200);
+    assert.equal(await mounted.accessProof(issued.access_token), null, 'Disconnect revokes the original Work grant too');
+    assert.equal(await ordinaryGrantActive(original.access_token), true, 'Disconnect must retain the ordinary grant');
+    const renewed = await exchange(client, await authorize(client, ownerCookies));
+    await pool.query('DELETE FROM sessions WHERE token_hash=$1', [digest]);
+    assert.equal(await mounted.accessProof(renewed.access_token), null, 'Revoking the exact owner session revokes delegated access');
+    assert.equal((await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: renewed.refresh_token, resource })).status, 400, 'A logged-out owner cannot renew Work');
+  } finally {
+    await app.close();
+  }
 }
 
 try {
@@ -127,6 +283,8 @@ try {
   await runAuthorityFixture(pool, createProvider, bindSession, sessionGrantActive);
   await runHttpFixture(pool, installHttp, root);
   await verifyMailboxActorGrant(pool);
+  await verifyWorkOwnerConsent(pool, root);
+  console.log('PASS mounted Work owner consent: same browser and grants, exact Work mailbox, owner admission, suspension and revocation');
   console.log('PASS isolated PostgreSQL: actor-scoped mailbox grant, remap denial and event compatibility');
   console.log('PASS isolated PostgreSQL: model isolation, lookup, concurrent single consumption, durable state, bounded expired-record/binding reclamation, replay retention and grant revocation');
 } finally {

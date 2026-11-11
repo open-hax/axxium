@@ -1,13 +1,12 @@
 (ns axxium.law.principal
   "An authenticated principal: who is acting, and how that was proven.
-   Only two proofs are admitted for mailbox sends (law 8): an AT Protocol
-   OAuth sign-in bound to the DID, or an Axxium service token signed with the
-   instance Ed25519 key. Verification happens in extern/auth adapters; this
-   contract only admits their output."
+   The boundary verifies a direct AT Protocol login, an Axxium service
+   token, or a current owner-delegated OAuth grant before constructing a
+   principal. This contract only admits their output."
   (:require [axxium.law.did :as did]
             [malli.core :as m]))
 
-(def auth-methods #{:atproto :service-token})
+(def auth-methods #{:atproto :owner-delegation :service-token})
 
 (def PrincipalContract
   [:map {:closed true}
@@ -16,6 +15,12 @@
 
 (defn authenticated? [principal]
   (m/validate PrincipalContract principal))
+
+(defn from-owner-delegation
+  "Principal for the mailbox DID of a verified owner-delegated grant."
+  [mailbox-did]
+  (let [p {:auth/did mailbox-did :auth/method :owner-delegation}]
+    (when (authenticated? p) p)))
 
 (defn from-service-claims
   "Principal for verified service-token claims carrying a `did` claim."

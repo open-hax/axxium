@@ -165,3 +165,22 @@ actor messaging. Direct AT Protocol clients, including Codex, can use the
 directory with their verified session and continue to poll their own inbox.
 Bindings and mailbox registrations are provisioned separately. An actor
 with no registered mailbox does not appear in discovery.
+
+### Work consent from the Axxium owner account
+
+On the canonical Axxium instance, opt in with `"mailbox-owner-consent?": true`
+and `"mailbox-actor-messaging?": true` in the existing private OIDC authority
+JSON. Use the canonical Axxium issuer and its `/api/mailbox/mcp` resource. Configure
+`AXXIUM_IDENTITY_ROOT_OPERATOR_ACTOR_ID` and `AXXIUM_IDENTITY_ROOT_DID` for
+the existing human account and its exact root. The selected Work mailbox DID
+needs a current AT Protocol provider binding to its own active Axxium account
+and an explicit mailbox-to-actor binding to an active child of that root.
+Keep the existing actor DIDs, including older spellings.
+
+The Work client requests `mailbox:events mailbox:actors` and the owner approves
+through their existing Axxium browser session, including a session established
+through Google. The human owner uses the existing login without an AT Protocol
+account. Axxium binds mailbox access to the configured Work actor and mailbox
+DID. Work access requires the same live owner session, provider binding,
+active root-to-child relationship and granted scopes. Legacy
+event-only requests keep the existing AT Protocol consent flow.

@@ -69,14 +69,50 @@
       (when-let [actor (await (resolve-session! token))]
         (when (= "active" (:status actor)) {:actor actor :digest (secrets/token-hash token)})))))
 
+(defn- ^:async owner-interaction-root!
+  [pool token {:keys [owner-actor-id mailbox-did authorized? resolve-human-session!]}]
+  (when-let [{:keys [actor actor-id] :as proof} (await (resolve-human-session! token))]
+    (when (and (= actor-id owner-actor-id) (authorized?))
+      (when-let [work-account (await (store/current-mailbox-account! pool mailbox-did))]
+        (when (not= owner-actor-id work-account)
+          {:actor actor :work-account work-account :owner-proof (dissoc proof :actor)})))))
+
 (defn- ^:async interaction-root!
-  [request cookie-name resolve-session! mailbox? owner]
-  (if mailbox?
+  [pool request cookie-name resolve-session! mailbox? owner delegation]
+  (cond
+    delegation (await (owner-interaction-root! pool (cookie-value request cookie-name) delegation))
+    mailbox?
     (when-let [proof (await (session/atproto-session-proof (cookie-value request cookie-name)))]
       (when (and (= owner (get-in proof [:principal :auth/did]))
                  (await (session/active-atproto-session? proof)))
         {:actor {:id (:actor-id proof) :display_name owner} :proof proof}))
-    (await (current-root request cookie-name resolve-session!))))
+    :else (await (current-root request cookie-name resolve-session!))))
+
+(defn- owner-authority-error []
+  (doto (js/Error. "The owner no longer controls this Work actor")
+    (aset "statusCode" 403)))
+
+(defn- ^:async bind-interaction-grant!
+  [pool config root grant-id subject bound-actor-did delegation]
+  (let [{:keys [mailbox-client-id mailbox-resource]} config]
+    (cond
+      delegation
+      (do
+        (when-not ((:authorized? delegation)) (throw (owner-authority-error)))
+        (await (store/bind-delegated-mailbox-session! pool grant-id (:work-account root) (:owner-proof root)
+                 mailbox-client-id mailbox-resource delegation))
+        ;; Do not hold the identity writer across the grant INSERT. An authority
+        ;; change during the INSERT must leave no grant to finish the interaction.
+        (when-not ((:authorized? delegation))
+          (await (store/revoke-family! pool grant-id))
+          (throw (owner-authority-error))))
+
+      (:proof root)
+      (await (store/bind-mailbox-session! pool grant-id (:proof root)
+               mailbox-client-id mailbox-resource bound-actor-did))
+
+      :else
+      (await (store/bind-session! pool grant-id subject (:digest root))))))
 
 (defn- fail!
   "Return a generic refusal without disclosing protocol codes or private state."
@@ -172,14 +208,21 @@
 (defn ^:async install!
   "Optionally mount an operator-configured authority at the fixed /oidc issuer.
    Root session and actor resolution remain owned by Axxium, not by this UI."
-  [app pool {:keys [config-file public-base-url session-cookie-name mailbox-actor-did mailbox-bound-actor-did mailbox-available?]}
+  [app pool {:keys [config-file public-base-url session-cookie-name mailbox-actor-did mailbox-bound-actor-did
+                     mailbox-available? mailbox-owner-authority]}
    resolve-session! lookup-actor!]
   (when (seq config-file)
     (let [config (private-config config-file)
           issuer (:issuer config)
           mailbox-resource (:mailbox-resource config)
           actor-messaging? (true? (:mailbox-actor-messaging? config))
-          csrf-actor (when actor-messaging? mailbox-bound-actor-did)
+          delegation (when (:mailbox-owner-consent? config)
+                       (assoc mailbox-owner-authority
+                         :mailbox-did mailbox-actor-did :bound-actor-did mailbox-bound-actor-did))
+          csrf-actor (cond
+                       delegation [mailbox-bound-actor-did mailbox-actor-did
+                                   (:owner-actor-id delegation) (:root-did delegation)]
+                       actor-messaging? mailbox-bound-actor-did)
           resource-scopes (law/mailbox-resource-scopes config)
           origin (.-origin (js/URL. issuer))
           secure? (= "https:" (.-protocol (js/URL. issuer)))
@@ -190,14 +233,21 @@
       (when (and mailbox-resource
                  (not (and mailbox-available? (seq mailbox-actor-did)
                            (= mailbox-resource (str (str/replace public-base-url #"/$" "") "/api/mailbox/mcp")))))
-        (throw (ex-info "OIDC mailbox grant requires the configured pilot and exact mailbox resource" {})))
+        (throw (ex-info "OIDC mailbox grant requires the configured recipient and exact mailbox resource" {})))
       (when (and actor-messaging? (not (law/mailbox-bound-actor-did? mailbox-bound-actor-did)))
         (throw (ex-info "OIDC mailbox actor messaging requires a configured seeded actor DID" {})))
+      (when (and delegation
+                 (not (and actor-messaging? (seq (:owner-actor-id delegation))
+                           (law/mailbox-bound-actor-did? (:root-did delegation))
+                           (not= (:root-did delegation) mailbox-bound-actor-did)
+                           (fn? (:authorized? delegation)) (fn? (:resolve-human-session! delegation)))))
+        (throw (ex-info "OIDC Work owner consent requires the canonical root operator and managed actor" {})))
       (await (store/initialize! pool))
       (install-store-sweeper! app pool)
-      (let [provider (engine/create-provider! pool config lookup-actor!
-                       (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id))
-                       mailbox-actor-did)
+      (let [verify-grant! (fn [grant-id actor-id] (store/session-grant-active? pool grant-id actor-id))
+            provider (if delegation
+                       (engine/create-delegated-provider! pool config lookup-actor! verify-grant! mailbox-actor-did delegation)
+                       (engine/create-provider! pool config lookup-actor! verify-grant! mailbox-actor-did))
             callback (.callback provider)]
         (await (relay/install! app config #(private-config config-file) lookup-actor!))
         ;; Provider receives the raw stream before Fastify can parse a token body.
@@ -253,11 +303,13 @@
                 (try
                   (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
                         uid (.. request -params -uid)
-                        mailbox? (mailbox-interaction? config details)]
+                        mailbox? (mailbox-interaction? config details)
+                        owner-consent (when (and mailbox? (law/mailbox-actor-scope? (.. details -params -scope)))
+                                        delegation)]
                     (if-not (= uid (.-uid details))
                       (fail! reply 400)
-                      (if-let [root (await (interaction-root! request session-cookie-name resolve-session!
-                                              mailbox? mailbox-actor-did))]
+                      (if-let [root (await (interaction-root! pool request session-cookie-name resolve-session!
+                                              mailbox? mailbox-actor-did owner-consent))]
                         ;; The root actor may have changed since the provider's
                         ;; browser session. Render current identity; the protected
                         ;; POST restarts login before it can ever grant consent.
@@ -275,7 +327,10 @@
                         (if (and mailbox? (await (current-root request session-cookie-name resolve-session!)))
                           (do (.header reply "Cache-Control" "no-store")
                               (.type reply "text/plain")
-                              (.send (.code reply 403) "Sign out of Axxium and sign in with the selected AT Protocol account."))
+                              (.send (.code reply 403)
+                                (if owner-consent
+                                  "Sign in with the Axxium account that manages this Work actor."
+                                  "Sign out of Axxium and sign in with the selected AT Protocol account.")))
                           (.redirect reply (str "/portal/index.html?oidc_return="
                                                 (js/encodeURIComponent (str "/oidc/interaction/" uid))))))))
                   (catch :default error (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503))))))
@@ -286,9 +341,11 @@
                     (if-not (csrf-valid? request origin csrf-cookie csrf-key uid csrf-actor)
                       (fail! reply 403)
                       (let [details (await (.interactionDetails provider (.-raw request) (.-raw reply)))
-                            mailbox? (mailbox-interaction? config details)]
-                        (if-let [root (await (interaction-root! request session-cookie-name resolve-session!
-                                               mailbox? mailbox-actor-did))]
+                            mailbox? (mailbox-interaction? config details)
+                            owner-consent (when (and mailbox? (law/mailbox-actor-scope? (.. details -params -scope)))
+                                            delegation)]
+                        (if-let [root (await (interaction-root! pool request session-cookie-name resolve-session!
+                                               mailbox? mailbox-actor-did owner-consent))]
                           (let [actor-id (get-in root [:actor :id])
                               prompt (.. details -prompt -name)
                               scopes (str/split (or (.. details -params -scope) "") #"\s+")
@@ -322,12 +379,9 @@
                                 (.addResourceScope grant mailbox-resource
                                                    (str/join " " (filter resource-scope? scopes))))
                               (let [grant-id (await (.save grant))]
-                                (if mailbox?
-                                  (await (store/bind-mailbox-session! pool grant-id (:proof root)
-                                           (:mailbox-client-id config) mailbox-resource
-                                           (when (some #{law/mailbox-actors-scope} scopes)
-                                             mailbox-bound-actor-did)))
-                                  (await (store/bind-session! pool grant-id actor-id (:digest root))))
+                                (await (bind-interaction-grant! pool config root grant-id actor-id
+                                         (when (some #{law/mailbox-actors-scope} scopes) mailbox-bound-actor-did)
+                                         owner-consent))
                                 (.hijack reply)
                                 (await (.interactionFinished provider (.-raw request) (.-raw reply)
                                          #js {:consent #js {:grantId grant-id}}
@@ -346,10 +400,10 @@
           {:resource mailbox-resource :issuer issuer :scope law/mailbox-scope
            :scopes resource-scopes :actor-messaging? actor-messaging?
            :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did
-                                         mailbox-bound-actor-did bearer))
+                                         mailbox-bound-actor-did bearer delegation))
            :active-grant?
            (fn ^:async active-grant? [proof]
              (= proof (await (engine/current-mailbox-grant! pool config mailbox-actor-did
                                (:oauth/grant-id proof) (:actor-id proof)
-                               (when (:mailbox/actors? proof) mailbox-bound-actor-did)))))}
+                               (when (:mailbox/actors? proof) mailbox-bound-actor-did) delegation))))}
           true)))))

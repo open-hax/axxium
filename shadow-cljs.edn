@@ -81,6 +81,7 @@
                               :bindMailbox axxium.extern.oidc-fixture/bind-mailbox
                               :mailboxGrantActive axxium.extern.oidc-fixture/mailbox-grant-active?
                               :sessionGrantActive axxium.extern.oidc-store/session-grant-active?
+                              :installOwnerHttp axxium.extern.oidc-fixture/install-owner-http
                               :installHttp axxium.extern.oidc-fixture/install-http}}}
    :compiler-options {:output-feature-set :es-next :optimizations :simple :infer-externs false}}
 
