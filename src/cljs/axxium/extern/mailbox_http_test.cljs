@@ -500,26 +500,32 @@
         root "did:web:axxium.test:actors:owner"
         grokbot (str root ":grokbot")
         work (str root ":work")
-        other (str "did:web:axxium.test:actors:other:agent")
+        group (str root ":group")
+        other "did:web:axxium.test:actors:other:agent"
         policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
         event-ids (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
         grokbot-key (str "axb_" (secrets/secure-id))
         work-key (str "axb_" (secrets/secure-id))
+        group-key (str "axb_" (secrets/secure-id))
         other-key (str "axb_" (secrets/secure-id))
         issue (fn [lg did key]
                 (:ledger (gi/issue-bootstrap lg (state/fold lg) (gi/parent-of (state/fold lg) did) did
                                              (mcp/digest key) (event-ids))))
         tree (atom (-> (:ledger (gi/seed-ledger
                                  (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
-                                                   :nodes [{:id grokbot :parent root :name "Grok Bot" :kind :agent :policy policy}
-                                                           {:id work :parent root :name "Work" :kind :agent :policy policy}]}
+                                                   :nodes [{:id grokbot :parent root :name "Grok Bot" :kind :bot :policy policy}
+                                                           {:id work :parent root :name "Work" :kind :agent :policy policy}
+                                                           {:id group :parent root :name "Group" :kind :group :policy policy}]}
                                                   "axxium.test")
                                  event-ids))
                        (#(:ledger (gi/register-root % (state/fold %) "did:web:axxium.test:actors:other" "Other" policy (event-ids))))
                        (#(:ledger (gi/provision-actor % (state/fold %) "did:web:axxium.test:actors:other" other "Other agent" policy :agent (event-ids))))
                        (issue grokbot grokbot-key)
                        (issue work work-key)
+                       (issue group group-key)
                        (issue other other-key)))
+        allowlist (atom nil)
+        change-before-operation! (atom nil)
         app (atom nil)
         config cfg/get-in-config]
     (try
@@ -527,14 +533,18 @@
       (with-redefs [tc/read-key-file (constantly (js/Buffer.alloc 32))
                     identity/current-actor-state (fn [] (state/fold @tree))
                     identity/with-current-actor-state! (fn ^:async read-identity [f]
+                                                        (when-let [change @change-before-operation!]
+                                                          (reset! change-before-operation! nil)
+                                                          (swap! tree change))
                                                         {:result (await (f (state/fold @tree)))})
                     cfg/get-in-config (fn [ks]
                                         (case (first ks)
                                           :mailbox/ledger-file ledger
                                           :mailbox/directory? true
                                           :mailbox/actor-bindings nil
+                                          :mailbox/bootstrap-actor-dids @allowlist
                                           :github-identity/ledger-file (path/join dir "actors.edn")
-                                          :identity/root-operator-binding nil
+                                          :identity/root-operator-binding {:root-did root :actor-id "actor_11111111-1111-4111-8111-111111111111"}
                                           :axxium/public-base-url origin
                                           (config ks)))]
         (reset! app (await (start-app!)))
@@ -542,33 +552,42 @@
               run (fn [creds sid body] (request! @app "POST" nil sid body creds))
               open! (fn [creds] (.then (run creds nil (rpc "initialize")) (fn [r] (:sid r))))
               g (as grokbot grokbot-key)
-              w (as work work-key)
-              o (as other other-key)
-              g-sid (await (open! g))
-              w-sid (await (open! w))
-              o-sid (await (open! o))]
-          (is (= 401 (:status (await (run (as grokbot work-key) nil (rpc "initialize"))))) "a node's key is its own")
-          (is (string? g-sid) "L5: Grok Bot authenticates as its own node")
-          (await (run g g-sid (tool "register_mailbox" {})))
-          (await (run w w-sid (tool "register_mailbox" {})))
-          (await (run o o-sid (tool "register_mailbox" {})))
-          (is (= grokbot (get (result (await (run g g-sid (tool "whoami" {})))) "did"))
-              "its mailbox address is its own DID")
-          (is (= #{work}
-                 (set (map #(get % "did") (get (result (await (run g g-sid (tool "discover_actors" {})))) "actors")))))
-          (is (= "accepted" (get (result (await (run g g-sid (tool "send_message" {"to" work "idempotency_key" "xh-1"
-                                                                                  "body" {"text" "hello work"}}))))
-                                 "accepted")))
-          (let [inbox (result (await (run w w-sid (tool "read_inbox" {}))))]
-            (is (= grokbot (get-in inbox ["messages" 0 "message_from"])))
-            (is (= "hello work" (get-in inbox ["messages" 0 "message_body" "text"]))))
-          (is (true? (get-in (await (run o o-sid (tool "send_message" {"to" work "idempotency_key" "x"
-                                                                        "body" {"text" "outside"}})))
-                             [:data "result" "isError"]))
-              "S3: another tree's node cannot reach Work")
-          (swap! tree #(:ledger (gi/suspend % (state/fold %) root grokbot (event-ids))))
-          (is (= 401 (:status (await (run g g-sid (tool "whoami" {})))))
-              "L2: a suspended node loses its own credential")))
+              w (as work work-key)]
+          (is (= 401 (:status (await (run g nil (rpc "initialize"))))) "Long-lived mailbox bootstrap is off by default.")
+          (reset! allowlist #{grokbot group other})
+          (is (= 401 (:status (await (run w nil (rpc "initialize"))))) "An unlisted sibling is refused.")
+          (is (= 401 (:status (await (run (as other other-key) nil (rpc "initialize")))))
+              "A listed actor outside the configured root is refused.")
+          (is (= 401 (:status (await (run (as group group-key) nil (rpc "initialize")))))
+              "A listed group is refused.")
+          (reset! allowlist #{grokbot work})
+          (let [g-sid (await (open! g))
+                w-sid (await (open! w))]
+            (is (= 401 (:status (await (run (as grokbot work-key) nil (rpc "initialize"))))) "A node's key is its own.")
+            (is (string? g-sid) "Grok Bot authenticates as its own node.")
+            (await (run g g-sid (tool "register_mailbox" {})))
+            (await (run w w-sid (tool "register_mailbox" {})))
+            (is (= grokbot (get (result (await (run g g-sid (tool "whoami" {})))) "did")))
+            (is (= #{work}
+                   (set (map #(get % "did") (get (result (await (run g g-sid (tool "discover_actors" {})))) "actors")))))
+            (is (= "accepted" (get (result (await (run g g-sid (tool "send_message" {"to" work "idempotency_key" "xh-1"
+                                                                                    "body" {"text" "hello work"}}))))
+                                   "accepted")))
+            (let [inbox (result (await (run w w-sid (tool "read_inbox" {}))))]
+              (is (= grokbot (get-in inbox ["messages" 0 "message_from"])))
+              (is (= "hello work" (get-in inbox ["messages" 0 "message_body" "text"]))))
+            (let [before (fs/readFileSync ledger "utf8")]
+              (reset! change-before-operation!
+                      #(:ledger (gi/bind-mailbox % (state/fold %) root fixture/alice grokbot (event-ids))))
+              (is (= 401 (:status (await (run g g-sid (tool "read_inbox" {})))))
+                  "Binding committed after preliminary authentication blocks the queued read.")
+              (is (= before (fs/readFileSync ledger "utf8"))))
+            (is (= grokbot (get (gi/mailbox-bindings (state/fold @tree)) fixture/alice)))
+            (is (= 401 (:status (await (run g nil (rpc "initialize")))))
+                "A bootstrap key cannot authenticate at a bound external mailbox.")
+            (swap! tree #(:ledger (gi/suspend % (state/fold %) root work (event-ids))))
+            (is (= 401 (:status (await (run w w-sid (tool "whoami" {})))))
+                "A suspended node loses mailbox access."))))
       (finally
         (when @app (await (.close (:app @app))))
         (fs/rmSync dir #js {:recursive true})))))

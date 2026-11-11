@@ -133,6 +133,18 @@
                         {:reason :invalid-mailbox-actor-bindings})))
       (into {} pairs))))
 
+(defn mailbox-bootstrap-actor-dids
+  "Admit an explicit comma-separated list of distinct actor DIDs."
+  [value]
+  (when (some? value)
+    (let [dids (when (and (string? value) (<= 1 (count value) 65536))
+                 (str/split value #"," -1))]
+      (when-not (and (seq dids) (every? did-law/web? dids)
+                     (= (count dids) (count (set dids))))
+        (throw (ex-info "AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS requires distinct did:web actor DIDs"
+                        {:reason :invalid-mailbox-bootstrap-actor-dids})))
+      (set dids))))
+
 (def config
   (let [instance (load-instance)
         webhook-actor (present (env "AXXIUM_MAILBOX_WEBHOOK_ACTOR_DID"))]
@@ -186,6 +198,7 @@
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
      ;; Bootstrap seed only; the identity ledger holds the bindings.
      :mailbox/actor-bindings (mailbox-actor-bindings (env "AXXIUM_MAILBOX_ACTOR_BINDINGS"))
+     :mailbox/bootstrap-actor-dids (mailbox-bootstrap-actor-dids (env "AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS"))
      ;; Owner-directory routing over ledger bindings, with or without a seed.
      :mailbox/directory? (env-bool "AXXIUM_MAILBOX_DIRECTORY" false)
      :identity/root-operator-binding
