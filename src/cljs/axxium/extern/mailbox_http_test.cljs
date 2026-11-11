@@ -402,6 +402,7 @@
         app (atom nil)
         config cfg/get-in-config
         scoped? (atom true)
+        webhook-effects (atom [])
         proof {:principal {:auth/did fixture/alice :auth/method :atproto}
                :oauth/grant-id "fixture" :oauth/client-id "chatgpt-fixture" :oauth/resource audience}
         oauth {:issuer (str origin "/oidc") :resource audience :scope "mailbox:events"
@@ -415,12 +416,17 @@
       (fs/writeFileSync ledger "" #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
                     db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
+                    http/on-interval! (fn [& _] (swap! webhook-effects conj :worker))
+                    webhook/verify! (fn [& _] (swap! webhook-effects conj :challenge))
                     identity/with-current-actor-state! (fn ^:async read-identity [f]
                                                         {:result (await (f @directory))})
                     cfg/get-in-config (fn [ks]
                                         (case (first ks)
                                           :mailbox/ledger-file ledger
                                           :mailbox/actor-bindings bindings
+                                          :mailbox/subscriptions-enabled? false
+                                          :mailbox/webhook-actor-did fixture/alice
+                                          :mailbox/webhook-key-file (path/join dir "unused-webhook.key")
                                           :github-identity/ledger-file actor-ledger
                                           :axxium/public-base-url origin
                                           (config ks)))]
@@ -429,14 +435,25 @@
                                                 (secrets/secure-id) fixture/bob)))
               initialize (fn [bearer] (request! @app "POST" bearer nil (rpc "initialize") {}))
               bob-session (:sid (await (initialize bob)))
-              scoped-session (:sid (await (initialize "actor-access")))
+              initialized (await (initialize "actor-access"))
+              scoped-session (:sid initialized)
               run (fn [bearer sid body] (request! @app "POST" bearer sid body {}))
               call (fn [body] (run "actor-access" scoped-session body))
               event-call (fn [body] (run "events-only" scoped-session body))
               list-names (fn [response] (mapv #(get % "name") (get-in response [:data "result" "tools"])))
+              subscribe (assoc (rpc "events/subscribe") "params"
+                               {"name" "message.available"
+                                "delivery" {"mode" "webhook" "url" "https://callback.example.com/inbox"
+                                            "secret" (str "whsec_" (.toString (js/Buffer.alloc 32 7) "base64"))}})
               discover (tool "discover_actors" {})
               send (tool "send_message" {"to" fixture/bob "idempotency_key" "work-fixture"
                                          "body" {"text" "hello"}})]
+          (is (= {"tools" {}} (get-in initialized [:data "result" "capabilities"])))
+          (let [before (fs/readFileSync ledger "utf8")]
+            (is (= [] (get-in (await (call (rpc "events/list"))) [:data "result" "events"])))
+            (is (= -32601 (get-in (await (call subscribe)) [:data "error" "code"])))
+            (is (= before (fs/readFileSync ledger "utf8")))
+            (is (empty? @webhook-effects) "Disabled subscriptions cannot start a worker or callback challenge."))
           (await (run bob bob-session (tool "register_mailbox" {})))
           (is (= ["whoami"] (list-names (await (event-call (rpc "tools/list"))))))
           (is (= #{"whoami" "discover_actors" "resolve_address" "send_message"}

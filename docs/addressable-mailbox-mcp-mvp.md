@@ -186,3 +186,11 @@ active root-to-child relationship and granted scopes. Legacy event-only
 grants keep their access and renewal through the existing AT Protocol consent
 flow. Enabling owner consent ends access and renewal for older actor-messaging
 grants. Fresh owner approval issues the replacement grant.
+
+Set `AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=false` on an instance that should
+offer mailbox actor access without webhook subscriptions. The instance omits
+the event capability, returns an empty event catalog and refuses subscription
+requests without starting a delivery worker. Keep the configured mailbox DID
+and webhook key path for the existing OIDC client. The setting defaults to
+enabled and takes effect on restart. It preserves the mailbox ledger and any
+previous subscription records.

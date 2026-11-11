@@ -120,7 +120,8 @@
       (await (submit ctx)))))
 
 (defn- ^:async post-mailbox!
-  [writer path resource runtime oauth bindings resource-metadata req reply {:keys [principal cred-id] :as proof}]
+  [writer path resource runtime subscriptions-disabled? oauth bindings resource-metadata
+   req reply {:keys [principal cred-id] :as proof}]
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
         sid (http/header req "mcp-session-id")
@@ -153,6 +154,7 @@
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? false
                  :events/enabled? (events/enabled? runtime proof)
+                 :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
                  :mailbox/actors? (:mailbox/actors? proof)
                  :audience resource}
@@ -188,12 +190,14 @@
      (when path
        (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
              resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
+             subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))
              owner (cfg/get-in-config [:mailbox/webhook-actor-did])
              webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
              storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file]) identity-path]
                                                   (some? owner))
              writer (queue/create storage)
-             runtime (events/install! app writer path owner webhook-key-file (partial active-proof! oauth))
+             runtime (when-not subscriptions-disabled?
+                       (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)))
              no-stream (authorized origin oauth resource-metadata allowed-dids
                                    (fn [_ reply _]
                                      (http/set-header! reply "Allow" "POST")
@@ -207,7 +211,7 @@
                                                        "bearer_methods_supported" ["header"]}))))
          (http/post! app endpoint
                      (authorized origin oauth resource-metadata allowed-dids
-                                 (partial post-mailbox! writer path (:resource origin) runtime oauth bindings
+                                 (partial post-mailbox! writer path (:resource origin) runtime subscriptions-disabled? oauth bindings
                                           resource-metadata)))
          (http/get! app endpoint no-stream)
          (http/delete! app endpoint no-stream))))))
