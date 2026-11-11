@@ -135,6 +135,130 @@
     (is (= [] (:refused again)))
     (is (= (:ledger first-run) (:ledger again)) "no new ledger entries")))
 
+(def ^:private ported-host "axxium.example:18874")
+
+(defn- legacy-ported-did [path]
+  (str "did:web:axxium.example:18874:actors:" path))
+
+(defn- canonical-ported-did [path]
+  (str "did:web:axxium.example%3A18874:actors:" path))
+
+(defn- legacy-ported-seed []
+  (-> (seed)
+      (update-in [:root :id] legacy-ported-did)
+      (update :nodes (fn [nodes]
+                       (mapv #(-> % (update :id legacy-ported-did)
+                                    (update :parent legacy-ported-did))
+                             nodes)))))
+
+(deftest fresh-ported-seed-encodes-the-authority
+  (let [root (canonical-ported-did "alice")
+        laptop-id (canonical-ported-did "alice:laptop")
+        agent-id (canonical-ported-did "alice:laptop:coding-agent")
+        resolved (gi/resolve-seed (seed) ported-host)
+        {:keys [ledger refused]} (gi/seed-ledger resolved (counter-ids))
+        st (state/fold ledger)]
+    (is (= alice (get-in (gi/resolve-seed (seed) host) [:root :did])))
+    (is (= root (get-in resolved [:root :did])))
+    (is (= resolved (gi/resolve-seed (seed) "axxium.example%3A18874")))
+    (is (= [] refused))
+    (is (= [laptop-id root] (gi/ancestors-of st agent-id)))
+    (is (nil? (gi/actor-node st (legacy-ported-did "alice"))))))
+
+(deftest ported-seed-resolves-relative-parents-to-explicit-legacy-dids
+  (let [mixed (-> (seed)
+                  (update-in [:root :id] legacy-ported-did)
+                  (update :nodes (fn [nodes]
+                                   (mapv #(cond-> % (= :host (:kind %))
+                                            (update :id legacy-ported-did))
+                                         nodes))))
+        resolved (gi/resolve-seed mixed ported-host)
+        {:keys [ledger refused]} (gi/seed-ledger resolved (counter-ids))
+        st (state/fold ledger)]
+    (is (empty? refused))
+    (is (= [(legacy-ported-did "alice:laptop") (legacy-ported-did "alice")]
+           (gi/ancestors-of st (legacy-ported-did "alice:laptop:coding-agent"))))
+    (is (nil? (gi/actor-node st (canonical-ported-did "alice:laptop"))))))
+
+(deftest ported-seed-preserves-the-existing-namespace
+  (let [ids (counter-ids)
+        legacy (gi/resolve-seed (legacy-ported-seed) ported-host)
+        root (legacy-ported-did "alice")
+        laptop-id (legacy-ported-did "alice:laptop")
+        original (:ledger (gi/seed-ledger legacy ids))
+        st (state/fold original)
+        replay (gi/resolve-seed (seed) ported-host st)
+        again (gi/apply-seed original root replay ids)
+        added-node (first (:nodes extra))
+        extended (gi/resolve-seed (update (seed) :nodes conj added-node) ported-host st)
+        addition (gi/apply-seed original root extended ids)
+        extended-state (state/fold (:ledger addition))
+        new-id (legacy-ported-did (:id added-node))]
+    (is (= root (get-in legacy [:root :did])) "full seed DIDs are preserved")
+    (is (= legacy replay) "a populated legacy tree resolves to its recorded identities")
+    (is (= replay (gi/resolve-seed (seed) "axxium.example%3A18874" st))
+        "an already encoded authority still finds the recorded legacy tree")
+    (is (= [] (:created again)))
+    (is (= 4 (count (:unchanged again))))
+    (is (= original (:ledger again)) "a restart adds no events")
+    (is (= [new-id] (:created addition)))
+    (is (= [laptop-id root] (gi/ancestors-of extended-state new-id)))
+    (is (nil? (gi/actor-node extended-state (canonical-ported-did (:id added-node)))))))
+
+(defn- ^:async ambiguous-ported-seed* []
+  (let [ids (counter-ids)
+        legacy (gi/resolve-seed (legacy-ported-seed) ported-host)
+        root (legacy-ported-did "alice")
+        laptop-id (legacy-ported-did "alice:laptop")
+        agent-path "alice:laptop:coding-agent"
+        legacy-agent (legacy-ported-did agent-path)
+        canonical-agent (canonical-ported-did agent-path)
+        original (:ledger (gi/seed-ledger legacy ids))
+        st (state/fold original)
+        collision (gi/provision-actor original st root laptop-id canonical-agent
+                                      "Existing canonical agent" (gi/policy-of st legacy-agent) :agent (ids))
+        conflicted (state/fold (:ledger collision))]
+    (is (= laptop-id (gi/parent-of conflicted legacy-agent)))
+    (is (= laptop-id (gi/parent-of conflicted canonical-agent)))
+    (is (= :conflicting-actor-did
+           (try
+             (gi/resolve-seed (seed) ported-host conflicted)
+             nil
+             (catch :default error
+               (:axxium/error (ex-data error))))))
+    (let [lg (:ledger collision)
+          out (await (mcp/call {:ledger lg :ids ids} {:actor root} "subtree_import"
+                               {:seed (seed) :host ported-host}))]
+      (is (= :conflicting-actor-did (:error out)))
+      (is (= lg (or (:ledger out) lg)) "a refused import appends no events"))))
+
+(deftest ported-seed-refuses-ambiguous-existing-identities
+  (async done
+    (-> (ambiguous-ported-seed*)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
+(defn- ^:async ambiguous-ported-seed-batch* []
+  (let [{:keys [nodes] :as source} (seed)
+        agent-node (peek nodes)
+        other-spelling (update agent-node :id legacy-ported-did)
+        base (assoc source :nodes (pop nodes))
+        lg (:ledger (gi/seed-ledger (gi/resolve-seed base ported-host) (counter-ids)))
+        caller (canonical-ported-did "alice")
+        unexpected-write (fn [] (throw (ex-info "The conflicting seed reached event creation" {})))]
+    (doseq [entries [[agent-node other-spelling] [other-spelling agent-node]]]
+      (let [batch (update base :nodes into entries)
+            out (await (mcp/call {:ledger lg :ids unexpected-write} {:actor caller} "subtree_import"
+                                 {:seed batch :host ported-host}))]
+        (is (= :conflicting-actor-did (:error out)))
+        (is (= lg (or (:ledger out) lg)) "the conflicting batch creates no events")))))
+
+(deftest ported-seed-refuses-a-batch-with-both-spellings
+  (async done
+    (-> (ambiguous-ported-seed-batch*)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
 (deftest seed-cannot-exceed-the-operator
   (let [ids (counter-ids)
         lg (:ledger (seeded ids))

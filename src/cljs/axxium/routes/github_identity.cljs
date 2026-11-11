@@ -27,8 +27,8 @@
             [axxium.extern.ledger-queue :as ledger-queue]
             [axxium.extern.signing-key :as signing-key]
             [axxium.extern.token-crypto :as tc]
+            [axxium.law.did :as did-law]
             [axxium.law.github-identity :as law]
-            [axxium.law.google-drive :as did-law]
             [axxium.routes.auth-context :as auth-context]
             [clio.shape.edn :as edn]
             [clojure.string :as str]))
@@ -199,9 +199,12 @@
   []
   (when-let [path (not-empty (cfg/get-in-config [:identity/seed-file]))]
     (when (configured?)
-      (let [seed (gi/resolve-seed (edn/read-one (ledger-file/read-text path)) (host))
+      (let [source (edn/read-one (ledger-file/read-text path))
+            authority (host)
             out (await (serialized
-                        #(gi/apply-seed % (get-in seed [:root :did]) seed mcp/event-ids)))]
+                        (fn [lg]
+                          (let [seed (gi/resolve-seed source authority (state/fold lg))]
+                            (gi/apply-seed lg (get-in seed [:root :did]) seed mcp/event-ids)))))]
         (println "Identity seed:" (count (:created out)) "created,"
                  (count (:unchanged out)) "unchanged," (count (:refused out)) "refused")
         out))))

@@ -4,7 +4,8 @@
    scope is requested (files this app created or was handed), with offline
    access so a refresh token is issued. There is no delete and put never
    overwrites (law 9)."
-  (:require [clojure.string :as str]
+  (:require [axxium.law.did :as did]
+            [clojure.string :as str]
             [malli.core :as m]))
 
 (def drive-file-scope "https://www.googleapis.com/auth/drive.file")
@@ -107,12 +108,7 @@
   "did:web for a Google-signed-in Axxium actor on this instance:
    did:web:<host>:actors:<actor-id>. The port, if any, is %3A-encoded."
   [public-base-url actor-id]
-  (let [host (-> public-base-url
-                 (str/replace #"^https?://" "")
-                 (str/replace #"/.*$" "")
-                 str/lower-case
-                 (str/replace ":" "%3A"))]
-    (str "did:web:" host ":actors:" actor-id)))
+  (did/actor-did public-base-url actor-id))
 
 (def EventRef
   "An event a Drive file refers to: a clio/Mongo event id."
