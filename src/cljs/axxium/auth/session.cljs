@@ -50,7 +50,7 @@
 (defn ^:async active-atproto-session?
   "Check the live session and current provider binding in one database read."
   [{:keys [principal actor-id cred-id token-hash]}]
-  (some? (await (db/query-one-sql
+  (some? (await (db/query-auth-proof!
                  (db/q-select-actor-by-atproto-session
                   actor-id token-hash cred-id (:auth/did principal))))))
 

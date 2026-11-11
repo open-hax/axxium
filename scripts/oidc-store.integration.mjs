@@ -54,6 +54,21 @@ async function verifyMailboxActorGrant(pool) {
   await Grant.upsert(scoped, actorPayload, 300);
   await bind(scoped, actorDid);
   assert.equal(await active(scoped, actorDid), true);
+  const lock = await pool.connect();
+  let deadline;
+  try {
+    await lock.query('BEGIN');
+    await lock.query('LOCK TABLE provider_bindings IN ACCESS EXCLUSIVE MODE');
+    const guard = new Promise((_, reject) => {
+      deadline = setTimeout(() => reject(new Error('Authorization read did not return')), 5000);
+    });
+    await assert.rejects(Promise.race([active(scoped, actorDid), guard]), /Query read timeout/);
+  } finally {
+    clearTimeout(deadline);
+    await lock.query('ROLLBACK');
+    lock.release();
+  }
+  assert.equal(await active(scoped, actorDid), true, 'The pool recovers after a proof times out');
   assert.equal(await active(scoped, otherActorDid), false, 'A remapped actor requires a new consent grant');
   assert.equal(await active(scoped, null), true, 'Existing event proof remains valid');
   await Grant.upsert(scoped, { ...actorPayload, rejected: { resources: { [resource]: 'mailbox:actors' } } }, 300);

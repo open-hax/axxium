@@ -67,6 +67,12 @@
   (let [[sql-str params] (honey->sql honey-map)]
     (pg/query-one! @pool sql-str params)))
 
+(defn query-auth-proof!
+  "Read a current authorization proof with a bounded database wait."
+  [honey-map]
+  (let [[sql-str params] (honey->sql honey-map)]
+    (pg/query-auth-proof! @pool sql-str params)))
+
 (defn query-all-sql
   "Execute HoneySQL query and return all rows."
   [honey-map]

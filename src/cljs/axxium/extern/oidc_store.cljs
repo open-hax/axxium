@@ -143,7 +143,7 @@
    (when (and (every? valid-key? [grant-id actor-id client-id resource])
               (or (nil? bound-actor-did) (oidc/mailbox-bound-actor-did? bound-actor-did)))
      (when-let [{:keys [mailbox_cred_id mailbox_did token_hash]}
-                (await (pg/query-one! pool
+                (await (pg/query-auth-proof! pool
                          (str "SELECT b.mailbox_cred_id::text AS mailbox_cred_id,b.mailbox_did,b.token_hash"
                               " FROM axxium_oidc_grant_sessions b JOIN actors a ON a.id=b.actor_id"
                               " JOIN sessions s ON s.actor_id=b.actor_id AND s.id=b.mailbox_cred_id AND s.token_hash=b.token_hash"

@@ -92,7 +92,7 @@
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
-                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     cfg/get-in-config (fn [ks]
                                         (case (first ks)
                                           :mailbox/ledger-file ledger
@@ -252,7 +252,7 @@
       (fs/writeFileSync ledger "" #js {:mode 384})
       (fs/writeFileSync key-file (.toString (js/Buffer.alloc 32 8) "base64") #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
-                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     http/on-interval! (fn [_ _ f] (reset! tick f))
                     webhook/verify! (fn ([_] (verify)) ([_ _] (verify)))
                     webhook/deliver! (fn ([_ event] (deliver event)) ([_ _ event] (deliver event)))
@@ -414,7 +414,7 @@
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
-                    db/query-one-sql (fn [q] (js/Promise.resolve (get @live q)))
+                    db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     identity/with-current-actor-state! (fn ^:async read-identity [f]
                                                         {:result (await (f @directory))})
                     cfg/get-in-config (fn [ks]

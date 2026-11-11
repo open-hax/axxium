@@ -215,16 +215,20 @@
         proof {:principal {:auth/did did :auth/method :atproto}
                :actor-id "actor" :cred-id credential :token-hash digest}
         pool #js {:query
-                  (fn [sql params]
-                    (let [values (vec (array-seq params))
+                  (fn [query params]
+                    (let [read? (not (string? query))
+                          sql (if read? (.-text query) query)
+                          params (if read? (.-values query) params)
+                          values (vec (array-seq params))
                           grant (first values)
-                          read? (.startsWith sql "SELECT")
                           required-actor-did (when read? (get values 6))
                           new-pin (when-not read? (get values 8))
                           admitted (and @admitted?
                                         (or (nil? required-actor-did)
                                             (and @actor-scope? (= required-actor-did (get @pins grant))))
                                         (or (nil? new-pin) @actor-scope?))]
+                      (when read?
+                        (is (= 2000 (.-query_timeout query))))
                       (swap! calls conj [sql values])
                       (when (and admitted new-pin) (swap! pins assoc grant new-pin))
                       (js/Promise.resolve
