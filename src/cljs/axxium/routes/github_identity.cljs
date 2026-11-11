@@ -245,9 +245,10 @@
 
 (defn ^:async apply-binding-seed!
   "AXXIUM_MAILBOX_ACTOR_BINDINGS is a bootstrap seed only: each pair becomes a
-   ledger binding recorded under its tree root's manage right (B1, B2). Pairs
-   the ledger already holds are untouched; a pair the ledger refuses stays
-   unbound, so the directory fails closed. The ledger is the only source the
+   ledger binding recorded under its tree root's manage right (B1, B2), but
+   only for a mailbox the ledger has never seen; an owner's unbind survives
+   restarts. A pair the ledger refuses stays unbound and appends nothing, so
+   the directory fails closed. The ledger is the only source the
    mailbox directory reads."
   []
   (when-let [pairs (not-empty (cfg/get-in-config [:mailbox/actor-bindings]))]

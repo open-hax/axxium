@@ -151,9 +151,10 @@ fold from the same log and take effect without a restart.
 pairs such as
 `[["did:plc:aaaaaaaaaaaaaaaaaaaaaaaa" "did:web:example.test:actors:owner:work"]]`.
 At startup, after the identity seed, each pair is applied once under its
-actor's tree root. A pair the ledger already holds is unchanged. A seed never
-moves or restores a binding the ledger has changed. A refused pair stays
-unbound, so routing fails closed. The directory reads only the ledger.
+actor's tree root, but only for a mailbox the ledger has never seen. Once a
+binding exists, bound or unbound, the ledger owns it. A restart never moves a
+binding or restores one the owner unbound. A refused pair stays unbound and
+appends nothing, so routing fails closed. The directory reads only the ledger.
 Existing two-DID pilots use their original configuration.
 
 `discover_actors` lists the reachable actors in the authenticated caller’s

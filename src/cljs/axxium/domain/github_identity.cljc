@@ -271,16 +271,20 @@
 (defn seed-bindings
   "Apply an operator-supplied {mailbox-did actor-did} seed idempotently, each
    pair as the actor's tree root (the same authority the identity seed uses).
-   Existing equal bindings are :unchanged; anything B2/B3 refuse is :refused,
-   so a seed can never move a binding the ledger already holds."
+   A seed only ever introduces a mailbox the ledger has never seen: once a
+   binding resource exists, bound or unbound, the ledger owns it, so a
+   restart can never undo an owner's unbind or move a binding (:unchanged).
+   A pair B2/B3 refuse is :refused and appends nothing, so a bad seed does
+   not grow the ledger on every boot."
   [lg pairs ids]
   (reduce (fn [{lg :ledger :as acc} [mailbox-did actor-did]]
             (let [st (state/fold lg)]
-              (if (= actor-did (bound-actor st mailbox-did))
+              (if (mailbox-binding st mailbox-did)
                 (update acc :unchanged conj mailbox-did)
                 (let [out (bind-mailbox lg st (tree-root st actor-did) mailbox-did actor-did (ids))]
-                  (-> (assoc acc :ledger (:ledger out))
-                      (update (if (:effect out) :created :refused) conj mailbox-did))))))
+                  (if (:effect out)
+                    (-> (assoc acc :ledger (:ledger out)) (update :created conj mailbox-did))
+                    (update acc :refused conj mailbox-did))))))
           {:ledger lg :created [] :unchanged [] :refused []}
           (sort pairs)))
 

@@ -76,7 +76,26 @@
     (is (= [] (:created again)))
     (is (= #{fx/alice fx/bob} (set (:unchanged again))))
     (is (= (:ledger seeded) (:ledger again)) "an applied seed appends nothing")
-    (is (= [fx/alice] (:refused moved)))
+    (is (= [fx/alice] (:unchanged moved)) "a seed never moves a ledger binding")
+    (is (= (:ledger seeded) (:ledger moved)))
     (is (= work (get (gi/mailbox-bindings (state/fold (:ledger moved))) fx/alice)))
-    (is (= [fx/alice] (:refused (gi/seed-bindings (tree) {fx/alice "did:web:axxium.example:actors:ghost"} ids)))
-        "a seed for an unknown actor stays unbound")))
+    (let [lg (tree)
+          ghost (gi/seed-bindings lg {fx/alice "did:web:axxium.example:actors:ghost"} ids)]
+      (is (= [fx/alice] (:refused ghost)) "a seed for an unknown actor stays unbound")
+      (is (= lg (:ledger ghost)) "a refused seed pair appends nothing on boot"))))
+
+(deftest a-restart-never-rebinds-a-mailbox-the-owner-unbound
+  (let [ids (counter)
+        seed {fx/alice work}
+        booted (:ledger (gi/seed-bindings (tree) seed ids))
+        unbound (:ledger (gi/unbind-mailbox booted (state/fold booted) root fx/alice (ids)))
+        rebooted (gi/seed-bindings unbound seed ids)
+        rebooted-again (gi/seed-bindings (:ledger rebooted) seed ids)]
+    (is (= {fx/alice work} (gi/mailbox-bindings (state/fold booted))))
+    (is (= {} (gi/mailbox-bindings (state/fold unbound))))
+    (is (= [fx/alice] (:unchanged rebooted)) "the ledger already knows this mailbox")
+    (is (= unbound (:ledger rebooted)) "the seed appends nothing")
+    (is (= {} (gi/mailbox-bindings (state/fold (:ledger rebooted-again)))) "it stays unbound across restarts")
+    (testing "the owner can still bind it again deliberately"
+      (let [st (state/fold unbound)]
+        (is (some? (:effect (gi/bind-mailbox unbound st root fx/alice codex (ids)))))))))
