@@ -97,7 +97,7 @@
    (act lg state operator :provision (node did parent name pol :active kind)
         (and (nil? (actor-node state did)) (effective? state parent)
              (or (= operator parent) (may-manage? state operator parent))
-             (contains? (disj law/actor-kinds :human) kind)
+             (contains? (disj law/actor-kinds :human :session) kind)
              (law/policy-within? pol (policy-of state parent))) ids)))
 
 (defn- set-status [lg state operator did status ids]
@@ -215,6 +215,105 @@
                                                              [:credential/label :credential/status
                                                               :credential/generation :github/app-slug])
                                                (credentials state d))}))))
+
+;; ------------------------------------------------------------- sessions
+
+(defn lease-of [state did] (get-in (actor-node state did) [:resource/metadata :actor/lease-until]))
+
+(defn live?
+  "S1 over G3: effective, and no lease on the node or an ancestor has ended."
+  [state did now]
+  (boolean
+   (and (effective? state did)
+        (every? #(if-let [lease (lease-of state %)] (< (inst-ms now) (inst-ms lease)) true)
+                (cons did (ancestors-of state did))))))
+
+(defn- session-lease-ok? [state parent lease-until now]
+  (let [t (inst-ms now)
+        until (when (inst? lease-until) (inst-ms lease-until))
+        bound (lease-of state parent)]
+    (and until (< t until) (<= until (+ t law/max-lease-ms))
+         (or (nil? bound) (<= until (inst-ms bound))))))
+
+(defn open-session
+  "S1: a live agent, bot or session (or a manager of it) opens a leased child
+   :session node named <parent>:<slug> (L7), within the parent's policy."
+  [lg state operator parent did name pol lease-until now ids]
+  (act lg state operator :provision
+       (assoc-in (node did parent name pol :active :session) [:resource/metadata :actor/lease-until] lease-until)
+       (and (nil? (actor-node state did))
+            (str/starts-with? (str did) (str parent ":"))
+            (contains? law/session-parent-kinds (kind-of state parent))
+            (live? state parent now)
+            (or (= operator parent) (may-manage? state operator parent))
+            (session-lease-ok? state parent lease-until now)
+            (law/policy-within? pol (policy-of state parent))) ids))
+
+(defn- advert [state did]
+  (let [r (get-in state [:resources (law/advert-resource-id did)])]
+    (when (= law/advert-kind (:resource/kind r)) r)))
+
+(defn- advert-node [did anchor tags status]
+  {:resource/id (law/advert-resource-id did)
+   :resource/kind law/advert-kind
+   :resource/owner did
+   :resource/store :axxium
+   :resource/metadata {:advert/actor did :advert/anchor anchor :advert/tags tags
+                       :advert/status status}})
+
+(defn advertise
+  "S2: a live node (itself, or a manager) advertises at an ancestor-or-self
+   anchor. Re-advertising replaces the anchor and tags."
+  [lg state operator did anchor tags now ids]
+  (act lg state operator :advertise (advert-node did anchor tags :advertised)
+       (and (actor-node state did)
+            (or (= operator did) (may-manage? state operator did))
+            (live? state did now)
+            (or (= anchor did) (ancestor? state anchor did))
+            (law/valid-tags? tags)) ids))
+
+(defn withdraw
+  "S2: the node or a manager withdraws its current advertisement."
+  [lg state operator did ids]
+  (let [{:advert/keys [anchor tags status]} (:resource/metadata (advert state did))]
+    (act lg state operator :withdraw (advert-node did anchor (or tags #{}) :withdrawn)
+         (and (= :advertised status)
+              (or (= operator did) (may-manage? state operator did))) ids)))
+
+(defn- tree-root-of [state did] (or (peek (ancestors-of state did)) did))
+
+(defn sees?
+  "S3: v sees s when both are live in the same tree."
+  [state v s now]
+  (and (live? state v now) (live? state s now)
+       (= (tree-root-of state v) (tree-root-of state s))))
+
+(defn- matches? [state did tags query]
+  (or (str/blank? query)
+      (let [q (str/lower-case query)]
+        (some #(str/includes? (str/lower-case (str %)) q)
+              (concat [did (get-in (actor-node state did) [:resource/metadata :actor/name])] tags)))))
+
+(defn directory-at
+  "S2: D(anchor), the live nodes currently advertised at `anchor`."
+  [state anchor now]
+  (->> (vals (:resources state))
+       (keep (fn [{:resource/keys [kind metadata]}]
+               (let [{:advert/keys [actor status tags] a :advert/anchor} metadata]
+                 (when (and (= law/advert-kind kind) (= :advertised status) (= anchor a)
+                            (live? state actor now))
+                   {:actor/did actor :advert/tags tags}))))
+       (sort-by :actor/did)
+       vec))
+
+(defn find-actors
+  "S3: find(v, anchor, q) ⊆ {s ∈ D(anchor) | see(v, s)}, matched on DID,
+   name and tags. The viewer itself is never in its own results."
+  [state viewer anchor query now]
+  (->> (directory-at state anchor now)
+       (filter (fn [{d :actor/did tags :advert/tags}]
+                 (and (not= viewer d) (sees? state viewer d now) (matches? state d tags query))))
+       vec))
 
 ;; -------------------------------------------------------- mailbox binding
 

@@ -554,7 +554,7 @@
           (await (run o o-sid (tool "register_mailbox" {})))
           (is (= grokbot (get (result (await (run g g-sid (tool "whoami" {})))) "did"))
               "its mailbox address is its own DID")
-          (is (= #{work grokbot}
+          (is (= #{work}
                  (set (map #(get % "did") (get (result (await (run g g-sid (tool "discover_actors" {})))) "actors")))))
           (is (= "accepted" (get (result (await (run g g-sid (tool "send_message" {"to" work "idempotency_key" "xh-1"
                                                                                   "body" {"text" "hello work"}}))))

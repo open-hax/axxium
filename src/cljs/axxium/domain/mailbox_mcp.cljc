@@ -146,10 +146,14 @@
                                    :actor (principal/address principal) :at now :body body})]
       (session-result lg' body))))
 
-(defn- discover-actors [lg ctx _]
-  (if-not (directory/enabled? ctx)
-    (refuse :unknown-tool)
-    (if-let [peers (directory/peers lg (state/fold lg) ctx)]
+(defn- discover-actors [lg ctx {:keys [anchor query]}]
+  (cond
+    (not (directory/enabled? ctx)) (refuse :unknown-tool)
+    (not (and (or (nil? anchor) (did/did? anchor))
+              (or (nil? query) (and (string? query) (<= (count query) 128)))))
+    (refuse :bad-request)
+    :else
+    (if-let [peers (directory/peers lg (state/fold lg) ctx {:anchor anchor :query query})]
       {:ledger lg :result {:actors peers}}
       (refuse :forbidden))))
 

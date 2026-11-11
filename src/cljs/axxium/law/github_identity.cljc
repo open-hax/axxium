@@ -31,7 +31,23 @@
 (def actor-kinds
   "Node kinds in the identity tree: a human root, grouping nodes (e.g. the
    Grok Bots), machines, coding agents on a machine, and service bots."
-  #{:human :group :host :agent :bot})
+  #{:human :group :host :agent :bot :session})
+
+;; S1 a :session node is a leased child of an agent, bot or session; its
+;;    policy is within its parent's (G1) and its lease never outlives the
+;;    parent's, so cred(s) = attenuate(cred(parent(s)));
+;; S2 a live node advertises itself at an ancestor-or-self anchor; the
+;;    directory D(anchor) is the fold of advertise/withdraw events, and
+;;    expired or ineffective nodes drop out;
+;; S3 see(v,s) <=> root(v) = root(s) and both live; find(v, anchor, q) is
+;;    the advertised nodes at anchor that v sees and q matches.
+(def session-parent-kinds #{:agent :bot :session})
+(def max-lease-ms 86400000)
+(def advert-kind :resource/actor-advert)
+(defn advert-resource-id [did] (str "actor-advert:" did))
+
+(def Tags [:set {:max 16} [:re #"^[a-z0-9][a-z0-9._:-]{0,63}$"]])
+(defn valid-tags? [tags] (m/validate Tags tags))
 
 (def bootstrap-label "bootstrap")
 (def statuses #{:active :suspended :revoked})
