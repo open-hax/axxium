@@ -55,9 +55,11 @@
          (fn ^:async access-proof [token]
            (let [proof (await ((:access-proof! oauth) token))]
              (when proof
-               #js {:subject (:actor-id proof)
-                    :workAccount (:mailbox/principal-actor-id proof)
-                    :mailboxDid (principal/address (:principal proof))
-                    :principalDid (get-in proof [:principal :auth/did])
-                    :authMethod (name (get-in proof [:principal :auth/method]))
-                    :boundActorDid (:mailbox/bound-actor-did proof)})))}))
+               (clj->js
+                 (cond-> {:subject (:actor-id proof)
+                          :workAccount (:mailbox/principal-actor-id proof)
+                          :mailboxDid (principal/address (:principal proof))
+                          :principalDid (get-in proof [:principal :auth/did])
+                          :authMethod (name (get-in proof [:principal :auth/method]))
+                          :boundActorDid (:mailbox/bound-actor-did proof)}
+                   (:mailbox/inbox? proof) (assoc :inbox true))))))}))

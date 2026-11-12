@@ -123,7 +123,7 @@
 
 (defn- html!
   "Render an origin-bound form without scripts, framing or response caching."
-  [reply uid client-id actor-label token mailbox? bound-actor-did redirect-source]
+  [reply uid client-id actor-label token mailbox? bound-actor-did delegated? inbox? redirect-source]
   (.header reply "Cache-Control" "no-store")
   ;; Keep the issuer Origin on the form POST while withholding cross-origin Referer.
   (.header reply "Referrer-Policy" (if mailbox? "same-origin" "no-referrer"))
@@ -134,12 +134,16 @@
   (.type reply "text/html; charset=utf-8")
   (.send reply (str "<!doctype html><html><head><meta charset=utf-8><title>Axxium shared login</title></head><body>"
                     "<h1>Continue with your Axxium identity</h1><p>Signed in as " (html-escape actor-label) ".</p>"
-                    "<p>Allow " (if mailbox? "mailbox event subscriptions for " "sign-in to ")
+                    "<p>Allow " (if mailbox? "mailbox access for " "sign-in to ")
                     (html-escape client-id) "?</p>"
                     (when bound-actor-did
                       (str "<p>This client may discover eligible actors controlled by your human account and send them mailbox messages as "
                            (html-escape bound-actor-did) ".</p>"))
-                    "<p>This sign-in may renew while your current Axxium root session is active, for at most 24 hours. Signing out of Axxium or disabling the actor ends reuse. This does not grant offline access or machine federation permission.</p>"
+                    (when inbox?
+                      "<p>This client may read and acknowledge messages in the Work actor’s own inbox.</p>")
+                    (if delegated?
+                      "<p>The Work grant lasts at most 24 hours, including after you sign out. Disconnect the client or remove the Work actor’s authority to end access sooner.</p>"
+                      "<p>This sign-in may renew while your current Axxium root session is active, for at most 24 hours. Signing out of Axxium or disabling the actor ends reuse. This does not grant offline access or machine federation permission.</p>")
                     "<form method=post action='/oidc/interaction/" (html-escape uid) "'>"
                     "<input type=hidden name=csrf value='" (html-escape token) "'>"
                     "<button name=decision value=approve>Continue</button>"
@@ -217,12 +221,14 @@
           issuer (:issuer config)
           mailbox-resource (:mailbox-resource config)
           actor-messaging? (true? (:mailbox-actor-messaging? config))
+          inbox-enabled? (true? (:mailbox-inbox? config))
           delegation (when (:mailbox-owner-consent? config)
                        (assoc mailbox-owner-authority
                          :mailbox-did mailbox-actor-did :bound-actor-did mailbox-bound-actor-did))
           csrf-actor (cond
-                       delegation [mailbox-bound-actor-did mailbox-actor-did
-                                   (:owner-actor-id delegation) (:root-did delegation)]
+                       delegation (cond-> [mailbox-bound-actor-did mailbox-actor-did
+                                           (:owner-actor-id delegation) (:root-did delegation)]
+                                    inbox-enabled? (conj law/mailbox-inbox-scope))
                        actor-messaging? mailbox-bound-actor-did)
           resource-scopes (law/mailbox-resource-scopes config)
           origin (.-origin (js/URL. issuer))
@@ -324,6 +330,9 @@
                                    (when (and mailbox? actor-messaging?
                                               (law/mailbox-actor-scope? (.. details -params -scope)))
                                      mailbox-bound-actor-did)
+                                   (some? owner-consent)
+                                   (and owner-consent inbox-enabled?
+                                        (law/mailbox-inbox-scope? (.. details -params -scope)))
                                    (when mailbox? (mailbox-redirect-source config details))))
                         (if (and mailbox? (await (current-root request session-cookie-name resolve-session!)))
                           (do (.header reply "Cache-Control" "no-store")
@@ -357,6 +366,8 @@
                                            :prompt prompt :decision (.. request -body -decision)
                                            :mailbox-client? mailbox?
                                            :mailbox-actor-messaging? actor-messaging?
+                                           :mailbox-owner-consent? (some? owner-consent)
+                                           :mailbox-inbox? inbox-enabled?
                                            :scopes scopes :claims claims})]
                             (case (if (and mailbox? (not (mailbox-resource? config details)))
                                     :invalid-resource (:decision admission))
@@ -399,12 +410,13 @@
                       (fail! reply (if (<= 400 (or (.-statusCode error) 503) 499) 400 503)))))))))
         (if mailbox-resource
           {:resource mailbox-resource :issuer issuer :scope law/mailbox-scope
-           :scopes resource-scopes :actor-messaging? actor-messaging?
+           :scopes resource-scopes :actor-messaging? actor-messaging? :inbox? inbox-enabled?
            :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did
                                          mailbox-bound-actor-did bearer delegation))
            :active-grant?
            (fn ^:async active-grant? [proof]
              (= proof (await (engine/current-mailbox-grant! pool config mailbox-actor-did
                                (:oauth/grant-id proof) (:actor-id proof)
-                               (when (:mailbox/actors? proof) mailbox-bound-actor-did) delegation))))}
+                               (when (:mailbox/actors? proof) mailbox-bound-actor-did) delegation
+                               (true? (:mailbox/inbox? proof))))))}
           true)))))

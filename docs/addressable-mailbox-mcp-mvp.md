@@ -303,6 +303,15 @@ grants keep their access and renewal through the existing AT Protocol consent
 flow. Enabling owner consent ends access and renewal for older actor-messaging
 grants. Fresh owner approval issues the replacement grant.
 
+To let that Work actor read and acknowledge its own inbox on demand, enable
+`"mailbox-inbox?": true` in the same private authority and request
+`mailbox:inbox` alongside `mailbox:events` and `mailbox:actors`. The owner
+must approve this capability in a new consent interaction. Existing outbound
+grants keep their current permissions. The capability is checked against the
+current bound grant on every use. The Work client can call `read_inbox` and
+`acknowledge_message` for its own mailbox. Native SSE remains restricted to
+its existing authentication methods.
+
 Set `AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=false` on an instance that should
 offer mailbox actor access without webhook subscriptions. The instance omits
 the event capability, returns an empty event catalog and refuses subscription

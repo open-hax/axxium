@@ -131,7 +131,9 @@ async function verifyWorkOwnerConsent(pool, root) {
   const legacyEvents = await legacyGrant('mailbox:events', null);
   const legacyActors = await legacyGrant('mailbox:events mailbox:actors', workDid);
   const legacyUnpinnedActors = await legacyGrant('mailbox:events mailbox:actors', null);
-  writeFileSync(configPath, JSON.stringify({ ...config, 'mailbox-owner-consent?': true }), { mode: 0o600 });
+  writeFileSync(configPath, JSON.stringify({
+    ...config, 'mailbox-owner-consent?': true, 'mailbox-inbox?': true,
+  }), { mode: 0o600 });
   const app = Fastify({ logger: false });
   app.register(cookiePlugin);
   let ownerMayManage = true;
@@ -150,11 +152,12 @@ async function verifyWorkOwnerConsent(pool, root) {
     const verifier = randomBytes(32).toString('base64url');
     const request = (url, options) => fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(10000), ...options });
     const ownerCookies = new Map([['axxium_session', token]]);
-    async function authorize(selected, cookies) {
+    async function authorize(selected, cookies, inbox = false) {
       const mailbox = selected === client;
+      const scope = mailbox ? `openid mailbox:events mailbox:actors${inbox ? ' mailbox:inbox' : ''}` : 'openid profile';
       const start = new URL(`${origin}/oidc/auth`);
       start.search = new URLSearchParams({ client_id: selected.id, redirect_uri: selected['redirect-uris'][0],
-        response_type: 'code', scope: mailbox ? 'openid mailbox:events mailbox:actors' : 'openid profile',
+        response_type: 'code', scope,
         ...(mailbox ? { resource } : {}), state: 'owner-consent-state',
         code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url') });
       const cookieHeader = () => [...cookies].map(([key, value]) => `${key}=${value}`).join('; ');
@@ -175,6 +178,8 @@ async function verifyWorkOwnerConsent(pool, root) {
           const html = await response.text();
           assert.ok(html.includes(owner.display_name));
           assert.equal(html.includes(workDid), mailbox);
+          assert.equal(html.includes('read and acknowledge messages'), inbox);
+          assert.equal(html.includes('including after you sign out'), mailbox);
           const csrf = html.match(/name=csrf value='([^']+)'/)?.[1];
           assert.ok(csrf);
           response = await request(url, { method: 'POST', headers: { cookie: cookieHeader(), origin,
@@ -242,6 +247,24 @@ async function verifyWorkOwnerConsent(pool, root) {
       subject: owner.id, workAccount: work.id, mailboxDid, principalDid: workDid, authMethod: 'actor-node',
       boundActorDid: workDid,
     });
+    const inboxGrantTokens = await exchange(client, await authorize(client, ownerCookies, true));
+    const inboxToken = inboxGrantTokens.access_token;
+    assert.equal((await mounted.accessProof(inboxToken))?.inbox, true);
+    assert.equal(await grantActive(client, inboxToken), true);
+    assert.equal((await mounted.accessProof(workToken))?.inbox, undefined, 'Existing outbound grants stay outbound');
+    const inboxGrant = await pool.query(
+      "UPDATE axxium_oidc_records SET payload=payload || jsonb_build_object('rejected',jsonb_build_object('resources',jsonb_build_object($1::text,'mailbox:inbox')))" +
+      " WHERE model='Grant' AND payload->'resources'->>$1::text LIKE '%mailbox:inbox%'", [resource]);
+    assert.equal(inboxGrant.rowCount, 1);
+    assert.equal(await mounted.accessProof(inboxToken), null, 'A token cannot reuse a rejected inbox scope');
+    assert.equal(await grantActive(client, inboxToken), false, 'Introspection respects rejected inbox scope');
+    const narrowed = await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: inboxGrantTokens.refresh_token, resource });
+    assert.equal(narrowed.status, 200);
+    const narrowedToken = (await narrowed.json()).access_token;
+    assert.equal((await mounted.accessProof(narrowedToken))?.principalDid, workDid);
+    assert.equal((await mounted.accessProof(narrowedToken))?.inbox, undefined, 'Refresh cannot restore a rejected scope');
+    assert.equal((await form('/token/revocation', client, { token: narrowedToken, token_type_hint: 'access_token' })).status, 200);
     const remapped = 'did:web:axxium.example:actors:another-owner:work';
     await pool.query('UPDATE axxium_oidc_grant_sessions SET mailbox_actor_did=$1 WHERE mailbox_principal_actor_id=$2',
       [remapped, work.id]);
@@ -259,7 +282,7 @@ async function verifyWorkOwnerConsent(pool, root) {
     assert.equal(await mounted.accessProof(issued.access_token), null, 'Disconnect revokes the original Work grant too');
     assert.equal(await ordinaryGrantActive(original.access_token), true, 'Disconnect must retain the ordinary grant');
     const { rows: [{ t: consentAt }] } = await pool.query('SELECT clock_timestamp() AS t');
-    const renewed = await exchange(client, await authorize(client, ownerCookies));
+    const renewed = await exchange(client, await authorize(client, ownerCookies, true));
     const workGrantEnd = async () => (await pool.query(
       'SELECT expires_at FROM axxium_oidc_grant_sessions WHERE mailbox_principal_actor_id=$1', [work.id])).rows[0].expires_at;
     const consentEnd = await workGrantEnd();
@@ -271,6 +294,8 @@ async function verifyWorkOwnerConsent(pool, root) {
       refresh_token: renewed.refresh_token, resource });
     assert.equal(afterLogout.status, 200, 'Work refreshes tokens inside its window after the owner logs out');
     const afterLogoutTokens = await afterLogout.json();
+    assert.equal((await mounted.accessProof(afterLogoutTokens.access_token))?.inbox, true,
+      'The consented inbox scope renews within the Work grant lifetime after owner logout');
     // Hard cap: the delegated row expires at most one day after consent, and
     // refreshing never moves it.
     const { rows: [cap] } = await pool.query(

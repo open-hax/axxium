@@ -221,9 +221,11 @@
 
 (defn ^:async delegated-mailbox-grant-proof!
   "Read an owner grant only for the same Work subject, owner, binding and scopes."
-  [pool grant-id account-id client-id resource
-   {:keys [owner-actor-id root-did mailbox-did bound-actor-did] :as delegation}]
-  (when (and (every? valid-key? [grant-id account-id client-id resource])
+  ([pool grant-id account-id client-id resource delegation]
+   (await (delegated-mailbox-grant-proof! pool grant-id account-id client-id resource delegation false)))
+  ([pool grant-id account-id client-id resource
+    {:keys [owner-actor-id root-did mailbox-did bound-actor-did] :as delegation} inbox?]
+   (when (and (every? valid-key? [grant-id account-id client-id resource])
              (owner-delegation-keys? delegation)
              (= account-id owner-actor-id))
     (when-let [{:keys [mailbox_cred_id token_hash mailbox_principal_actor_id]}
@@ -236,18 +238,20 @@
                              " JOIN entities e ON e.id=owner.entity_id AND e.kind='human'"
                              mailbox-grant-join
                              (mailbox-scope-condition "$6")
+                             (when inbox? (mailbox-scope-condition "$10"))
                              " WHERE b.grant_id=$1 AND b.actor_id=$2 AND b.mailbox_client_id=$3 AND b.mailbox_resource=$4"
                              " AND b.mailbox_owner_root_did=$7 AND b.mailbox_actor_did=$8 AND b.mailbox_did=$9"
                              " AND b.expires_at>clock_timestamp()")
-                        [grant-id account-id client-id resource oidc/mailbox-scope oidc/mailbox-actors-scope
-                         root-did bound-actor-did mailbox-did]))]
+                        (cond-> [grant-id account-id client-id resource oidc/mailbox-scope oidc/mailbox-actors-scope
+                                 root-did bound-actor-did mailbox-did]
+                          inbox? (conj oidc/mailbox-inbox-scope))))]
       ;; L5: the grant authenticates as the Work node itself, acting at the
       ;; mailbox the ledger binds to it; the owner only witnessed consent.
       (when-let [proof (principal/from-actor-node bound-actor-did mailbox-did)]
         {:principal proof :actor-id account-id :cred-id mailbox_cred_id :token-hash token_hash
          :oauth/grant-id grant-id :oauth/client-id client-id :oauth/resource resource
          :mailbox/owner-root-did root-did :mailbox/bound-actor-did bound-actor-did
-         :mailbox/principal-actor-id mailbox_principal_actor_id}))))
+         :mailbox/principal-actor-id mailbox_principal_actor_id})))))
 
 (defn ^:async session-grant-active?
   "Check current actor and root-session state before grant reuse/introspection."

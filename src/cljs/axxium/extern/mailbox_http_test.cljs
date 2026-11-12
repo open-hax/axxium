@@ -383,6 +383,82 @@
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
 
+(defn- ^:async verify-oauth-inbox*
+  [app ledger {:keys [work-login codex-login codex-session foreign-message inbox-checks]}]
+  (let [run (fn [bearer sid body] (request! app "POST" bearer sid body {}))
+        initialize #(run % nil (rpc "initialize"))
+        direct-session (:sid (await (initialize work-login)))
+        registration (await (run work-login direct-session (tool "register_mailbox" {})))
+        initialized (await (initialize "inbox-access"))
+        sid (:sid initialized)
+        call (fn [session body] (run "inbox-access" session body))
+        older-sid (:sid (await (initialize "owner-access")))
+        older-call (fn [body] (run "owner-access" older-sid body))
+        rpc-error (fn [response] (get-in response [:data "error" "code"]))
+        read-inbox (tool "read_inbox" {})
+        ack #(tool "acknowledge_message" {"message_id" %})
+        inbox-resource {"uri" "axxium://mailbox/inbox"}
+        send #(run codex-login codex-session
+                   (tool "send_message" {"to" fixture/alice "idempotency_key" %
+                                         "body" {"text" %}}))]
+    (is (some? (get (result registration) "mailbox")))
+    (is (= {"tools" {}} (get-in initialized [:data "result" "capabilities"])))
+    (is (= #{"whoami" "discover_actors" "resolve_address" "send_message"
+             "read_inbox" "acknowledge_message"}
+           (into #{} (map #(get % "name"))
+                 (get-in (await (call sid (rpc "tools/list"))) [:data "result" "tools"]))))
+    (let [schemes [{"type" "oauth2" "scopes" ["mailbox:events" "mailbox:actors" "mailbox:inbox"]}]
+          descriptors (get-in (await (older-call (rpc "tools/list"))) [:data "result" "tools"])
+          own-tools (filter #(contains? #{"read_inbox" "acknowledge_message"} (get % "name")) descriptors)]
+      (is (= #{"read_inbox" "acknowledge_message"} (set (map #(get % "name") own-tools))))
+      (doseq [descriptor own-tools]
+        (is (= schemes (get descriptor "securitySchemes")
+               (get-in descriptor ["_meta" "securitySchemes"]))))
+      (let [before (fs/readFileSync ledger "utf8")
+            challenge (str "Bearer error=\"insufficient_scope\", "
+                           "error_description=\"Approve access to your mailbox inbox before retrying.\", "
+                           "scope=\"mailbox:events mailbox:actors mailbox:inbox\", "
+                           "resource_metadata=\"" origin "/.well-known/oauth-protected-resource" endpoint "\"")]
+        (doseq [operation [read-inbox (ack foreign-message)]]
+          (let [response (get-in (await (older-call operation)) [:data "result"])]
+            (is (true? (get response "isError")))
+            (is (= [challenge] (get-in response ["_meta" "mcp/www_authenticate"])))))
+        (is (= before (fs/readFileSync ledger "utf8")))))
+    (doseq [name ["register_mailbox" "grant_send" "revoke_send" "get_delivery"]]
+      (is (= -32001 (rpc-error (await (call sid (tool name {})))))))
+    (is (= -32601 (rpc-error (await (call sid (rpc "resources/list"))))))
+    (doseq [method ["resources/read" "resources/subscribe"]]
+      (is (= -32601 (rpc-error (await (call sid (assoc (rpc method) "params" inbox-resource)))))))
+    (is (= 405 (:status (await (request! app "GET" "inbox-access" sid nil {"accept" "text/event-stream"})))))
+    (is (= [] (get-in (await (call sid (rpc "events/list"))) [:data "result" "events"])))
+    (is (true? (get-in (await (call sid (tool "read_inbox" {"mailbox" fixture/bob})))
+                       [:data "result" "isError"])))
+    (is (true? (get-in (await (call sid (ack foreign-message))) [:data "result" "isError"])))
+    (let [first-id (get (result (await (send "inbox-first"))) "message_id")
+          second-id (get (result (await (send "inbox-second"))) "message_id")
+          messages (get (result (await (call sid read-inbox))) "messages")
+          second-seq (get (second messages) "message_seq")]
+      (is (= [first-id second-id] (mapv #(get % "message_id") messages)))
+      (is (= [fixture/alice fixture/alice] (mapv #(get % "message_to") messages)))
+      (is (= 0 (get (result (await (call sid (ack second-id)))) "cursor")))
+      (let [reconnected (:sid (await (initialize "inbox-access")))
+            unread (get (result (await (call reconnected read-inbox))) "messages")
+            explicit (result (await (call reconnected (tool "read_inbox" {"after" second-seq}))))]
+        (is (not= sid reconnected))
+        (is (= [first-id] (mapv #(get % "message_id") unread)))
+        (is (= 0 (get explicit "cursor")))
+        (is (= first-id (get-in explicit ["messages" 0 "message_id"])))
+        (doseq [operation [read-inbox (ack first-id)]]
+          (let [before (fs/readFileSync ledger "utf8")]
+            (reset! inbox-checks 1)
+            (is (= 401 (:status (await (call reconnected operation)))))
+            (is (= -1 @inbox-checks) "The grant is checked again before the operation commits.")
+            (is (= before (fs/readFileSync ledger "utf8")))))
+        (is (= 401 (:status (await (call reconnected read-inbox)))))
+        (reset! inbox-checks nil)
+        (is (= second-seq (get (result (await (call reconnected (ack first-id)))) "cursor")))
+        (is (= [] (get (result (await (call reconnected read-inbox))) "messages")))))))
+
 (defn- ^:async verify-actor-messaging* []
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-actors-"))
@@ -407,16 +483,30 @@
         app (atom nil)
         config cfg/get-in-config
         scoped? (atom true)
+        inbox-checks (atom nil)
         webhook-effects (atom [])
         proof {:principal {:auth/did fixture/alice :auth/method :atproto}
                :oauth/grant-id "fixture" :oauth/client-id "chatgpt-fixture" :oauth/resource audience}
+        owner-proof (assoc proof :oauth/grant-id "fixture-owner"
+                           :principal {:auth/did work :auth/method :actor-node :auth/mailbox fixture/alice}
+                           :mailbox/owner-root-did root :mailbox/bound-actor-did work :mailbox/actors? true)
+        inbox-proof (assoc owner-proof :oauth/grant-id "fixture-inbox" :mailbox/inbox? true)
         oauth {:issuer (str origin "/oidc") :resource audience :scope "mailbox:events"
-               :scopes ["mailbox:events" "mailbox:actors"] :actor-messaging? true
+               :scopes ["mailbox:events" "mailbox:actors" "mailbox:inbox"] :actor-messaging? true :inbox? true
                :access-proof! #(case %
                                  "events-only" proof
                                  "actor-access" (cond-> proof @scoped? (assoc :mailbox/actors? true))
+                                 "owner-access" owner-proof
+                                 "inbox-access" inbox-proof
                                  nil)
-               :active-grant? #(or (not (:mailbox/actors? %)) @scoped?)}]
+               :active-grant? #(cond
+                                 (:mailbox/inbox? %)
+                                 (or (nil? @inbox-checks) (not (neg? (swap! inbox-checks dec))))
+
+                                 (= "fixture" (:oauth/grant-id %))
+                                 (or (not (:mailbox/actors? %)) @scoped?)
+
+                                 :else true)}]
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (with-redefs [signing/current! (constantly keys)
@@ -430,9 +520,11 @@
                                           :mailbox/ledger-file ledger
                                           :mailbox/actor-bindings bindings
                                           :mailbox/subscriptions-enabled? false
+                                          :mailbox/stream-enabled? true
                                           :mailbox/webhook-actor-did fixture/alice
                                           :mailbox/webhook-key-file (path/join dir "unused-webhook.key")
                                           :github-identity/ledger-file actor-ledger
+                                          :identity/root-operator-binding {:root-did root}
                                           :axxium/public-base-url origin
                                           (config ks)))]
         (reset! app (await (start-app! oauth)))
@@ -464,10 +556,18 @@
           (is (= #{"whoami" "discover_actors" "resolve_address" "send_message"}
                  (set (list-names (await (call (rpc "tools/list")))))))
           (is (= -32001 (get-in (await (call (tool "read_inbox" {}))) [:data "error" "code"])))
+          (is (= -32001 (get-in (await (call (tool "acknowledge_message" {}))) [:data "error" "code"])))
           (is (= -32001 (get-in (await (event-call send)) [:data "error" "code"])))
           (is (= [{"did" codex "name" "Codex" "kind" "agent" "mailbox_did" fixture/bob}]
                  (get (result (await (call discover))) "actors")))
-          (is (= "accepted" (get (result (await (call send))) "accepted")))
+          (let [sent (result (await (call send)))
+                alice (:bearer (await (mint-fixture! live "actor_11111111-1111-4111-8111-111111111111"
+                                                    (secrets/secure-id) fixture/alice)))]
+            (is (= "accepted" (get sent "accepted")))
+            (await (verify-oauth-inbox* @app ledger {:work-login alice :codex-login bob
+                                                    :codex-session bob-session
+                                                    :foreign-message (get sent "message_id")
+                                                    :inbox-checks inbox-checks})))
           (is (= "hello" (get-in (result (await (run bob bob-session (tool "read_inbox" {}))))
                                  ["messages" 0 "message_body" "text"])))
           (swap! directory assoc-in [:resources (identity-law/actor-resource-id codex)
@@ -483,12 +583,19 @@
           (is (= [] (get (result (await (call discover))) "actors"))
               "An unbound ledger binding stops routing although the env seed still names it.")
           (reset! scoped? false)
-          (is (= ["whoami"] (list-names (await (call (rpc "tools/list"))))))))
+          (is (= ["whoami"] (list-names (await (call (rpc "tools/list"))))))
+          (await (.close (:app @app)))
+          (reset! app (await (start-app! (assoc oauth :inbox? false))))
+          (let [owner-sid (:sid (await (initialize "owner-access")))]
+            (is (= #{"whoami" "discover_actors" "resolve_address" "send_message"}
+                   (set (list-names (await (run "owner-access" owner-sid (rpc "tools/list")))))))
+            (is (= -32001 (get-in (await (run "owner-access" owner-sid (tool "read_inbox" {})))
+                                 [:data "error" "code"]))))))
       (finally
         (when @app (await (.close (:app @app))))
         (fs/rmSync dir #js {:recursive true})))))
 
-(deftest scoped-oauth-discovers-and-sends-without-acquiring-inbox-access
+(deftest scoped-oauth-opens-only-its-authorized-mailbox-tools
   (async done
     (-> (verify-actor-messaging*)
         (.catch (fn [error] (is false (str error))))
