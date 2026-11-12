@@ -13,16 +13,29 @@
   "Opt-in discovery and messaging within the configured human's actor tree."
   "mailbox:actors")
 
+(def mailbox-inbox-scope
+  "Opt-in on-demand reading and acknowledgment of the delegated actor's own inbox."
+  "mailbox:inbox")
+
 (defn mailbox-resource-scopes
   "Resource scopes offered by the trusted mailbox client configuration."
-  [{:keys [mailbox-actor-messaging?]}]
+  [{:keys [mailbox-actor-messaging? mailbox-inbox?]}]
   (cond-> [mailbox-scope]
-    (true? mailbox-actor-messaging?) (conj mailbox-actors-scope)))
+    (true? mailbox-actor-messaging?) (conj mailbox-actors-scope)
+    (true? mailbox-inbox?) (conj mailbox-inbox-scope)))
+
+(defn- token-scopes [scope]
+  (when (string? scope) (set (str/split scope #" "))))
 
 (defn mailbox-actor-scope?
   "Check whether a space-delimited opaque token scope includes actor messaging."
   [scope]
-  (and (string? scope) (boolean (some #{mailbox-actors-scope} (str/split scope #" ")))))
+  (contains? (token-scopes scope) mailbox-actors-scope))
+
+(defn mailbox-inbox-scope?
+  "Check whether a space-delimited scope explicitly includes inbox consumption."
+  [scope]
+  (contains? (token-scopes scope) mailbox-inbox-scope))
 
 (defn mailbox-bound-actor-did?
   "Admit a bounded seeded actor DID to pin the actor-messaging grant."
@@ -50,6 +63,7 @@
              [:mailbox-client-id {:optional true} [:ref ::id]]
              [:mailbox-resource {:optional true} [:ref ::uri]]
              [:mailbox-actor-messaging? {:optional true} :boolean]
+             [:mailbox-inbox? {:optional true} :boolean]
              [:mailbox-owner-consent? {:optional true} :boolean]
              [:node-grants {:optional true} [:vector {:max 64} relay/grant-schema]]]})
 
@@ -79,19 +93,27 @@
                  (= (count (:clients config)) (count (set (map :secret (:clients config)))))
                  (mailbox-client-configured? config)
                  (or (not (:mailbox-owner-consent? config)) (:mailbox-actor-messaging? config))
+                 (or (not (:mailbox-inbox? config)) (:mailbox-owner-consent? config))
                  (relay/grants-valid? (get config :node-grants []) (:clients config)))
     (throw (ex-info "Invalid OIDC authority configuration" {})))
   config)
+
+(defn- admitted-mailbox-scopes?
+  [config scopes]
+  (and (contains? scopes mailbox-scope)
+       (or (not (contains? scopes mailbox-inbox-scope))
+           (and (true? (:mailbox-owner-consent? config))
+                (contains? scopes mailbox-actors-scope)))))
 
 (defn mailbox-access-claims?
   "Admit only verified token claims for the exact client, issuer and resource."
   [{:keys [issuer mailbox-resource] :as config}
    {:keys [client-id token-issuer audience scope account-id grant-id]}]
-  (let [scopes (when (string? scope) (set (str/split scope #" ")))]
+  (let [scopes (token-scopes scope)]
     (and (mailbox-client? config client-id)
          (= issuer token-issuer)
          (= mailbox-resource audience)
-         (contains? scopes mailbox-scope)
+         (admitted-mailbox-scopes? config scopes)
          (every? (set (mailbox-resource-scopes config)) scopes)
          (every? #(and (string? %) (<= 1 (count %) 2048)) [account-id grant-id]))))
 
@@ -100,7 +122,7 @@
   (and (vector? scopes)
        (some #{"openid"} scopes)
        (if mailbox-client?
-         (and (some #{mailbox-scope} scopes)
+         (and (admitted-mailbox-scopes? config (set scopes))
               (every? (into #{"openid" "profile"} (mailbox-resource-scopes config)) scopes))
          (every? #{"openid" "profile"} scopes))))
 

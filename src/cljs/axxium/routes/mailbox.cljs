@@ -227,7 +227,13 @@
   (let [body (http/json-body req)
         version (http/header req "mcp-protocol-version")
         sid (http/header req "mcp-session-id")
-        initialize? (= "initialize" (get body "method"))]
+        initialize? (= "initialize" (get body "method"))
+        inbox-upgrade? (and directory? (true? (:inbox? oauth))
+                            (true? (:mailbox/actors? proof))
+                            (some? (:oauth/grant-id proof))
+                            (some? (:mailbox/owner-root-did proof))
+                            (= :actor-node (:auth/method principal))
+                            (= (:mailbox/bound-actor-did proof) (:auth/did principal)))]
     (cond
       (not (accepts? req "application/json"))
       (http/send-secret! reply 406 {:error "Mailbox requests require application/json"})
@@ -254,9 +260,12 @@
                  :events/enabled? (events/enabled? runtime proof)
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
-                 :mailbox/actors? (:mailbox/actors? proof))
+                 :mailbox/actors? (:mailbox/actors? proof)
+                 :mailbox/inbox-upgrade? inbox-upgrade?
+                 :mailbox/inbox? (and inbox-upgrade? (true? (:mailbox/inbox? proof)))
+                 :mailbox/resource-metadata resource-metadata)
             out (if (and (:events/enabled? ctx) (contains? events/event-methods (get body "method")))
-                  (await (events/execute! runtime (dissoc proof :mailbox/actors?) ctx body))
+                  (await (events/execute! runtime (dissoc proof :mailbox/actors? :mailbox/inbox?) ctx body))
                   (await (submit-operation! writer path oauth proof ctx body directory? stream-runtime)))
             applied? (case (:inbox-subscription out)
                        :subscribe (stream/subscribe! stream-runtime sid (principal/address principal))

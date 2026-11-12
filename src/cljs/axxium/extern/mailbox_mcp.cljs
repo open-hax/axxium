@@ -2,6 +2,7 @@
   "JSON-RPC wire adapter for the addressable mailbox."
   (:require [axxium.domain.mailbox-events :as access]
             [axxium.domain.mailbox-mcp :as mailbox]
+            [axxium.law.oidc :as oidc]
             [axxium.law.principal :as principal]
             [clojure.string :as str]))
 
@@ -140,13 +141,38 @@
   (str (name error) ": " (get error-actions error "Check the tool arguments and retry with an authorized session.")))
 
 (def ^:private actor-messaging-tools #{"discover_actors" "resolve_address" "send_message"})
+(def ^:private own-inbox-tools #{"read_inbox" "acknowledge_message"})
+(def ^:private inbox-scopes [oidc/mailbox-scope oidc/mailbox-actors-scope oidc/mailbox-inbox-scope])
+(def ^:private inbox-security-schemes [{"type" "oauth2" "scopes" inbox-scopes}])
+
+(defn- inbox-upgrade-tool? [ctx name]
+  (and (:mailbox/inbox-upgrade? ctx) (contains? own-inbox-tools name)))
 
 (defn- tool-allowed? [ctx name]
   (let [directory? (contains? ctx :directory/bindings)]
     (if (:events/only? ctx)
       (or (= name "whoami")
-          (and directory? (:mailbox/actors? ctx) (contains? actor-messaging-tools name)))
+          (and directory?
+               (or (and (:mailbox/actors? ctx) (contains? actor-messaging-tools name))
+                   (and (true? (:mailbox/inbox? ctx)) (contains? own-inbox-tools name)))))
       (or directory? (not= name "discover_actors")))))
+
+(defn- visible-tool [ctx {:strs [name] :as descriptor}]
+  (if (inbox-upgrade-tool? ctx name)
+    (-> descriptor
+        (assoc "securitySchemes" inbox-security-schemes)
+        (assoc-in ["_meta" "securitySchemes"] inbox-security-schemes))
+    (when (tool-allowed? ctx name) descriptor)))
+
+(defn- inbox-scope-required [id ctx]
+  (let [description "Approve access to your mailbox inbox before retrying."
+        challenge (str "Bearer error=\"insufficient_scope\", error_description=\"" description
+                       "\", scope=\"" (str/join " " inbox-scopes) "\""
+                       (when-let [metadata (:mailbox/resource-metadata ctx)]
+                         (str ", resource_metadata=\"" metadata "\"")))]
+    (rpc-result id {"isError" true
+                    "content" [{"type" "text" "text" description}]
+                    "_meta" {"mcp/www_authenticate" [challenge]}})))
 
 (defn- rpc-request
   "Evaluate a request; the public adapter suppresses notification responses."
@@ -175,10 +201,12 @@
 
     (= method "tools/list")
     {:ledger lg :response {"jsonrpc" "2.0" "id" id
-                           "result" {"tools" (filterv #(tool-allowed? ctx (get % "name")) tool-descriptors)}}}
+                           "result" {"tools" (into [] (keep (partial visible-tool ctx)) tool-descriptors)}}}
 
     (and (= method "tools/call") (not (tool-allowed? ctx (get params "name"))))
-    {:ledger lg :response (rpc-error id -32001 "Mailbox access does not grant this tool")}
+    {:ledger lg :response (if (inbox-upgrade-tool? ctx (get params "name"))
+                            (inbox-scope-required id ctx)
+                            (rpc-error id -32001 "Mailbox access does not grant this tool"))}
 
     (= method "tools/call")
     (let [tool-name (get params "name")

@@ -93,6 +93,31 @@
                      config]]
     (is (thrown? cljs.core/ExceptionInfo (provider/create-provider! nil candidate identity identity nil)))))
 
+(deftest mailbox-inbox-requires-explicit-owner-delegation-and-actor-scope
+  (let [resource "https://identity.example.test/api/mailbox/mcp"
+        actor-config (assoc config :mailbox-client-id "knoxx-stealth" :mailbox-resource resource
+                             :mailbox-actor-messaging? true :mailbox-owner-consent? true)
+        inbox-config (assoc actor-config :mailbox-inbox? true)
+        claims {:client-id "knoxx-stealth" :token-issuer (:issuer config) :audience resource
+                :account-id "actor" :grant-id "grant" :scope "mailbox:events mailbox:actors"}
+        inbox-claims (update claims :scope str " mailbox:inbox")
+        consent (merge inbox-config
+                       {:expected-uid "interaction" :actual-uid "interaction" :actor-id "actor"
+                        :session-actor-id "actor" :prompt "consent" :decision "approve"
+                        :scopes ["openid" "mailbox:events" "mailbox:actors" "mailbox:inbox"]
+                        :claims [] :mailbox-client? true})]
+    (is (= inbox-config (admitted-config inbox-config)))
+    (is (nil? (admitted-config (dissoc inbox-config :mailbox-owner-consent?))))
+    (is (law/mailbox-access-claims? inbox-config claims) "Existing outbound tokens still work.")
+    (is (law/mailbox-access-claims? inbox-config inbox-claims))
+    (is (not (law/mailbox-access-claims? actor-config inbox-claims)))
+    (is (not (law/mailbox-access-claims? inbox-config (assoc claims :scope "mailbox:events mailbox:inbox"))))
+    (is (= {:decision :consent} (law/interaction-admission consent)))
+    (is (= {:decision :refuse :status 403}
+           (law/interaction-admission (dissoc consent :mailbox-owner-consent?))))
+    (is (= {:decision :refuse :status 403}
+           (law/interaction-admission (assoc consent :scopes ["openid" "mailbox:events" "mailbox:inbox"]))))))
+
 (deftest interaction-consent-is-principal-and-scope-bound
   (let [context {:expected-uid "interaction" :actual-uid "interaction" :actor-id "a"
                  :session-actor-id "a" :prompt "consent" :decision "approve"
