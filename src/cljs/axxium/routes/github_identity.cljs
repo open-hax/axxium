@@ -269,19 +269,18 @@
 (defn- mailbox-bootstrap-node?
   [st did]
   (let [root-did (:root-did (root-binding))]
-    (and (not= did root-did)
+    (and (gi/active-owner-delegation? st root-did did)
          (gi/live? st did (js/Date.))
          (let [kind (gi/kind-of st did)]
            (or (and (= :session kind) (gi/lease-of st did))
                (and (contains? #{:agent :bot} kind)
-                    (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did)
-                    (gi/active-owner-delegation? st root-did did))))
+                    (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did))))
          (let [bindings (gi/mailbox-bindings st)]
            (and (not (contains? bindings did))
                 (not-any? #{did} (vals bindings)))))))
 
 (defn node-proof
-  "Authenticate a leased session or opted-in agent or bot at its own unbound DID."
+  "Authenticate an eligible child of the configured owner at its own unbound DID."
   [did key]
   (when (and (string? did) (string? key) (configured?))
     (let [st (current-actor-state)]
@@ -291,8 +290,8 @@
             {:principal p :cred-id (pr-str ["actor-node" did digest]) :node/digest digest}))))))
 
 (defn node-proof-active?
-  "Recheck current generation, live ancestry and the unbound address. Long-lived
-   agents also need a current opt-in. The caller can already hold the writer."
+  "Recheck current generation, configured owner delegation, liveness and the
+   unbound address. Long-lived agents also need a current opt-in."
   [{:keys [principal] :node/keys [digest]}]
   (let [st (current-actor-state)
         did (:auth/did principal)]
