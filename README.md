@@ -22,22 +22,24 @@ the official client verifies the authorization flow.
 
 ## Quick Start
 
+For a local run, use Node.js 22, Java 21, and a running PostgreSQL 16
+instance with a database and user for Axxium.
+
 ```bash
-# Install dependencies
-npm install
-
-# Set up environment
+npm ci
 cp .env.example .env
-# Edit .env with your database credentials
+# Set the DB_* values in .env for your local database.
 node scripts/provision-signing-key.mjs ./signing-key.pem
-
-# Development
-npm run watch
-
-# Build for production
 npm run build
-npm start
+node --env-file=.env dist/server.js
 ```
+
+Open `http://127.0.0.1:8787/portal/index.html` with the example configuration.
+The local command loads the database settings and signing-key path from
+`.env`. The key provisioner creates a private Ed25519 file for this instance.
+For iterative compilation, run `npm run watch` in a separate terminal.
+Deployments that supply configuration through the process environment can
+start the build with `npm start`.
 
 ## Deployment ownership
 
