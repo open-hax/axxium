@@ -51,7 +51,11 @@
                     (some-> (await (native-session token)) (js->clj :keywordize-keys true)))
                   (fn ^:async actor-fixture [subject]
                     (some-> (await (native-lookup subject)) (js->clj :keywordize-keys true)))))]
-    #js {:accessProof
+    #js {:renewAfterUse
+         (fn ^:async renew-after-use [token]
+           (when-let [proof (await ((:access-proof! oauth) token))]
+             (await ((:renew-after-use! oauth) proof))))
+         :accessProof
          (fn ^:async access-proof [token]
            (let [proof (await ((:access-proof! oauth) token))]
              (when proof

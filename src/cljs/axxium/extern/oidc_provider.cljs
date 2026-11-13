@@ -232,6 +232,18 @@
                              :revocation #js {:enabled true
                                               :allowedPolicy (fn [_ctx client token]
                                                                (= (.-clientId token) (.-clientId client)))}}
+              :expiresWithSession
+              (fn ^:async expires-with-session [_ctx source]
+                ;; The newly consented Work grant, not the provider browser
+                ;; session, owns the lifetime of this one delegated credential.
+                (and (not (.has (.-scopes source) "offline_access"))
+                     (not (and (law/mailbox-client? config (.-clientId source))
+                               (law/mailbox-actor-scope? (.-scope source))
+                               (:mailbox/renew-on-use?
+                                 (await (current-mailbox-grant! pool config mailbox-owner
+                                          (.-grantId source) (.-accountId source)
+                                          (:bound-actor-did delegation) delegation
+                                          (law/mailbox-inbox-scope? (.-scope source)))))))))
               :issueRefreshToken
               (fn ^:async bounded-refresh [ctx client source]
                 (if (.grantTypeAllowed client "refresh_token")

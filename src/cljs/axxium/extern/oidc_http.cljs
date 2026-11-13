@@ -142,7 +142,7 @@
                     (when inbox?
                       "<p>This client may read and acknowledge messages in the Work actor’s own inbox.</p>")
                     (if delegated?
-                      "<p>The Work grant lasts at most 24 hours, including after you sign out. Disconnect the client or remove the Work actor’s authority to end access sooner.</p>"
+                      "<p>The Work grant expires after 24 hours without successful mailbox use, including after you sign out. Each successful mailbox tool call starts a new 24-hour window. Disconnect the client or remove the Work actor’s authority to end access sooner.</p>"
                       "<p>This sign-in may renew while your current Axxium root session is active, for at most 24 hours. Signing out of Axxium or disabling the actor ends reuse. This does not grant offline access or machine federation permission.</p>")
                     "<form method=post action='/oidc/interaction/" (html-escape uid) "'>"
                     "<input type=hidden name=csrf value='" (html-escape token) "'>"
@@ -227,7 +227,7 @@
                          :mailbox-did mailbox-actor-did :bound-actor-did mailbox-bound-actor-did))
           csrf-actor (cond
                        delegation (cond-> [mailbox-bound-actor-did mailbox-actor-did
-                                           (:owner-actor-id delegation) (:root-did delegation)]
+                                           (:owner-actor-id delegation) (:root-did delegation) :work-renew-on-use-v1]
                                     inbox-enabled? (conj law/mailbox-inbox-scope))
                        actor-messaging? mailbox-bound-actor-did)
           resource-scopes (law/mailbox-resource-scopes config)
@@ -413,6 +413,13 @@
            :scopes resource-scopes :actor-messaging? actor-messaging? :inbox? inbox-enabled?
            :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did
                                          mailbox-bound-actor-did bearer delegation))
+           :renew-after-use!
+           (fn ^:async renew-after-use [proof]
+             (try
+               (when (and (:mailbox/renew-on-use? proof) ((:authorized? delegation)))
+                 (await (store/renew-delegated-mailbox-grant! pool proof)))
+               (catch :default _
+                 (.warn (.-log app) "Could not renew Work mailbox access"))))
            :active-grant?
            (fn ^:async active-grant? [proof]
              (= proof (await (engine/current-mailbox-grant! pool config mailbox-actor-did

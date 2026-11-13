@@ -180,6 +180,7 @@ async function verifyWorkOwnerConsent(pool, root) {
           assert.equal(html.includes(workDid), mailbox);
           assert.equal(html.includes('read and acknowledge messages'), inbox);
           assert.equal(html.includes('including after you sign out'), mailbox);
+          assert.equal(html.includes('without successful mailbox use'), mailbox);
           const csrf = html.match(/name=csrf value='([^']+)'/)?.[1];
           assert.ok(csrf);
           response = await request(url, { method: 'POST', headers: { cookie: cookieHeader(), origin,
@@ -283,43 +284,96 @@ async function verifyWorkOwnerConsent(pool, root) {
     assert.equal(await ordinaryGrantActive(original.access_token), true, 'Disconnect must retain the ordinary grant');
     const { rows: [{ t: consentAt }] } = await pool.query('SELECT clock_timestamp() AS t');
     const renewed = await exchange(client, await authorize(client, ownerCookies, true));
+    const { rows: [binding] } = await pool.query(
+      "SELECT grant_id,mailbox_renew_on_use FROM axxium_oidc_grant_sessions b JOIN axxium_oidc_records g" +
+      " ON g.model='Grant' AND g.id=b.grant_id WHERE b.mailbox_principal_actor_id=$1", [work.id]);
+    const grantId = binding.grant_id;
+    assert.equal(binding.mailbox_renew_on_use, true);
     const workGrantEnd = async () => (await pool.query(
-      'SELECT expires_at FROM axxium_oidc_grant_sessions WHERE mailbox_principal_actor_id=$1', [work.id])).rows[0].expires_at;
+      'SELECT expires_at FROM axxium_oidc_grant_sessions WHERE grant_id=$1', [grantId])).rows[0].expires_at;
     const consentEnd = await workGrantEnd();
+    assert.ok(consentEnd.getTime() - consentAt.getTime() <= 86_401_000, 'Initial grant ends in 24 hours');
+    assert.ok(renewed.expires_in > 0 && renewed.expires_in <= 300, 'Work access tokens remain short-lived');
+    // Simulate a grant used near its previous deadline without waiting a day.
+    async function shortenGrant() {
+      const { rows: [previous] } = await pool.query(
+        "UPDATE axxium_oidc_grant_sessions SET expires_at=date_trunc('second',clock_timestamp())+interval '2 minutes'" +
+        " WHERE grant_id=$1 RETURNING expires_at", [grantId]);
+      await pool.query(
+        "UPDATE axxium_oidc_records SET expires_at=$2,payload=jsonb_set(payload,'{exp}',to_jsonb(extract(epoch FROM $2::timestamptz)::bigint))" +
+        " WHERE (model='Grant' AND id=$1) OR (model='RefreshToken' AND consumed_at IS NULL AND payload->>'grantId'=$1)",
+        [grantId, previous.expires_at]);
+      return previous.expires_at;
+    }
+    const previous = await shortenGrant();
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET mailbox_renew_on_use=false WHERE grant_id=$1", [grantId]);
+    assert.equal(await mounted.renewAfterUse(renewed.access_token), null, 'Existing one-day consent cannot adopt a rolling window');
+    assert.deepEqual(await workGrantEnd(), previous);
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET mailbox_renew_on_use=true WHERE grant_id=$1", [grantId]);
     await pool.query('DELETE FROM sessions WHERE token_hash=$1', [digest]);
+    const removedProviderSession = await pool.query(
+      "DELETE FROM axxium_oidc_records WHERE model='Session' AND payload->>'uid'=(" +
+      "SELECT payload->>'sessionUid' FROM axxium_oidc_records WHERE model='AccessToken' AND id=$1)", [renewed.access_token]);
+    assert.equal(removedProviderSession.rowCount, 1);
     // L5: the owner's session witnessed consent only; Work's grant is its own credential.
     assert.equal((await mounted.accessProof(renewed.access_token))?.principalDid, workDid,
-      'Ending the owner browser session does not end the Work node credential');
+      'The Work credential survives both Axxium and OIDC browser-session expiration');
     const afterLogout = await form('/token', client, { grant_type: 'refresh_token',
       refresh_token: renewed.refresh_token, resource });
     assert.equal(afterLogout.status, 200, 'Work refreshes tokens inside its window after the owner logs out');
     const afterLogoutTokens = await afterLogout.json();
     assert.equal((await mounted.accessProof(afterLogoutTokens.access_token))?.inbox, true,
       'The consented inbox scope renews within the Work grant lifetime after owner logout');
-    // Hard cap: the delegated row expires at most one day after consent, and
-    // refreshing never moves it.
-    const { rows: [cap] } = await pool.query(
-      "SELECT expires_at, expires_at <= $2::timestamptz + interval '1 day' AS capped" +
-      " FROM axxium_oidc_grant_sessions WHERE mailbox_principal_actor_id=$1", [work.id, consentAt]);
-    assert.equal(cap.capped, true, 'The Work grant ends no later than one day after consent');
-    assert.equal(cap.expires_at.getTime(), consentEnd.getTime(), 'Refreshing never extends the one-day cap');
-    await pool.query("UPDATE axxium_oidc_grant_sessions SET expires_at=clock_timestamp()-interval '1 second'" +
-      ' WHERE mailbox_principal_actor_id=$1', [work.id]);
-    assert.equal(await mounted.accessProof(afterLogoutTokens.access_token), null,
-      'At the one-day cap the Work grant stops working');
-    assert.equal((await form('/token', client, { grant_type: 'refresh_token',
-      refresh_token: afterLogoutTokens.refresh_token, resource })).status, 400,
-      'At the one-day cap refresh is refused; Work needs fresh owner consent');
-    await pool.query('UPDATE axxium_oidc_grant_sessions SET expires_at=$2 WHERE mailbox_principal_actor_id=$1',
-      [work.id, cap.expires_at]);
+    assert.deepEqual(await workGrantEnd(), previous, 'OAuth refresh alone leaves the deadline');
+    const tokenEnd = async token => (await pool.query(
+      "SELECT expires_at,payload->>'exp' AS exp FROM axxium_oidc_records WHERE id=$1", [token])).rows[0];
+    const accessEnd = await tokenEnd(afterLogoutTokens.access_token);
+    const consumedEnd = await tokenEnd(renewed.refresh_token);
+    const expiredRefresh = randomUUID();
+    await pool.query(
+      "INSERT INTO axxium_oidc_records(model,id,payload,expires_at)" +
+      " SELECT model,$2,jsonb_set(payload,'{exp}',to_jsonb(floor(extract(epoch FROM clock_timestamp()))-1)),expires_at" +
+      " FROM axxium_oidc_records WHERE model='RefreshToken' AND id=$1",
+      [afterLogoutTokens.refresh_token, expiredRefresh]);
+    const expiredEnd = await tokenEnd(expiredRefresh);
+    assert.equal(await mounted.renewAfterUse(afterLogoutTokens.access_token), true);
+    const afterUse = await workGrantEnd();
+    assert.ok(afterUse.getTime() - Date.now() > 86_390_000, 'Successful use starts a new 24-hour window');
+    assert.ok(afterUse.getTime() - Date.now() <= 86_400_000);
+    assert.deepEqual(await tokenEnd(grantId), { expires_at: afterUse, exp: String(afterUse.getTime() / 1000) });
+    assert.deepEqual(await tokenEnd(afterLogoutTokens.refresh_token), await tokenEnd(grantId));
+    assert.deepEqual(await tokenEnd(renewed.refresh_token), consumedEnd, 'Consumed refresh tokens keep their old deadlines');
+    assert.deepEqual(await tokenEnd(expiredRefresh), expiredEnd, 'Expired protocol payload cannot be renewed');
+    assert.deepEqual(await tokenEnd(afterLogoutTokens.access_token), accessEnd, 'Mailbox use never extends a bearer access token');
     await assert.rejects(authorize(client, new Map(ownerCookies)), /Consent HTTP 4\d\d/,
       'New consent still needs a live owner session');
     ownerMayManage = false;
     assert.equal(await mounted.accessProof(afterLogoutTokens.access_token), null,
       'Loss of the owner manage right still revokes the Work grant');
+    assert.equal(await mounted.renewAfterUse(afterLogoutTokens.access_token), null);
     assert.equal((await form('/token', client, { grant_type: 'refresh_token',
       refresh_token: afterLogoutTokens.refresh_token, resource })).status, 400, 'and blocks renewal');
     ownerMayManage = true;
+    // Race a real refresh with another successful mailbox use. Either order must
+    // leave the newly issued refresh token with the resulting grant deadline.
+    const beforeRace = await shortenGrant();
+    const [racingRefresh, racingUse] = await Promise.all([
+      form('/token', client, { grant_type: 'refresh_token', refresh_token: afterLogoutTokens.refresh_token, resource }),
+      mounted.renewAfterUse(afterLogoutTokens.access_token),
+    ]);
+    assert.equal(racingRefresh.status, 200);
+    assert.equal(racingUse, true);
+    const racingTokens = await racingRefresh.json();
+    assert.ok(racingTokens.expires_in > 0 && racingTokens.expires_in <= 300);
+    assert.ok((await workGrantEnd()).getTime() > beforeRace.getTime());
+    assert.deepEqual(await tokenEnd(racingTokens.refresh_token), await tokenEnd(grantId));
+    await pool.query("UPDATE axxium_oidc_grant_sessions SET expires_at=clock_timestamp()-interval '1 second'" +
+      ' WHERE grant_id=$1', [grantId]);
+    assert.equal(await mounted.accessProof(racingTokens.access_token), null, 'An inactive grant stops working');
+    assert.equal(await mounted.renewAfterUse(racingTokens.access_token), null, 'Use cannot resurrect an inactive grant');
+    assert.equal((await form('/token', client, { grant_type: 'refresh_token',
+      refresh_token: racingTokens.refresh_token, resource })).status, 400,
+      'An inactive grant needs fresh owner consent');
   } finally {
     await app.close();
   }
