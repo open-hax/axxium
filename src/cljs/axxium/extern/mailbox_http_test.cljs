@@ -384,7 +384,7 @@
         (.finally done))))
 
 (defn- ^:async verify-oauth-inbox*
-  [app ledger {:keys [work-login codex-login codex-session foreign-message inbox-checks]}]
+  [app ledger {:keys [work-login codex-login codex-session foreign-message inbox-checks renewals]}]
   (let [run (fn [bearer sid body] (request! app "POST" bearer sid body {}))
         initialize #(run % nil (rpc "initialize"))
         direct-session (:sid (await (initialize work-login)))
@@ -434,13 +434,16 @@
     (is (true? (get-in (await (call sid (tool "read_inbox" {"mailbox" fixture/bob})))
                        [:data "result" "isError"])))
     (is (true? (get-in (await (call sid (ack foreign-message))) [:data "result" "isError"])))
+    (is (empty? @renewals) "MCP setup and failed operations do not renew the Work grant.")
     (let [first-id (get (result (await (send "inbox-first"))) "message_id")
           second-id (get (result (await (send "inbox-second"))) "message_id")
           messages (get (result (await (call sid read-inbox))) "messages")
           second-seq (get (second messages) "message_seq")]
       (is (= [first-id second-id] (mapv #(get % "message_id") messages)))
       (is (= [fixture/alice fixture/alice] (mapv #(get % "message_to") messages)))
+      (is (= ["fixture-inbox"] @renewals) "Only the Work read renews the grant.")
       (is (= 0 (get (result (await (call sid (ack second-id)))) "cursor")))
+      (is (= ["fixture-inbox" "fixture-inbox"] @renewals) "A successful acknowledgment also renews.")
       (let [reconnected (:sid (await (initialize "inbox-access")))
             unread (get (result (await (call reconnected read-inbox))) "messages")
             explicit (result (await (call reconnected (tool "read_inbox" {"after" second-seq}))))]
@@ -455,9 +458,11 @@
             (is (= -1 @inbox-checks) "The grant is checked again before the operation commits.")
             (is (= before (fs/readFileSync ledger "utf8")))))
         (is (= 401 (:status (await (call reconnected read-inbox)))))
+        (is (= 4 (count @renewals)) "Reconnection and the revoked operations do not renew.")
         (reset! inbox-checks nil)
         (is (= second-seq (get (result (await (call reconnected (ack first-id)))) "cursor")))
-        (is (= [] (get (result (await (call reconnected read-inbox))) "messages")))))))
+        (is (= [] (get (result (await (call reconnected read-inbox))) "messages")))
+        (is (= 6 (count @renewals)) "A successful read renews even when the inbox is empty.")))))
 
 (defn- ^:async verify-actor-messaging* []
   (let [keys (await (signing/generate-ephemeral!))
@@ -484,15 +489,18 @@
         config cfg/get-in-config
         scoped? (atom true)
         inbox-checks (atom nil)
+        renewals (atom [])
         webhook-effects (atom [])
         proof {:principal {:auth/did fixture/alice :auth/method :atproto}
                :oauth/grant-id "fixture" :oauth/client-id "chatgpt-fixture" :oauth/resource audience}
         owner-proof (assoc proof :oauth/grant-id "fixture-owner"
                            :principal {:auth/did work :auth/method :actor-node :auth/mailbox fixture/alice}
                            :mailbox/owner-root-did root :mailbox/bound-actor-did work :mailbox/actors? true)
-        inbox-proof (assoc owner-proof :oauth/grant-id "fixture-inbox" :mailbox/inbox? true)
+        inbox-proof (assoc owner-proof :oauth/grant-id "fixture-inbox"
+                                      :mailbox/inbox? true :mailbox/renew-on-use? true)
         oauth {:issuer (str origin "/oidc") :resource audience :scope "mailbox:events"
                :scopes ["mailbox:events" "mailbox:actors" "mailbox:inbox"] :actor-messaging? true :inbox? true
+               :renew-after-use! #(swap! renewals conj (:oauth/grant-id %))
                :access-proof! #(case %
                                  "events-only" proof
                                  "actor-access" (cond-> proof @scoped? (assoc :mailbox/actors? true))
@@ -567,7 +575,8 @@
             (await (verify-oauth-inbox* @app ledger {:work-login alice :codex-login bob
                                                     :codex-session bob-session
                                                     :foreign-message (get sent "message_id")
-                                                    :inbox-checks inbox-checks})))
+                                                    :inbox-checks inbox-checks
+                                                    :renewals renewals})))
           (is (= "hello" (get-in (result (await (run bob bob-session (tool "read_inbox" {}))))
                                  ["messages" 0 "message_body" "text"])))
           (swap! directory assoc-in [:resources (identity-law/actor-resource-id codex)

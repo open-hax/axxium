@@ -151,11 +151,14 @@
 
 (defn- ^:async opaque-key-public-boundaries* []
   (let [calls (atom [])
-        pool #js {:query (fn [sql params]
-                           (swap! calls conj [sql (vec (array-seq params))])
-                           (js/Promise.resolve
-                             #js {:rowCount 1 :rows #js [#js {:payload "{}" :consumed_at nil
-                                                              :active true :expires_ms "10000"}]}))}
+        query (fn [sql params]
+                (when (seq params)
+                  (swap! calls conj [sql (vec (array-seq params))]))
+                (js/Promise.resolve
+                  #js {:rowCount 1 :rows #js [#js {:payload "{}" :consumed_at nil
+                                                   :active true :expires_ms "10000"}]}))
+        conn #js {:query query :release (fn [_])}
+        pool #js {:query query :connect #(js/Promise.resolve conn)}
         factory (store/adapter-factory pool)
         adapter (factory "Session")
         digest (apply str (repeat 64 "a"))
@@ -180,7 +183,7 @@
         (is (= :accepted
                (try (await (operation key)) :accepted
                     (catch :default error [:rejected (.-message error)]))) label)
-        (is (= 1 (count @calls)) label)
+        (is (= (if (= "revoke family" label) 2 1) (count @calls)) label)
         (is (some #(some #{key} (second %)) @calls)
             (str label " passes the opaque key as a parameter without truncation"))))
     (doseq [key [nil "" 42 #js {} #js [] (apply str (repeat 2049 "k"))]]

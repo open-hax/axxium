@@ -205,6 +205,11 @@
                      (stream/dispatch! stream-runtime recipient
                                        #(identity/with-current-actor-state!
                                          (fn [_] (notify-inbox! writer path stream-runtime recipient)))))
+                   (when (and (:mailbox/renew-on-use? proof)
+                              (= "tools/call" (get body "method"))
+                              (contains? (:response out) "result")
+                              (not (get-in out [:response "result" "isError"])))
+                     (await ((:renew-after-use! oauth) proof)))
                    out))]
     (if (and directory? (or (nil? (:oauth/grant-id proof))
                           (:mailbox/actors? proof) (:mailbox/owner-root-did proof)))
