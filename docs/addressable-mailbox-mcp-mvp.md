@@ -213,9 +213,9 @@ refused, the session is still opened and its key is still returned, and the
 result carries `:advert/error`. The session can then call `actor_advertise`
 itself.
 
-So `cred(session) = attenuate(cred(parent))`. The session authenticates to
-the mailbox as itself and registers its own mailbox at its DID. A node whose
-lease has ended is no longer live, and it drops out of discovery and
+So `cred(session) = attenuate(cred(parent))`. A session under the configured
+active human root can authenticate as itself and register a mailbox at its
+own DID. A node whose lease has ended drops out of discovery and
 authentication. This includes stored node proofs that are checked again
 later, such as at webhook delivery. Ended session nodes, their adverts and
 key records stay in the ledger as history; nothing deletes them.
