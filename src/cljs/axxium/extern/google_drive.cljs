@@ -1,7 +1,8 @@
 (ns axxium.extern.google-drive
   "Google Drive REST boundary. `fetch` is injected so tests never touch the
    network. Deliberately exposes no delete, trash or overwrite call."
-  (:require [axxium.law.google-drive :as law]
+  (:require ["node:crypto" :as crypto]
+            [axxium.law.google-drive :as law]
             [clojure.string :as str]))
 
 (defn with-timeout
@@ -81,10 +82,11 @@
                   :drive/incomplete-search? (:incompleteSearch body)})))))
 
 (defn create-file
-  "Multipart create. Always a new file id; never PATCHes an existing one."
-  [fetch access-token {:drive/keys [name folder-id mime-type content]}]
-  (let [boundary (str "axxium" (.toString (js/Date.now) 36))
+  "Multipart create. An optional preallocated ID allows safe reconciliation."
+  [fetch access-token {:drive/keys [file-id name folder-id mime-type content]}]
+  (let [boundary (str "axxium" (.toString (crypto/randomBytes 24) "hex"))
         meta (cond-> {:name name}
+               file-id (assoc :id file-id)
                mime-type (assoc :mimeType mime-type)
                folder-id (assoc :parents [folder-id]))
         body (str "--" boundary "\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n"
@@ -98,6 +100,19 @@
                     :body body})
         (.then json-body)
         (.then ->file))))
+
+(defn generate-file-id
+  "Reserve one provider file ID without creating a file."
+  [fetch access-token]
+  (-> (fetch (str files-endpoint "/generateIds?count=1&space=drive&type=files")
+             #js {:headers (auth access-token)})
+      (.then json-body)
+      (.then (fn [{:keys [kind ids space]}]
+               (let [[file-id] ids]
+                 (when-not (and (= "drive#generatedIds" kind) (= "drive" space)
+                                (vector? ids) (= 1 (count ids)) (law/file-id? file-id))
+                   (throw (ex-info "invalid Drive file ID reservation" {})))
+                 file-id)))))
 
 (defn get-file
   [fetch access-token file-id]

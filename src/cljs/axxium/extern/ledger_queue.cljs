@@ -15,8 +15,10 @@
 
 (defn submit!
   "Run f exclusively and persist its resulting ledger before returning it."
-  [{:keys [ledger queue storage] :as writer} path f]
-  (let [run (.then @queue
+  ([writer path f] (submit! writer path f nil))
+  ([{:keys [ledger queue storage] :as writer} path f append!]
+   (let [persist! (or append! (get storage :append! disk/append-batch!))
+         run (.then @queue
                    (fn [_]
                      (let [before (current-ledger writer path)]
                        (.then (js/Promise.resolve (f before))
@@ -25,7 +27,7 @@
                                   ;; A failed append may still have written complete lines.
                                   ;; Invalidate first so the next operation reloads disk.
                                   (reset! ledger nil)
-                                  (reset! ledger ((get storage :append! disk/append-batch!) path before after)))
+                                  (reset! ledger (persist! path before after)))
                                 out)))))]
-    (reset! queue (.catch run (fn [_] nil)))
-    run))
+     (reset! queue (.catch run (fn [_] nil)))
+     run)))
