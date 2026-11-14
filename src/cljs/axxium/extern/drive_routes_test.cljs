@@ -2,16 +2,24 @@
   "Route-level failure injection; no Google account or network is used."
   (:require [axxium.auth.session :as session]
             [axxium.config :as cfg]
+            [axxium.domain.drive :as drive]
+            [axxium.domain.github-identity :as gi]
+            [axxium.domain.policy :as policy]
+            [axxium.domain.state :as state]
+            [axxium.extern.github-identity-mcp :as agent-auth]
             [axxium.extern.google :as google]
             [axxium.extern.google-drive :as gd]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
             [axxium.extern.ledger-file :as disk]
+            [axxium.extern.ledger-queue :as queue]
             [axxium.extern.signing-key :as signing-key]
             [axxium.extern.token-crypto :as tc]
             [axxium.law.google-drive :as law]
             [axxium.routes.drive :as routes]
+            [axxium.routes.github-identity :as identity]
             [clio.shape.edn :as edn]
+            [clojure.string :as str]
             [cljs.test :refer [async deftest is]]
             ["node:crypto" :as crypto]))
 
@@ -43,6 +51,7 @@
                   http/clear-state-cookie! (fn ([_ _] nil) ([_ _ _] nil))
                   http/redirect! (fn [_ target] (reset! response {:redirect target}))
                   http/send! (fn [_ status body] (reset! response {:status status :body body}))
+                  http/send-secret! (fn [_ status body] (reset! response {:status status :body body}))
                   disk/load-ledger (fn [_] @durable)
                   disk/append-batch! (fn [_ before after]
                                        (is (= before @durable))
@@ -83,5 +92,183 @@
 (deftest remote-create-then-persist-failure-can-be-retried-honestly
   (async done
     (-> (failed-persist*)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
+(defn- fixture-tree [root actor sibling actor-key sibling-key]
+  (let [policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
+        lg (:ledger (gi/register-root [] state/empty-state root "Owner" policy (agent-auth/event-ids)))
+        provision (fn [lg did name]
+                    (:ledger (gi/provision-actor lg (state/fold lg) root did name policy :agent
+                               (agent-auth/event-ids))))
+        lg (-> lg (provision actor "Codex") (provision sibling "Claude"))
+        issue (fn [lg did key]
+                (:ledger (gi/issue-bootstrap lg (state/fold lg) root did (agent-auth/digest key)
+                           (agent-auth/event-ids))))]
+    (-> lg (issue actor actor-key) (issue sibling sibling-key) state/fold)))
+
+(defn- ^:async actor-drive* []
+  (let [registered (handlers)
+        root "did:web:drive-actor.test:actors:owner"
+        actor (str root ":codex")
+        sibling (str root ":claude")
+        actor-key (str "axb_" (apply str (repeat 43 "a")))
+        sibling-key (str "axb_" (apply str (repeat 43 "b")))
+        tree (atom (fixture-tree root actor sibling actor-key sibling-key))
+        inactive (assoc-in @tree [:resources (str "bot-actor:" actor) :resource/metadata :actor/status] :suspended)
+        active @tree
+        signing (assoc (await (signing-key/generate-ephemeral!)) :issuer "fixture")
+        owner-id "browser-operator"
+        browser-session "12345678-1234-1234-1234-123456789abc"
+        other-session "12345678-1234-1234-1234-123456789abd"
+        proof (atom {:actor-id owner-id :cred-id browser-session})
+        durable (atom [])
+        writer (queue/create {:load! (fn [_] @durable)
+                              :append! (fn [_ before after]
+                                         (is (= before @durable))
+                                         (reset! durable after))})
+        response (atom nil)
+        state-cookie (atom nil)
+        sealed-key (crypto/randomBytes 32)
+        exchange-count (atom 0)
+        fetch-count (atom 0)
+        suspend-on-exchange (atom false)
+        suspend-on-read (atom false)
+        enabled? (atom true)
+        reply! (fn [_ status body] (reset! response {:status status :body body}))
+        origin "https://drive-actor.test"
+        enrollment (fn [origin selected]
+                     #js {:headers #js {:host "drive-actor.test" :origin origin}
+                          :body #js {:actor-did selected}})
+        callback (fn [state] #js {:query #js {:state state :code "test-code"}})
+        agent (fn [did key tool args]
+                #js {:headers #js {:host "drive-actor.test" :x-axxium-actor did
+                                   :authorization (str "Bearer " key)}
+                     :body #js {:tool tool :arguments (pr-str args)}})
+        call! (fn ^:async invoke [path request]
+                (await ((get registered path) request nil))
+                @response)
+        result (fn [] (edn/read-one (get-in @response [:body :edn])))]
+    (let [signed (await (jose/sign-drive-actor-state!
+                         {:state "fixture-state" :verifier "fixture-verifier"
+                          :actor-did actor :root-did root :session-id browser-session}
+                         signing))]
+      (is (some? (await (jose/verify-drive-actor-state! signed signing)))))
+    (with-redefs [session/resolve-auth-context (fn [_] (js/Promise.resolve {:auth/actor-id owner-id}))
+                  session/human-session-proof! (fn [cookie]
+                                                 (js/Promise.resolve (when (= "owner-session" cookie) @proof)))
+                  cfg/get-in-config (fn [ks] (case ks
+                                              [:axxium/public-base-url] origin
+                                              [:jwt/issuer] "fixture"
+                                              [:drive/actor-access?] @enabled?
+                                              [:drive/ledger-file] "actor-drive-fixture"
+                                              [:drive/token-key-file] "actor-drive-fixture-key"
+                                              [:github-identity/ledger-file] "actor-drive-identity-fixture"
+                                              [:identity/root-operator-binding] {:actor-id owner-id :root-did root}
+                                              nil))
+                  identity/current-actor-state #(deref tree)
+                  identity/with-current-actor-state! (fn ^:async fixture-identity [f] {:result (await (f @tree))})
+                  google/drive-client (fn [] {:client-id "fixture-client" :client-secret "fixture-secret"})
+                  tc/read-key-file (fn [_] sealed-key)
+                  signing-key/current! (fn [] signing)
+                  http/cookie (fn [_ name]
+                                (cond
+                                  (= session/COOKIE-NAME name) "owner-session"
+                                  (= "axxium_drive_actor_state" name) @state-cookie))
+                  http/set-state-cookie! (fn
+                                           ([_ _ _ _] (is false "Enrollment requires a purpose-specific cookie."))
+                                           ([_ cookie token secure? path]
+                                            (is (= "axxium_drive_actor_state" cookie))
+                                            (is secure?)
+                                            (is (= law/callback-path path))
+                                            (reset! state-cookie token)))
+                  http/clear-state-cookie! (fn
+                                             ([_ _] (is false "Enrollment requires a purpose-specific cookie."))
+                                             ([_ name path]
+                                              (is (= law/callback-path path))
+                                              (when (= "axxium_drive_actor_state" name) (reset! state-cookie nil))))
+                  http/redirect! (fn [_ url] (reset! response {:redirect url}))
+                  http/send! reply!
+                  http/send-secret! reply!
+                  queue/submit! (let [submit! queue/submit!]
+                                  (fn [_ path f] (submit! writer path f)))
+                  gd/exchange-code (fn [_ _]
+                                     (swap! exchange-count inc)
+                                     (when @suspend-on-exchange (reset! tree inactive))
+                                     (js/Promise.resolve {:scope law/drive-file-scope :refresh_token "actor-refresh"}))
+                  gd/refresh-access-token (fn [_ request]
+                                            (is (= "actor-refresh" (:refresh-token request)))
+                                            (js/Promise.resolve "actor-access"))
+                  gd/get-file (fn [_ _ file-id]
+                                (swap! fetch-count inc)
+                                (is (= "fixture-file" file-id))
+                                (when @suspend-on-read (reset! tree inactive))
+                                (js/Promise.resolve {:drive/content "{:fixture true}"}))]
+      (is (= 403 (:status (await (call! "/api/drive/actor/connect" (enrollment "https://other.test" actor))))))
+      (is (= 403 (:status (await (call! "/api/drive/actor/connect" (enrollment origin root))))))
+      (reset! enabled? false)
+      (is (= 503 (:status (await (call! "/api/drive/actor/connect" (enrollment origin actor))))))
+      (reset! enabled? true)
+      (swap! proof assoc :actor-id "unrelated-human")
+      (is (= 401 (:status (await (call! "/api/drive/actor/connect" (enrollment origin actor))))))
+      (swap! proof assoc :actor-id owner-id)
+      (let [start (fn ^:async start-enrollment [target]
+                    (let [out (await (call! "/api/drive/actor/connect" (enrollment origin target)))]
+                      (when-not (= 200 (:status out))
+                        (throw (ex-info "Expected actor enrollment to open consent" out)))
+                      (let [url (js/URL. (get-in out [:body :authorization-url]))]
+                      (is (not (str/includes? (.-href url) target)))
+                      (is (= law/drive-file-scope (.get (.-searchParams url) "scope")))
+                      (.get (.-searchParams url) "state"))))]
+        (let [oauth-state (await (start actor))]
+          (is (nil? (await (jose/verify-google-state! @state-cookie signing))))
+          (swap! proof assoc :cred-id other-session)
+          (is (= 400 (:status (await (call! law/callback-path (callback oauth-state))))))
+          (is (zero? @exchange-count))
+          (swap! proof assoc :cred-id browser-session))
+        (let [oauth-state (await (start actor))]
+          (reset! suspend-on-exchange true)
+          (is (= 403 (:status (await (call! law/callback-path (callback oauth-state))))))
+          (is (empty? @durable))
+          (reset! tree active)
+          (reset! suspend-on-exchange false))
+        (let [oauth-state (await (start actor))]
+          (is (= "/portal/index.html?drive=actor-connected"
+                 (:redirect (await (call! law/callback-path (callback oauth-state))))))
+          (is (= 400 (:status (await (call! law/callback-path (callback oauth-state))))))
+          (is (= 2 @exchange-count)))
+        (is (not (str/includes? (pr-str @durable) "actor-refresh")))
+        (is (policy/decision-before-effect? @durable))
+        (is (= root (:event/actor (last @durable))) "Enrollment is attributed to the authorizing human root.")
+        (is (= "actor-refresh" (tc/open-sealed sealed-key actor (drive/sealed-credential (state/fold @durable) actor))))
+        (is (nil? (drive/sealed-credential (state/fold @durable) sibling)))
+        (let [id "google-drive:fixture-file"
+              listing (agent actor actor-key "drive_list" {})
+              reading (agent actor actor-key "drive_get" {:resource/id id})]
+          (is (= 200 (:status (await (call! "/api/drive/agent" listing)))))
+          (is (= [] (get-in (result) [:result :resources])) "Enrollment does not adopt existing Google files.")
+          (is (= 400 (:status (await (call! "/api/drive/agent" (agent sibling sibling-key "drive_list" {}))))))
+          (is (= :not-connected (:error (result))))
+          (let [oauth-state (await (start sibling))]
+            (is (= "/portal/index.html?drive=actor-connected"
+                   (:redirect (await (call! law/callback-path (callback oauth-state)))))))
+          (await (queue/submit! writer "actor-drive-fixture"
+                   (fn [lg]
+                     (drive/record-put lg (state/fold lg) actor
+                       {:drive/file-id "fixture-file" :drive/name "fixture.edn"} [] (agent-auth/event-ids)))))
+          (is (= 401 (:status (await (call! "/api/drive/agent" (agent actor sibling-key "drive_list" {}))))))
+          (is (= 400 (:status (await (call! "/api/drive/agent" (agent sibling sibling-key "drive_get" {:resource/id id}))))))
+          (is (= :not-found (:error (result))))
+          (is (= 403 (:status (await (call! "/api/drive/agent" (agent actor actor-key "drive_put" {}))))))
+          (is (zero? @fetch-count))
+          (is (= 200 (:status (await (call! "/api/drive/agent" reading)))))
+          (is (= {:fixture true} (get-in (result) [:result :drive/value])))
+          (reset! suspend-on-read true)
+          (is (= 401 (:status (await (call! "/api/drive/agent" reading)))))
+          (is (nil? (get-in @response [:body :edn]))))))))
+
+(deftest actor-drive-consent-and-own-resource-reads
+  (async done
+    (-> (actor-drive*)
         (.catch (fn [error] (is false (pr-str error))))
         (.finally done))))

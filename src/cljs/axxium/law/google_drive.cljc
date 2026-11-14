@@ -16,6 +16,20 @@
 
 (def callback-path "/api/drive/callback")
 
+(defn actor-did?
+  "Bound a selected actor DID before route or OAuth state processing."
+  [value]
+  (and (did/web? value) (<= (count value) 512)))
+
+(def ActorEnrollment
+  "One explicit actor destination, with no caller-supplied root or credential."
+  [:map {:closed true} [:actor-did [:fn actor-did?]]])
+
+(defn valid-actor-enrollment?
+  "Admit only the target actor DID supplied by the owner."
+  [body]
+  (m/validate ActorEnrollment body))
+
 (def request-timeout-ms 15000)
 
 (defn authorization-params

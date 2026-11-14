@@ -185,6 +185,7 @@
      :drive/client-secret (env "GOOGLE_DRIVE_CLIENT_SECRET" "")
      ;; Append-only EDN ledger holding Drive credential and file resources.
      :drive/ledger-file (env "AXXIUM_DRIVE_LEDGER_FILE" "")
+     :drive/actor-access? (env-bool "AXXIUM_DRIVE_ACTOR_ACCESS_ENABLED" false)
      ;; Bot identity tree + per-actor GitHub Apps. Key: 32-byte base64 file.
      :github-identity/token-key-file (env "AXXIUM_GITHUB_IDENTITY_KEY_FILE" "")
      :github-identity/ledger-file (env "AXXIUM_GITHUB_IDENTITY_LEDGER_FILE" "")

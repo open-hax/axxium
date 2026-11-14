@@ -9,7 +9,9 @@
 
    Both are registered through `resource/register`, so every registration
    records its policy decision before its effect (law 7)."
-  (:require [axxium.domain.resource :as resource]
+  (:require [axxium.domain.github-identity :as identity]
+            [axxium.domain.policy :as policy]
+            [axxium.domain.resource :as resource]
             [axxium.law.google-drive :as law]))
 
 (defn credential-resource [owner sealed-refresh-token]
@@ -34,6 +36,35 @@
   "Register (or rotate) the owner's sealed Drive credential."
   [lg state owner sealed ids]
   (resource/register lg state owner (credential-resource owner sealed) ids))
+
+(defn eligible-actor?
+  "Require an active, non-session managed actor under the configured human root."
+  [identity-state root-did actor-did now]
+  (and (identity/active-owner-delegation? identity-state root-did actor-did)
+       (contains? #{:agent :bot} (identity/kind-of identity-state actor-did))
+       (identity/live? identity-state actor-did now)))
+
+(defn connect-actor
+  "Record the human operator's authorization before registering a sealed
+   credential owned by the selected actor, with its root binding provenance."
+  [lg drive-state identity-state {:keys [root-did operator-id actor-did]} sealed {:keys [at] :as ids}]
+  (let [r (-> (credential-resource actor-did sealed)
+              (update :resource/metadata assoc :drive/root-did root-did :drive/operator-id operator-id))
+        allowed? (and (seq operator-id) (eligible-actor? identity-state root-did actor-did at))]
+    (policy/act lg drive-state
+      {:actor root-did :resource (:resource/id r) :action :connect-drive :at at}
+      (when allowed? {:stream "resources" :type :axxium.resource/registered :actor root-did :body r})
+      ids (constantly allowed?))))
+
+(defn actor-connected?
+  "Use only an exact actor grant recorded for the current owner binding."
+  [state root-did operator-id actor-did]
+  (let [r (get-in state [:resources (law/credential-resource-id actor-did)])]
+    (and (= law/credential-kind (:resource/kind r))
+         (= actor-did (:resource/owner r))
+         (= root-did (get-in r [:resource/metadata :drive/root-did]))
+         (= operator-id (get-in r [:resource/metadata :drive/operator-id]))
+         (seq (get-in r [:resource/location :drive/sealed-refresh-token])))))
 
 (defn record-put
   "Register a file Axxium just created in the owner's Drive."

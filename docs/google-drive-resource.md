@@ -96,3 +96,31 @@ not authorize adoption, replacement or a duplicate upload.
 - Listing reads Axxium's registry, not Drive; files created outside Axxium are invisible (by design under `drive.file`).
 - Large blobs use multipart upload (≤5 MB); resumable upload is a follow-up.
 - Clio EDN↔JSON tagged mapping (clio#7) is not used; the HTTP body carries EDN text.
+
+## Separate Drive access for managed actors
+
+`AXXIUM_DRIVE_ACTOR_ACCESS_ENABLED=true` enables these routes when a Drive
+client, sealing key and ledger and an identity ledger and root operator are
+configured. It defaults to off.
+
+From the configured human owner's signed-in Axxium browser, send a same-origin
+`POST /api/drive/actor/connect` with JSON `{"actor-did":"<exact managed actor DID>"}`.
+Navigate to the returned `authorization-url` to grant that one actor access.
+Google uses the same registered `/api/drive/callback` as human Drive consent.
+The signed enrollment state pins the selected actor, the owner's exact session,
+and the configured root. Axxium rechecks them before recording the owner's
+approval and sealing the refresh token to the actor.
+
+A Codex, Claude or OpenCode process authenticates independently as a managed
+agent or bot. Send the agent's `x-axxium-actor` DID header and bootstrap bearer
+to `POST /api/drive/agent`, using the same JSON/EDN envelope as the human RPC.
+The available tools are `drive_list` and `drive_get`. A client adapter is
+required for standard MCP discovery. The caller cannot name another owner, use
+the human's token or read another actor's registered resource. Authorization is
+checked again before a result is returned, so key rotation or suspension during
+a Drive read suppresses that result.
+
+Consent does not import files. An enrolled actor with no registered resources
+sees an empty list. This read-only entry point does not include a way to create
+or adopt actor files. A managed create operation still needs a durable
+request and a way to reconcile a Google create whose local receipt failed.
