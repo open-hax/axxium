@@ -81,6 +81,37 @@ The identity policy retains narrower actions and forbids for managed operations.
 `token_for` only exports reads. GitHub repository rules independently govern
 branch protection, bypasses, and force pushes.
 
+### Managed issue and pull request comments
+
+`github_comment` uses the selected actor's GitHub App to post a conversation
+comment. The caller must be the active credential holder or a managing
+ancestor. The actor policy must admit the exact repository, the `:comment`
+action, and `issues:write`. This tool keeps the one-repository installation
+token inside Axxium and attempts to revoke it after use.
+
+Call `github_comment` on `/api/identity/agent` with the actor's bootstrap
+credential, or `/api/github/mcp` with an authenticated human session. Both
+routes accept the existing JSON tool envelope with an EDN `arguments` value.
+
+```clojure
+{:actor/did "did:web:example.invalid:actors:owner:codex"
+ :credential/label "github-app"
+ :github/repo "owner/repository"
+ :github/number 42
+ :github/body "Comment text"
+ :github/request-id "00000000-0000-4000-8000-000000000001"}
+```
+
+The result contains the comment ID and URL, the verified App bot login, the
+actor DID, and the target and request ID. Retain the original request ID
+across ambiguous responses. Axxium durably records intent before sending the
+comment and stores the provider receipt after validating it. Repeating the
+same request with active authority returns the existing receipt. Reusing an
+ID with different input returns `:comment-request-conflict`. A pending
+intent returns `:comment-outcome-unknown`. Check GitHub for the outcome
+before using a new request ID. Issue and PR review comments are separate
+surfaces. This operation posts only to the issue or PR conversation.
+
 `token_for` also returns `:axxium/marker` (`<!-- axxium-actor:v1 did=… -->`) to
 identify the actor for consumers that record attribution.
 
@@ -123,7 +154,7 @@ credentials retain their own DIDs and cannot act as the configured root.
 ## Not yet
 
 - The ledger supports a single writer process only.
-- A write proxy for review, comment, push, and merge is still pending.
+- Managed review, push, and merge operations are still pending.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
 - Nothing has been run against real GitHub.
 
