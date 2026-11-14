@@ -85,9 +85,12 @@ branch protection, bypasses, and force pushes.
 
 `github_comment` uses the selected actor's GitHub App to post a conversation
 comment. The caller must be the active credential holder or a managing
-ancestor. The actor policy must admit the exact repository, the `:comment`
-action, and `issues:write`. This tool keeps the one-repository installation
-token inside Axxium and attempts to revoke it after use.
+ancestor. Axxium resolves the target with a read-only token for the exact
+repository before requesting write access. The actor policy and the GitHub App
+installation must both allow the selected permission. A pull request uses
+`pull_requests:write`. An issue uses `issues:write`. The actor policy must
+also allow the `:comment` action. Axxium keeps the one-repository token in the
+service and attempts to revoke it after use.
 
 Call `github_comment` on `/api/identity/agent` with the actor's bootstrap
 credential, or `/api/github/mcp` with an authenticated human session. Both
@@ -103,15 +106,24 @@ routes accept the existing JSON tool envelope with an EDN `arguments` value.
 ```
 
 The result contains the comment ID and URL, the verified App bot login, the
-actor DID, and the target and request ID. Retain the original request ID
-across ambiguous responses. Axxium durably records intent, then checks the
-caller and actor lease again before sending the comment. It confirms success
-after saving the verified provider receipt. Repeating the same request with
-active authority returns the existing receipt. Reusing an ID with different
-input returns `:comment-request-conflict`. A pending intent returns
-`:comment-outcome-unknown`, including when authority is lost after intent or
-receipt storage fails. Check GitHub for the outcome before using a new request
-ID. Issue and PR review comments are separate surfaces. This operation posts
+actor DID, and the target and request ID. Axxium durably records intent and
+rechecks the caller before the provider POST. When GitHub responds, Axxium
+captures the status and its request ID when the header is present and valid.
+The tool keeps the original Axxium request ID for reconciliation.
+
+A repeat with the same Axxium request ID and active authority reads the saved
+outcome. The caller must retain that ID after an uncertain response.
+Reusing an ID with different input returns `:comment-request-conflict`.
+`:comment-provider-rejected` identifies a recorded provider rejection.
+`:comment-outcome-unknown` requires GitHub readback before another write.
+A recorded intent cannot initiate another provider POST. Error responses can
+carry a sibling `github` diagnostic object alongside the existing `edn` result.
+Its fields are `phase` (`comment-post`), `target_kind` (`issue` or
+`pull-request`), `http_status`, and, when available, GitHub's `request_id`.
+A verified result includes the same provider metadata in EDN under `:github`
+keys. Provider response bodies and authorization headers stay out of diagnostics.
+
+Issue and PR review comments are separate surfaces. This operation posts
 only to the issue or PR conversation.
 
 `token_for` also returns `:axxium/marker` (`<!-- axxium-actor:v1 did=… -->`) to
@@ -158,7 +170,21 @@ credentials retain their own DIDs and cannot act as the configured root.
 - The ledger supports a single writer process only.
 - Managed review, push, and merge operations are still pending.
 - PATs and SSH keys can be stored, but nothing mints with them yet.
-- Nothing has been run against real GitHub.
+
+## Edit an existing actor policy
+
+Open the Identities panel in the portal, select a managed actor and expand
+**Edit actor policy**. The editor starts with the actor's current repositories,
+permission levels, actions, and restrictions. Saving compares the displayed
+policy with the current ledger record so stale forms cannot overwrite a later
+edit. Refresh after a conflict to load the newest policy.
+
+The server checks that the editor is an effective managing ancestor. The
+revised policy must fit within its ancestors' grants and contain the grants
+retained by its descendants. Narrow the affected children first when narrowing
+a group's policy. GitHub App installation permissions remain managed in GitHub.
+The edit governs future Axxium authorization checks. Provider tokens previously
+exported by authorized reads keep their existing provider expiry.
 
 ## Seed files
 
