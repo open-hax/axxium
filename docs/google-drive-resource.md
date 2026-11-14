@@ -45,7 +45,7 @@ Laws:
    bytes encoded as base64. Create it once:
 
    ```sh
-   (umask 077 && set -C && openssl rand -base64 32 > drive-token.key && chmod 600 drive-token.key)
+   (umask 077 && set -C && : > drive-token.key && chmod 600 drive-token.key && openssl rand -base64 32 >> drive-token.key)
    ```
 
    Never commit the key. Losing it means every user reconnects.
