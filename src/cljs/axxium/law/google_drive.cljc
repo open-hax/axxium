@@ -75,10 +75,10 @@
   (-> value (str/replace "\\" "\\\\") (str/replace "'" "\\'")))
 
 (defn same-name-query
-  "Drive search for an existing, untrashed file with this name in the folder."
+  "Find an existing, untrashed file in the folder where Drive would create it."
   [{:drive/keys [name folder-id]}]
   (str "name = '" (query-literal name) "' and trashed = false"
-       (when folder-id (str " and '" (query-literal folder-id) "' in parents"))))
+       " and '" (query-literal (or folder-id "root")) "' in parents"))
 
 (defn put-plan
   "Law 9: refuse when a same-named file already exists; otherwise create."
