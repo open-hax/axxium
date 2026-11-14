@@ -253,7 +253,7 @@ def collect_batch(entry, *, observe_unit=unit_closed, work_producer=None):
     work = work_producer is not None
     application = work_campaign.APPLICATION if work else APPLICATION
     producer_revision = work_producer if work else PRODUCER
-    harness_revision = application if work else HARNESS
+    harness_revision = work_campaign.HARNESS if work else HARNESS
     require(isinstance(producer_revision, str) and HEX40.fullmatch(producer_revision), 'Invalid producer revision')
     if work:
         verify_evaluator_custody(producer_revision)
