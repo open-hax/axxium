@@ -114,9 +114,7 @@
                         {:reason :invalid-mailbox-pilot-allowed-dids})))
       allowed)))
 
-(defn mailbox-actor-bindings
-  "Admit a one-to-one operator-supplied vector of [AT DID, actor DID] pairs."
-  [value]
+(defn- parse-mailbox-bindings [value env-name reason distinct-address?]
   (when (some? value)
     (let [pairs (when (and (string? value) (<= 1 (count value) 65536))
                   (try (edn/read-one value) (catch :default _ nil)))]
@@ -125,13 +123,26 @@
                                (and (vector? pair) (= 2 (count pair))
                                     (atproto-law/did? (first pair))
                                     (did-law/did? (first pair))
-                                    (did-law/web? (second pair))))
+                                    (did-law/web? (second pair))
+                                    (or (not distinct-address?) (not= (first pair) (second pair)))))
                              pairs)
                      (= (count pairs) (count (set (map first pairs)))
                         (count (set (map second pairs)))))
-        (throw (ex-info "AXXIUM_MAILBOX_ACTOR_BINDINGS requires unique AT Protocol and actor DID pairs"
-                        {:reason :invalid-mailbox-actor-bindings})))
+        (throw (ex-info (str env-name " requires unique AT Protocol and actor DID pairs")
+                        {:reason reason})))
       (into {} pairs))))
+
+(defn mailbox-actor-bindings
+  "Admit a one-to-one operator-supplied vector of [AT DID, actor DID] pairs."
+  [value]
+  (parse-mailbox-bindings value "AXXIUM_MAILBOX_ACTOR_BINDINGS" :invalid-mailbox-actor-bindings false))
+
+(defn mailbox-bound-bootstrap-bindings
+  "Pin an opted-in bootstrap actor to its exact existing mailbox DID."
+  [value]
+  (some->> (parse-mailbox-bindings value "AXXIUM_MAILBOX_BOUND_BOOTSTRAP_BINDINGS"
+                                  :invalid-mailbox-bound-bootstrap-bindings true)
+           (into {} (map (fn [[mailbox actor]] [actor mailbox])))))
 
 (defn mailbox-bootstrap-actor-dids
   "Admit an explicit comma-separated list of distinct actor DIDs."
@@ -200,6 +211,7 @@
      ;; Bootstrap seed only; the identity ledger holds the bindings.
      :mailbox/actor-bindings (mailbox-actor-bindings (env "AXXIUM_MAILBOX_ACTOR_BINDINGS"))
      :mailbox/bootstrap-actor-dids (mailbox-bootstrap-actor-dids (env "AXXIUM_MAILBOX_BOOTSTRAP_ACTOR_DIDS"))
+     :mailbox/bound-bootstrap-bindings (mailbox-bound-bootstrap-bindings (env "AXXIUM_MAILBOX_BOUND_BOOTSTRAP_BINDINGS"))
      ;; Owner-directory routing over ledger bindings, with or without a seed.
      :mailbox/directory? (env-bool "AXXIUM_MAILBOX_DIRECTORY" false)
      :identity/root-operator-binding

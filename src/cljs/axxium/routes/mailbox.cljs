@@ -36,11 +36,15 @@
                     (if resource-metadata (str "Bearer resource_metadata=\"" resource-metadata "\"") "Bearer"))
   (http/send-secret! reply 401 {:error "A live AT Protocol session is required"}))
 
-(defn- active-proof! [oauth proof]
-  (cond
-    (:oauth/grant-id proof) ((:active-grant? oauth) proof)
-    (:node/digest proof) (identity/node-proof-active? proof)
-    :else (session/active-atproto-session? proof)))
+(defn- active-proof!
+  ([oauth proof] (active-proof! oauth proof nil))
+  ([oauth proof actor-state]
+   (cond
+     (:oauth/grant-id proof) ((:active-grant? oauth) proof)
+     (:node/digest proof) (if actor-state
+                            (identity/node-proof-active? actor-state proof)
+                            (identity/node-proof-active? proof))
+     :else (session/active-atproto-session? proof))))
 
 (defn- node-credential
   "Directory mode only: an agent node's own bootstrap credential."
@@ -135,13 +139,19 @@
               (gi/active-owner-delegation?
                st (:root-did (cfg/get-in-config [:identity/root-operator-binding])) actor)))))
 
+(defn- bound-inbox-active? [lg proof now]
+  (or (nil? (:node/mailbox-generation proof))
+      (mailbox/existing-inbox? lg (principal/address (:principal proof)) now)))
+
 (defn- ^:async active-stream-session?
   [writer path oauth proof ctx]
-  (and (await (active-proof! oauth proof))
-       (let [st (identity/current-actor-state)]
-         (stream-eligible? true proof st (gi/mailbox-bindings st)))
-       (mailbox/streaming-session? (queue/current-ledger writer path)
-                                   (assoc ctx :now (secrets/now)))))
+  (let [st (identity/current-actor-state)]
+    (and (await (active-proof! oauth proof st))
+         (stream-eligible? true proof st (gi/mailbox-bindings st))
+         (let [lg (queue/current-ledger writer path)
+               now (secrets/now)]
+           (and (bound-inbox-active? lg proof now)
+                (mailbox/streaming-session? lg (assoc ctx :now now)))))))
 
 (defn- ^:async listen-inbox!
   [writer path oauth resource stream-runtime req reply proof]
@@ -198,9 +208,11 @@
                  (let [out (await
                             (queue/submit! writer path
                                            (fn ^:async apply-mailbox [lg]
-                                             (if (await (active-proof! oauth proof))
-                                               (operation lg (assoc ctx :now (secrets/now)) body)
-                                               {:unauthenticated? true}))))]
+                                             (let [now (secrets/now)]
+                                               (if (and (await (active-proof! oauth proof (:directory/state ctx)))
+                                                        (bound-inbox-active? lg proof now))
+                                                 (operation lg (assoc ctx :now now) body)
+                                                 {:unauthenticated? true})))))]
                    (when-let [recipient (and stream-runtime (:notify-to out))]
                      (stream/dispatch! stream-runtime recipient
                                        #(identity/with-current-actor-state!
@@ -262,10 +274,11 @@
       (let [ctx (assoc (transport-context resource proof sid)
                  :session/new-id (when initialize? (secrets/secure-id))
                  :session/push-supported? false
-                 :events/enabled? (events/enabled? runtime proof)
+                 :events/enabled? (and (not (:node/mailbox-generation proof)) (events/enabled? runtime proof))
                  :events/subscriptions-disabled? subscriptions-disabled?
                  :events/only? (some? (:oauth/grant-id proof))
                  :mailbox/actors? (:mailbox/actors? proof)
+                 :mailbox/bound-bootstrap? (some? (:node/mailbox-generation proof))
                  :mailbox/inbox-upgrade? inbox-upgrade?
                  :mailbox/inbox? (and inbox-upgrade? (true? (:mailbox/inbox? proof)))
                  :mailbox/resource-metadata resource-metadata)
@@ -304,11 +317,16 @@
                         (some? (cfg/get-in-config [:mailbox/actor-bindings])))
          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
          streaming? (cfg/get-in-config [:mailbox/stream-enabled?])
+         bound-bootstrap (cfg/get-in-config [:mailbox/bound-bootstrap-bindings])
          subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))]
      (when (or (and directory? (or (not path) allowed-dids (str/blank? identity-path)))
                (and (:actor-messaging? oauth) (not directory?)))
        (throw (ex-info "Mailbox actor messaging requires both ledgers and directory mode, outside the two-actor pilot"
                        {:reason :invalid-mailbox-actor-messaging-config})))
+     (when (and (seq bound-bootstrap)
+                (not (and directory? (cfg/get-in-config [:identity/root-operator-binding]))))
+       (throw (ex-info "Bound mailbox bootstrap requires an owner directory"
+                       {:reason :invalid-mailbox-bound-bootstrap-config})))
      (when (and streaming? (not (and directory? subscriptions-disabled?
                                       (cfg/get-in-config [:identity/root-operator-binding]))))
        (throw (ex-info "Mailbox notifications require the owner directory with webhook subscriptions disabled"

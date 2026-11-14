@@ -171,9 +171,18 @@ following:
   `x-axxium-actor: <its actor DID>` and `Authorization: Bearer axb_…`, its own
   bootstrap key issued by an ancestor. Its mailbox address is its own actor
   DID. Every request rechecks the current key generation, active ancestry,
-  and unbound status. A binding added later ends this access. External
-  mailbox addresses continue to require their verified account or the
-  existing owner-consented OAuth path.
+  and unbound status. A binding added later ends this access.
+- **An actor node using its existing AT Protocol mailbox.** An operator can
+  explicitly pin a long-lived agent or bot to its existing AT mailbox using
+  `AXXIUM_MAILBOX_BOUND_BOOTSTRAP_BINDINGS`, an EDN vector of unique
+  `[AT mailbox DID, actor DID]` pairs. The actor presents its own bootstrap
+  key and actor DID as above. The identity ledger must already bind that
+  exact pair under the configured active human root. The AT mailbox must
+  already be registered with an active owner read grant. The bootstrap
+  session can read, acknowledge, discover and send using that mailbox DID.
+  The verified AT Protocol account can still log in. Revoking the bootstrap
+  credential or unbinding the mailbox ends bootstrap access. Rebinding the
+  same pair requires a new bootstrap MCP session and SSE connection.
 - **An external account bound to a node.** This is an AT Protocol session
   whose DID the ledger binds to a node.
 - **A Work grant.** An owner-consented Work grant authenticates as the Work

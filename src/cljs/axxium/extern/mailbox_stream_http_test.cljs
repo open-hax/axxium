@@ -141,17 +141,21 @@
     (await (.cancel body))
     status))
 
-(defn- fixture-state [root grok codex grok-key]
+(defn- fixture-ids []
+  {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
+
+(defn- fixture-ledger [root grok codex grok-key codex-key]
   (let [policy {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{}}
-        ids (fn [] {:decision-id (secrets/secure-id) :effect-id (secrets/secure-id) :at fixture/t0})
         seed (gi/resolve-seed {:root {:id root :name "Owner" :policy policy}
                               :nodes [{:id grok :parent root :name "Grok Bot" :kind :bot :policy policy}
                                       {:id codex :parent root :name "Codex" :kind :agent :policy policy}]}
                              "axxium.test")
-        ledger (:ledger (gi/seed-ledger seed ids))
-        bound (:ledger (gi/seed-bindings ledger {codex-at codex} ids))]
-    (state/fold (:ledger (gi/issue-bootstrap bound (state/fold bound) root grok
-                                           (bootstrap/digest grok-key) (ids))))))
+        ledger (:ledger (gi/seed-ledger seed fixture-ids))
+        bound (:ledger (gi/seed-bindings ledger {codex-at codex} fixture-ids))
+        grok-issued (:ledger (gi/issue-bootstrap bound (state/fold bound) root grok
+                                                (bootstrap/digest grok-key) (fixture-ids)))]
+    (:ledger (gi/issue-bootstrap grok-issued (state/fold grok-issued) root codex
+                                (bootstrap/digest codex-key) (fixture-ids)))))
 
 (defn- ^:async roundtrip! [base grok-key grok codex-token]
   (let [grok-client (await (initialize! (assoc base :bearer grok-key :did grok)))
@@ -182,7 +186,69 @@
       (await (js/Promise.all #js [(expect-no-extra-update! grok-stream)
                                  (expect-no-extra-update! codex-stream)])))))
 
-(defn- ^:async verify-native-stream! []
+(defn- ^:async verify-bound-bootstrap!
+  [base {:keys [grok grok-key codex codex-key codex-token root actor-ledger opt-in]}]
+  (let [grok-client (await (initialize! (assoc base :bearer grok-key :did grok)))
+        at-client (await (initialize! (assoc base :bearer codex-token)))
+        bootstrap-client (assoc base :bearer codex-key :did codex)
+        init (rpc "initialize" nil)
+        whoami (tool "whoami" {})
+        register (tool "register_mailbox" {})]
+    (is (= 401 (:status (await (post! bootstrap-client init)))) "A ledger binding alone grants no bootstrap access.")
+    (reset! opt-in {codex fixture/alice})
+    (is (= 401 (:status (await (post! bootstrap-client init)))) "Pinning a different mailbox does not follow the actor.")
+    (reset! opt-in {codex codex-at})
+    (is (= 401 (:status (await (post! bootstrap-client init)))) "The bootstrap cannot create an external mailbox.")
+    (is (= (str "mbox/" codex-at) (get (structured (await (post! at-client register))) "mailbox")))
+    (is (= (str "mbox/" grok) (get (structured (await (post! grok-client register))) "mailbox")))
+    (is (= 401 (:status (await (post! (assoc bootstrap-client :bearer grok-key) init)))))
+    (let [bound-client (await (initialize! bootstrap-client))
+          bound-id (:sid bound-client)
+          subscribe (resource-request "resources/subscribe" inbox)
+          who (structured (await (post! bound-client whoami)))]
+      (is (= codex-at (get who "did")))
+      (is (= "actor-node" (get who "method")))
+      (is (= codex-at (get (structured (await (post! at-client whoami))) "did")))
+      (is (= 404 (:status (await (post! (assoc at-client :sid bound-id) whoami)))))
+      (is (= 404 (:status (await (post! (assoc bound-client :sid (:sid at-client)) whoami)))))
+      (is (= -32001 (get-in (await (post! bound-client register)) [:json "error" "code"])))
+      (is (= {} (result (await (post! bound-client subscribe)))))
+      (let [source (await (connect! bound-client))
+            body {"text" "Synthetic bound inbox fixture"}
+            first-send (structured (await (post! grok-client (send codex-at "bound-first" body))))]
+        (await (expect-message! bound-client source grok body first-send))
+        (let [message-id (get first-send "message_id")
+              ack (await (post! bound-client (tool "acknowledge_message" {"message_id" message-id})))
+              at-inbox (structured (await (post! at-client (tool "read_inbox" {}))))]
+          (is (map? (structured ack)))
+          (is (= [] (get at-inbox "messages")) "Both proof methods share the same durable acknowledgment."))
+        (let [before (gi/mailbox-binding-generation (state/fold @actor-ledger) codex-at)
+              unbound (:ledger (gi/unbind-mailbox @actor-ledger (state/fold @actor-ledger)
+                                                 root codex-at (fixture-ids)))
+              rebound (:ledger (gi/bind-mailbox unbound (state/fold unbound)
+                                               root codex-at codex (fixture-ids)))]
+          (is (not= before (gi/mailbox-binding-generation (state/fold rebound) codex-at)))
+          (reset! actor-ledger rebound))
+        (is (= 404 (:status (await (post! bound-client whoami)))) "A new binding to the same DID cannot revive the old session.")
+        (is (= codex-at (get (structured (await (post! at-client whoami))) "did")) "The existing AT session still uses the same address.")
+        (is (= "accepted" (get (structured (await (post! grok-client (send codex-at "bound-rebound" body)))) "accepted")))
+        (let [closed (try
+                       (.-done (await (.read (:reader source))))
+                       (catch :default _ true))]
+          (is closed "The old stream closes instead of delivering an update after a bind generation changes."))
+        (let [fresh (await (initialize! bootstrap-client))]
+          (is (= codex-at (get (structured (await (post! fresh whoami))) "did")))
+          (let [reply (structured (await (post! fresh (send grok "bound-reply" body))))
+                inbox (structured (await (post! grok-client (tool "read_inbox" {}))))]
+            (is (= "accepted" (get reply "accepted")))
+            (is (= codex-at (get-in inbox ["messages" 0 "message_from"]))))
+          (let [replacement (str "axb_" (.toString (js/Buffer.alloc 32 3) "base64url"))]
+            (swap! actor-ledger (fn [lg] (:ledger (gi/issue-bootstrap lg (state/fold lg) root codex
+                                                                      (bootstrap/digest replacement) (fixture-ids)))))
+            (is (= 401 (:status (await (post! fresh whoami)))))
+            (is (= codex-at (get (structured (await (post! at-client whoami))) "did")))))))))
+
+(defn- ^:async verify-native-stream! [bound-bootstrap?]
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-stream-"))
         ledger (path/join dir "mailbox.edn")
@@ -191,9 +257,12 @@
         grok (str root ":grokbot")
         codex (str root ":codex")
         grok-key (str "axb_" (.toString (js/Buffer.alloc 32 1) "base64url"))
+        codex-key (str "axb_" (.toString (js/Buffer.alloc 32 2) "base64url"))
         actor-id "actor_22222222-2222-4222-8222-222222222222"
         cred-id (secrets/secure-id)
-        actor-state (fixture-state root grok codex grok-key)
+        actor-ledger (atom (fixture-ledger root grok codex grok-key codex-key))
+        actor-state #(state/fold @actor-ledger)
+        opt-in (atom nil)
         controller (js/AbortController.)
         deadline (js/setTimeout #(.abort controller) 12000)
         app (fastify/create-app)
@@ -206,14 +275,15 @@
               query (db/q-select-actor-by-atproto-session actor-id (secrets/token-hash codex-token)
                                                          cred-id codex-at)]
           (with-redefs [db/query-auth-proof! (fn [q] (js/Promise.resolve (when (= q query) {:id actor-id})))
-                        identity/current-actor-state (constantly actor-state)
+                        identity/current-actor-state actor-state
                         identity/with-current-actor-state! (fn ^:async with-fixture-state [f]
-                                                            {:result (await (f actor-state))})
+                                                            {:result (await (f (actor-state)))})
                         cfg/get-in-config (fn [ks]
                                             (case (first ks)
                                               :mailbox/ledger-file ledger
                                               :mailbox/actor-bindings {codex-at codex}
                                               :mailbox/bootstrap-actor-dids #{grok}
+                                              :mailbox/bound-bootstrap-bindings @opt-in
                                               :mailbox/stream-enabled? true
                                               :mailbox/subscriptions-enabled? false
                                               :github-identity/ledger-file (path/join dir "actors.edn")
@@ -224,8 +294,13 @@
                                               (config ks)))]
             (.register app fastify-cookie)
             (routes/register-mailbox-routes! app)
-            (let [url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)]
-              (await (roundtrip! {:url url :signal (.-signal controller)} grok-key grok codex-token))))))
+            (let [url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)
+                  base {:url url :signal (.-signal controller)}]
+              (if bound-bootstrap?
+                (await (verify-bound-bootstrap! base {:grok grok :grok-key grok-key :codex codex :codex-key codex-key
+                                                       :codex-token codex-token :root root :actor-ledger actor-ledger
+                                                       :opt-in opt-in}))
+                (await (roundtrip! base grok-key grok codex-token)))))))
       (finally
         (js/clearTimeout deadline)
         (.abort controller)
@@ -234,6 +309,12 @@
 
 (deftest bootstrap-and-bound-at-actors-deliver-over-native-sse
   (async done
-    (-> (verify-native-stream!)
+    (-> (verify-native-stream! false)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(deftest explicitly-pinned-bootstrap-preserves-the-at-mailbox-and-invalidates-old-streams
+  (async done
+    (-> (verify-native-stream! true)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
