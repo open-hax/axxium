@@ -109,13 +109,14 @@
     (mapv by-name names)))
 
 (defn- ^:async scoped-token [fetch jwt {:keys [installation-id names] :as scope}
-                             selection permissions signal]
+                             selection permissions signal on-token]
   (let [permissions (assoc permissions "metadata" "read")
         expected-permissions (into {} (map (fn [[k v]] [(keyword k) v])) permissions)
         url (str api "/app/installations/" installation-id "/access_tokens")
         result (await (github-post fetch url jwt (assoc selection :permissions permissions) signal))
         {:keys [token expires_at]} result
         granted (:permissions result)]
+    (when (and on-token (string? token) (not (str/blank? token))) (on-token token))
     (when-not (and (string? token) (not (str/blank? token))
                    (string? expires_at) (js/Number.isFinite (.parse js/Date expires_at))
                    (map? granted) (= "read" (get granted :metadata "read"))
@@ -129,38 +130,78 @@
 (defn ^:async verify-installation-scope
   "Verify the installation owner before any mint. Resolve exact repository IDs
    with a name-restricted, metadata-only token confined to this operation."
-  [fetch jwt app-id installation-id {:scope/keys [repos permissions]} signal]
-  (let [app-id (credential-id app-id)
-        installation-id (credential-id installation-id)
-        names (vec (distinct (map str/lower-case repos)))
-        parts (mapv #(str/split % #"/" 2) names)]
-    (when-not (and (<= 1 (count names) 500)
-                   (every? (fn [[owner repo]] (and (seq owner) (seq repo))) parts))
-      (reject-scope!))
-    (let [{:keys [id app_id account target_id target_type suspended_at] granted :permissions}
-          (await (github-get fetch (str api "/app/installations/" installation-id) jwt signal))
-          owner-login (folded-name (:login account))
-          owner-id (:id account)]
-      (when-not (and (= installation-id id) (= app-id app_id)
-                     (#{"Organization" "User"} target_type)
-                     (nil? suspended_at) (valid-id? owner-id) (= owner-id target_id)
-                     (installation-grants-scope? granted permissions)
-                     (seq owner-login) (every? #(= owner-login (first %)) parts))
-        (reject-scope!))
-      (let [scope {:installation-id installation-id :owner-id owner-id
-                   :owner-login owner-login :names names}
-            proof (await (scoped-token fetch jwt scope {:repositories (mapv second parts)} {} signal))]
-        (assoc scope :repository-ids (:repository-ids proof))))))
+  ([fetch jwt app-id installation-id scope signal]
+   (await (verify-installation-scope fetch jwt app-id installation-id scope signal nil)))
+  ([fetch jwt app-id installation-id {:scope/keys [repos permissions]} signal
+    {:keys [on-metadata-token expected-app-slug]}]
+   (let [app-id (credential-id app-id)
+         installation-id (credential-id installation-id)
+         names (vec (distinct (map str/lower-case repos)))
+         parts (mapv #(str/split % #"/" 2) names)]
+     (when-not (and (<= 1 (count names) 500)
+                    (every? (fn [[owner repo]] (and (seq owner) (seq repo))) parts))
+       (reject-scope!))
+     (let [{:keys [id app_id app_slug account target_id target_type suspended_at] granted :permissions}
+           (await (github-get fetch (str api "/app/installations/" installation-id) jwt signal))
+           owner-login (folded-name (:login account))
+           owner-id (:id account)]
+       (when-not (and (= installation-id id) (= app-id app_id)
+                      (#{"Organization" "User"} target_type)
+                      (nil? suspended_at) (valid-id? owner-id) (= owner-id target_id)
+                      (or (nil? expected-app-slug) (= (folded-name expected-app-slug) (folded-name app_slug)))
+                      (installation-grants-scope? granted permissions)
+                      (seq owner-login) (every? #(= owner-login (first %)) parts))
+         (reject-scope!))
+       (let [scope {:installation-id installation-id :owner-id owner-id
+                    :owner-login owner-login :names names}
+             proof (await (scoped-token fetch jwt scope {:repositories (mapv second parts)} {} signal on-metadata-token))]
+         (assoc scope :repository-ids (:repository-ids proof)))))))
 
 (defn ^:async mint-installation-token
   "Mint with verified immutable repository IDs and admit only a matching result."
-  [fetch jwt {:keys [repository-ids names] :as scope} permissions signal]
-  (when-not (and (vector? repository-ids) (<= 1 (count repository-ids) 500)
-                 (= (count names) (count repository-ids)) (every? valid-id? repository-ids))
-    (reject-scope!))
-  (let [result (await (scoped-token fetch jwt scope {:repository_ids repository-ids} permissions signal))]
-    (when-not (= repository-ids (:repository-ids result)) (reject-scope!))
-    (dissoc result :repository-ids)))
+  ([fetch jwt scope permissions signal]
+   (await (mint-installation-token fetch jwt scope permissions signal nil)))
+  ([fetch jwt {:keys [repository-ids names] :as scope} permissions signal on-token]
+   (when-not (and (vector? repository-ids) (<= 1 (count repository-ids) 500)
+                  (= (count names) (count repository-ids)) (every? valid-id? repository-ids))
+     (reject-scope!))
+   (let [result (await (scoped-token fetch jwt scope {:repository_ids repository-ids} permissions signal on-token))]
+     (when-not (= repository-ids (:repository-ids result)) (reject-scope!))
+     (dissoc result :repository-ids))))
+
+(defn ^:async post-issue-comment!
+  "Create one conversation comment and validate GitHub's native response."
+  [fetch token repo number body app-id app-slug signal]
+  (let [path (str "/repos/" repo "/issues/" number)
+        response (await (fetch (str api path "/comments")
+                               #js {:method "POST"
+                                    :headers (doto (headers (str "Bearer " token))
+                                               (aset "content-type" "application/json"))
+                                    :body (js/JSON.stringify #js {:body body})
+                                    :redirect "error" :signal signal}))
+        {:keys [id user html_url issue_url performed_via_github_app] created :body} (await (json response))]
+    (when (and (= 201 (.-status response)) (valid-id? id)
+               (= (folded-name issue_url) (folded-name (str api path)))
+               (= body created)
+               (= "Bot" (:type user))
+               (valid-id? (:id user))
+               (= (str (folded-name app-slug) "[bot]") (folded-name (:login user)))
+               (or (nil? performed_via_github_app)
+                   (and (= (credential-id app-id) (:id performed_via_github_app))
+                        (= (folded-name app-slug) (folded-name (:slug performed_via_github_app)))))
+               (contains? #{(str "https://github.com/" repo "/issues/" number "#issuecomment-" id)
+                            (str "https://github.com/" repo "/pull/" number "#issuecomment-" id)}
+                          (folded-name html_url)))
+      {:github/comment-id id :github/comment-url html_url :github/actor (:login user)
+       :github/actor-id (:id user)})))
+
+(defn ^:async revoke-installation-token!
+  "Best-effort caller-owned cleanup for an internal installation token."
+  [fetch token signal]
+  (let [response (await (fetch (str api "/installation/token")
+                               #js {:method "DELETE" :headers (headers (str "Bearer " token))
+                                    :redirect "error" :signal signal}))]
+    (= 204 (.-status response))))
 
 (defn read-key-file
   "Read an imported PEM in place, only from under `allowed-dir`."

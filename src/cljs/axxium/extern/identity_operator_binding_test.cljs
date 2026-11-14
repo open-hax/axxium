@@ -62,11 +62,11 @@
                                       :github-identity/ledger-file "identity-operator-binding"
                                       :identity/root-operator-binding @binding
                                       nil))
-                  db/query-one-sql (fn [_]
-                                     (case @human-live?
-                                       :unavailable (throw (ex-info "Synthetic database outage" {}))
-                                       true {:id operator}
-                                       nil))
+                  db/query-auth-proof! (fn [_]
+                                         (case @human-live?
+                                           :unavailable (throw (ex-info "Synthetic database outage" {}))
+                                           true {:id operator}
+                                           nil))
                   disk/load-ledger (fn [_] @durable)
                   disk/append-batch! (fn [_ _ after] (reset! durable after))
                   gh/convert-manifest (fn [_ _]
