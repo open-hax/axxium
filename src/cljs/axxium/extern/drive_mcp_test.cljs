@@ -6,6 +6,7 @@
             [axxium.domain.policy :as policy]
             [axxium.domain.state :as state]
             [axxium.extern.drive-mcp :as mcp]
+            [axxium.extern.google-drive :as gd]
             [axxium.extern.token-crypto :as tc]
             [axxium.law.google-drive :as law]
             [axxium.shape.ledger-edn :as edn-lines]
@@ -17,6 +18,30 @@
   #js {:ok (< status 400) :status status
        :json (fn [] (js/Promise.resolve (clj->js body)))
        :text (fn [] (js/Promise.resolve body))})
+
+(deftest reserved-id-is-sent-with-the-multipart-create
+  (async done
+    (let [fetch (fn [url opts]
+                  (is (= "Bearer fixture-access" (aget (.-headers opts) "authorization")))
+                  (js/Promise.resolve
+                    (if (str/includes? url "/generateIds?")
+                      (do
+                        (is (= (str gd/files-endpoint "/generateIds?count=1&space=drive&type=files") url))
+                        (respond 200 {:kind "drive#generatedIds" :space "drive" :ids ["reserved-1"]}))
+                      (let [multipart (.-body opts)
+                            metadata-line (nth (str/split multipart #"\r\n") 3)]
+                        (is (= "POST" (.-method opts)))
+                        (is (str/starts-with? url (str gd/upload-endpoint "?uploadType=multipart")))
+                        (is (= {:id "reserved-1" :name "fixture.edn" :mimeType law/edn-mime-type}
+                               (js->clj (js/JSON.parse metadata-line) :keywordize-keys true)))
+                        (respond 200 {:id "reserved-1" :name "fixture.edn" :mimeType law/edn-mime-type})))))]
+      (-> (gd/generate-file-id fetch "fixture-access")
+          (.then #(gd/create-file fetch "fixture-access"
+                    {:drive/file-id % :drive/name "fixture.edn" :drive/mime-type law/edn-mime-type
+                     :drive/content "{:fixture true}"}))
+          (.then #(is (= "reserved-1" (:drive/file-id %))))
+          (.catch (fn [e] (is false (pr-str e))))
+          (.finally done)))))
 
 (defn- fake-drive
   "A fetch over an atom {file-id {:name :parents :content}}. Grants an

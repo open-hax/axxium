@@ -96,3 +96,58 @@ not authorize adoption, replacement or a duplicate upload.
 - Listing reads Axxium's registry, not Drive; files created outside Axxium are invisible (by design under `drive.file`).
 - Large blobs use multipart upload (≤5 MB); resumable upload is a follow-up.
 - Clio EDN↔JSON tagged mapping (clio#7) is not used; the HTTP body carries EDN text.
+
+## Separate Drive access for managed actors
+
+`AXXIUM_DRIVE_ACTOR_ACCESS_ENABLED=true` enables these routes when a Drive
+client, sealing key and ledger and an identity ledger and root operator are
+configured. It defaults to off. Before enabling actor uploads, provision the
+Drive ledger as a regular mode `0600` file owned by the Axxium service user.
+Retain its contents when enabling this on an existing Drive installation.
+
+From the configured human owner's signed-in Axxium browser, send a same-origin
+`POST /api/drive/actor/connect` with JSON `{"actor-did":"<exact managed actor DID>"}`.
+Navigate to the returned `authorization-url` to grant that one actor access.
+Google uses the same registered `/api/drive/callback` as human Drive consent.
+The signed enrollment state pins the selected actor, the owner's exact session,
+and the configured root. Axxium rechecks them before recording the owner's
+approval and sealing the refresh token to the actor.
+The managed-actor grant and its file registry are separate from a human
+browser grant, including when the two have the same DID string.
+
+A Codex, Claude or OpenCode process authenticates independently as a managed
+agent or bot. Send the agent's `x-axxium-actor` DID header and bootstrap bearer
+to `POST /api/drive/agent`, using the same JSON/EDN envelope as the human RPC.
+The available tools are `drive_list`, `drive_get` and `drive_put`. A client
+adapter is required for standard MCP discovery. The caller cannot name another owner, use
+the human's token or read another actor's registered resource. Authorization is
+checked again before a result is returned, so key rotation or suspension during
+a Drive read suppresses that result.
+
+Consent starts the actor with an empty registry. `drive_put` writes a new EDN
+file in the consented My Drive root and registers it under that actor:
+
+```clojure
+{:drive/name "work-notes.edn"
+ :drive/idempotency-key "work-notes-2026-11-14"
+ :drive/refs ["<event-id>"]
+ :drive/value {:status "draft"}}
+```
+
+The idempotency key is 1–128 ASCII letters, digits, periods, underscores or
+hyphens and belongs to the actor. The EDN value can be up to 1 MiB. An actor
+can create files and read its registered files. Folder selection, import,
+overwrite and delete are outside this API.
+
+Before upload, Axxium records the allowing decision and the reserved Google
+file ID and explicitly syncs the current ledger before an upload attempt,
+including after a previous flush failed. Repeating the exact request returns the existing receipt or looks up
+that exact reserved ID and verifies its name, media type and bytes. A repeat
+with different args returns `:idempotency-conflict`. A same-name unrelated
+file yields `:exists-untracked`, without exposing another actor's file ID. On
+`:reconciliation-required`, retry only with the same key and identical args.
+A replaced Google grant cannot continue a pending upload from the prior grant.
+Google can hold duplicate names from writes outside this route. The reserved
+ID prevents creating a second file for a retried Axxium request.
+
+[Google Drive API guidance on pre-generated IDs](https://developers.google.com/workspace/drive/api/guides/manage-uploads#use_a_pre-generated_id_to_upload_files)
