@@ -43,12 +43,16 @@
                               :open_session {:audience mailbox-fixture/aud :ttl-ms 3600000}))]
     (try
       (is (thrown? js/Error (lf/sync-drive-ledger! p [])))
+      (is (thrown? js/Error (lf/append-drive-batch! p [] lg)))
+      (is (not (fs/existsSync p)) "The actor append never creates a replacement ledger.")
       (fs/writeFileSync p "" #js {:mode 8r600})
-      (lf/append-batch! p [] lg)
+      (is (= lg (lf/append-drive-batch! p [] lg)))
       (is (nil? (lf/sync-drive-ledger! p lg)))
       (is (thrown? js/Error (lf/sync-drive-ledger! p [])))
+      (is (thrown? js/Error (lf/append-drive-batch! p [] lg)))
       (fs/symlinkSync p link)
       (is (thrown? js/Error (lf/sync-drive-ledger! link lg)))
+      (is (thrown? js/Error (lf/append-drive-batch! link [] lg)))
       (fs/chmodSync p 8r644)
       (is (thrown? js/Error (lf/sync-drive-ledger! p lg)))
       (fs/chmodSync p 8r600)

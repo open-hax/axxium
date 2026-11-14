@@ -56,8 +56,9 @@
 ;; One in-process writer; the adapter reloads after uncertain disk writes.
 (defonce ^:private ledger-writer (ledger-queue/create))
 
-(defn- serialized [f]
-  (ledger-queue/submit! ledger-writer (ledger-path) f))
+(defn- serialized
+  ([f] (ledger-queue/submit! ledger-writer (ledger-path) f))
+  ([f append!] (ledger-queue/submit! ledger-writer (ledger-path) f append!)))
 
 (defn- ids []
   {:decision-id (str (random-uuid)) :effect-id (str (random-uuid)) :at (js/Date.)})
@@ -144,7 +145,8 @@
                                      (drive/connect-actor lg (state/fold lg) st
                                        {:root-did root-did :operator-id operator-id :actor-did actor-did}
                                        (tc/seal (token-key) (drive/credential-aad (drive/actor-owner actor-did)) refresh-token)
-                                       (ids))))))))))]
+                                       (ids))))
+                                 ledger-file/append-drive-batch!))))))]
     (if (:effect outcome)
       (http/redirect! reply "/portal/index.html?drive=actor-connected")
       (http/send-secret! reply 403 {:error "Drive enrollment authority no longer current"}))))
@@ -238,13 +240,15 @@
   (and (eligible-actor? st root-did actor-did)
        (= actor-did (agent-auth/authenticate st actor-did key))))
 
-(defn- authorized-drive-step [authorize? {:keys [root-did operator-id actor-did]} step]
-  (serialized (fn [lg]
-                (cond
-                  (not (authorize?)) {:error :unauthenticated}
-                  (not (drive/actor-connected? (state/fold lg) root-did operator-id actor-did))
-                  {:error :not-connected}
-                  :else (step lg)))))
+(defn- authorized-drive-step [authorize? {:keys [root-did operator-id actor-did]} append! step]
+  (serialized
+    (fn [lg]
+      (cond
+        (not (authorize?)) {:error :unauthenticated}
+        (not (drive/actor-connected? (state/fold lg) root-did operator-id actor-did))
+        {:error :not-connected}
+        :else (step lg)))
+    append!))
 
 (defn- ^:async agent! [req reply]
   (try
@@ -283,8 +287,8 @@
                         (await (drive-mcp/actor-put! {:fetch gd/timed-fetch :token-key (token-key)
                                                      :client (google/drive-client) :ids ids
                                                      :sync-ledger! (partial ledger-file/sync-drive-ledger! (ledger-path))}
-                                 principal args step! authorize?))
-                        (await (step! #(call-drive % (drive/actor-owner actor-did) tool args))))]
+                                 principal args (partial step! ledger-file/append-drive-batch!) authorize?))
+                        (await (step! nil #(call-drive % (drive/actor-owner actor-did) tool args))))]
               (if (and (not= :unauthenticated (:error out)) (authorize?))
                 (respond-edn! reply out)
                 (http/send-secret! reply 401 {:error "A current Drive actor credential is required"})))))))

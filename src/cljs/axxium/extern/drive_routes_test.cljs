@@ -212,7 +212,11 @@
                   http/send! reply!
                   http/send-secret! reply!
                   queue/submit! (let [submit! queue/submit!]
-                                  (fn [_ path f] (submit! writer path f)))
+                                  (fn
+                                    ([_ path f] (submit! writer path f nil))
+                                    ([_ path f append!]
+                                     (is (or (nil? append!) (= disk/append-drive-batch! append!)))
+                                     (submit! writer path f nil))))
                   disk/sync-drive-ledger! (fn [_ expected]
                                             (is (= expected @durable))
                                             (when (compare-and-set! fail-recovery-fsync? true false)

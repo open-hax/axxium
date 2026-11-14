@@ -91,7 +91,7 @@
 (defn- grant-binding [key st owner]
   (tc/fingerprint key :drive/actor-grant (drive/sealed-credential st owner)))
 
-(defn- ^:async reserve! [{:keys [fetch token-key ids] :as deps} lg
+(defn- ^:async reserve! [{:keys [fetch token-key ids sync-ledger!] :as deps} lg
                          {:keys [actor-did intent-id request-binding] :as request} authorize?]
   (let [st (state/fold lg)
         owner (drive/actor-owner actor-did)]
@@ -99,7 +99,8 @@
       (if (= request-binding (:drive/request-binding intent))
         {:result intent}
         {:error :idempotency-conflict})
-      (let [at (await (access-token deps st owner))
+      (let [_ (sync-ledger! lg)
+            at (await (access-token deps st owner))
             file-id (await (gd/generate-file-id fetch at))]
         (if (authorize?)
           (let [out (drive/reserve-actor-put lg st

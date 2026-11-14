@@ -99,19 +99,31 @@
         (f fd stat))
       (finally (fs/closeSync fd)))))
 
-(defn sync-drive-ledger!
-  "Durably confirm the exact reservations visible in a pre-provisioned private Drive ledger."
-  [path expected-events]
+(defn- with-drive-ledger [path expected-events mode f]
   (let [expected-stat (fs/lstatSync path)
         invalid-file #(ex-info "Drive ledger must be a service-owned regular 0600 file" {})]
     (when-not (private-stat? expected-stat)
       (throw (invalid-file)))
-    (with-private-file path expected-stat (.-O_RDWR fs/constants) invalid-file
+    (with-private-file path expected-stat mode invalid-file
       (fn [fd _]
         (let [{:keys [events tail-bytes]} (decode-ledger (fs/readFileSync fd "utf8"))]
           (when-not (and (nil? tail-bytes) (= expected-events events))
             (throw (ex-info "Drive ledger changed before upload" {})))
-          (fs/fsyncSync fd))))))
+          (f fd))))))
+
+(defn sync-drive-ledger!
+  "Durably confirm the exact reservations visible in a pre-provisioned private Drive ledger."
+  [path expected-events]
+  (with-drive-ledger path expected-events (.-O_RDWR fs/constants) fs/fsyncSync))
+
+(defn append-drive-batch!
+  "Append to the verified existing Drive ledger without O_CREAT."
+  [path before after]
+  (with-drive-ledger path before (bit-or (.-O_RDWR fs/constants) (.-O_APPEND fs/constants))
+    (fn [fd]
+      (let [batch (subvec (vec after) (count before))]
+        (when (seq batch) (append-text! fd (edn-lines/export-lines batch)))
+        after))))
 
 (defn private-ledger-storage
   "Pin an existing private mailbox file. Every load and append checks the
