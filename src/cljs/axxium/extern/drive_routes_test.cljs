@@ -137,6 +137,9 @@
         sealed-key (crypto/randomBytes 32)
         exchange-count (atom 0)
         fetch-count (atom 0)
+        refresh-count (atom 0)
+        lookup-count (atom 0)
+        search-count (atom 0)
         generated (atom 0)
         uploads (atom 0)
         remote (atom {})
@@ -207,9 +210,11 @@
                                      (when @suspend-on-exchange (reset! tree inactive))
                                      (js/Promise.resolve {:scope law/drive-file-scope :refresh_token "actor-refresh"}))
                   gd/refresh-access-token (fn [_ request]
+                                            (swap! refresh-count inc)
                                             (is (= "actor-refresh" (:refresh-token request)))
                                             (js/Promise.resolve "actor-access"))
                   gd/get-file (fn [_ _ file-id]
+                                (swap! lookup-count inc)
                                 (if (= "fixture-file" file-id)
                                   (do
                                     (swap! fetch-count inc)
@@ -220,6 +225,7 @@
                                     (js/Promise.reject (ex-info "fixture file missing" {:status 404})))))
                   gd/generate-file-id (fn [_ _] (js/Promise.resolve (str "generated-" (swap! generated inc))))
                   gd/list-files (fn [_ _ {:keys [q]}]
+                                  (swap! search-count inc)
                                   (when @suspend-on-search (reset! tree inactive))
                                   (js/Promise.resolve
                                     {:drive/files (vec (filter #(= q (law/same-name-query %)) (vals @remote)))}))
@@ -331,9 +337,23 @@
             (is (= 200 (:status (await (put! ambiguous)))))
             (is (= "google-drive:generated-3" (get-in (result) [:result :resource/id])))
             (is (= 2 @uploads) "A lost provider response does not cause a second upload."))
+          (let [pending (assoc payload :drive/name "pending.edn" :drive/idempotency-key "previous-grant")]
+            (reset! interrupted-upload? true)
+            (is (= 400 (:status (await (put! pending)))))
+            (is (= :reconciliation-required (:error (result))))
+            (let [oauth-state (await (start actor))]
+              (is (= "/portal/index.html?drive=actor-connected"
+                     (:redirect (await (call! law/callback-path (callback oauth-state)))))))
+            (let [before [@refresh-count @generated @uploads @lookup-count @search-count]]
+              (is (= 200 (:status (await (put! payload)))))
+              (is (= file-id (get-in (result) [:result :resource/id])))
+              (is (= 400 (:status (await (put! pending)))))
+              (is (= :reconciliation-required (:error (result))))
+              (is (= before [@refresh-count @generated @uploads @lookup-count @search-count])
+                  "Completed receipts replay locally after reconnection; old pending writes stay quarantined.")))
           (reset! suspend-on-search true)
           (is (= 401 (:status (await (put! (assoc payload :drive/name "blocked.edn" :drive/idempotency-key "suspended"))))))
-          (is (= 2 @uploads) "Suspension while searching stops the upload.")
+          (is (= 3 @uploads) "Suspension while searching stops the upload.")
           (is (policy/decision-before-effect? @durable)))))))
 
 (deftest actor-drive-consent-and-own-resource-access

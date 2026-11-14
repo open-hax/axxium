@@ -142,13 +142,13 @@
 (defn- ^:async finish-reserved! [{:keys [fetch ids token-key] :as deps} lg
                                 {:keys [actor-did intent-id]} args content
                                 {:drive/keys [file-id] :as intent} authorize?]
-  (let [st (state/fold lg)]
+  (let [st (state/fold lg)
+        registered (drive/owned-file st actor-did (law/file-resource-id file-id))]
     (cond
+      registered {:result registered}
+
       (not= (:drive/grant-binding intent) (grant-binding token-key st actor-did))
       {:error :reconciliation-required}
-
-      (drive/owned-file st actor-did (law/file-resource-id file-id))
-      {:result (drive/owned-file st actor-did (law/file-resource-id file-id))}
 
       :else
       (let [at (await (access-token deps st actor-did))
