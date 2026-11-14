@@ -150,12 +150,14 @@
 
 (defn- tool-allowed? [ctx name]
   (let [directory? (contains? ctx :directory/bindings)]
-    (if (:events/only? ctx)
+    (cond
+      (:mailbox/bound-bootstrap? ctx) (contains? mailbox/spec-tools name)
+      (:events/only? ctx)
       (or (= name "whoami")
           (and directory?
                (or (and (:mailbox/actors? ctx) (contains? actor-messaging-tools name))
                    (and (true? (:mailbox/inbox? ctx)) (contains? own-inbox-tools name)))))
-      (or directory? (not= name "discover_actors")))))
+      :else (or directory? (not= name "discover_actors")))))
 
 (defn- visible-tool [ctx {:strs [name] :as descriptor}]
   (if (inbox-upgrade-tool? ctx name)
