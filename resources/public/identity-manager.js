@@ -7,6 +7,12 @@ import { treeRows, policyFromFields, fieldsFromPolicy } from './identity-tree.js
 
 const KINDS = ['agent', 'bot', 'host', 'group'];
 const TYPES = ['api-key', 'ssh-key', 'github-pat', 'github-app'];
+const POLICY_ERRORS = {
+  'descendant-policy-conflict': 'Narrow the affected child policies before saving this policy.',
+  'policy-changed': 'This policy changed since you opened it. Refresh the page before saving.',
+  forbidden: 'The policy must stay within its ancestors’ policies and you must manage this actor.',
+  'valid policy and expectedPolicy required': 'Enter valid repositories, permission levels, actions, and restrictions.',
+};
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -188,7 +194,37 @@ class AxxiumIdentityManager extends HTMLElement {
     panel.append(
       el('h3', {}, `${a.name || a.did} `, el('small', {}, `${a.kind} · ${a.status}${a.effective ? '' : ' (not effective)'}`)),
       el('small', {}, a.did),
-      el('p', {}, `Repos: ${(a.policy?.repos || []).join(', ')} · actions: ${(a.policy?.actions || []).join(', ')} · forbid: ${(a.policy?.forbid || []).join(', ')}`));
+      el('p', {}, `Repos: ${fields.repos || 'none'} · permissions: ${fields.permissions || 'none'} · actions: ${fields.actions || 'none'} · restrictions: ${fields.forbid || 'none'}`));
+
+    if (a.policy && a.status !== 'revoked' && this.actors.some(actor => actor.did === a.parent)) {
+      const status = el('p', { class: 'error', role: 'status' });
+      const save = el('button', { type: 'submit' }, 'Save policy');
+      panel.append(el('details', {}, el('summary', {}, 'Edit actor policy'),
+        el('form', { onsubmit: async event => {
+          event.preventDefault();
+          if (save.disabled) return;
+          const sessionVersion = this.sessionVersion;
+          save.disabled = true;
+          status.textContent = '';
+          try {
+            const data = Object.fromEntries(new FormData(event.currentTarget));
+            const policy = policyFromFields(data, { strictPermissions: true });
+            await this.admin({ op: 'set-policy', did: a.did, policy, expectedPolicy: a.policy });
+            if (sessionVersion === this.sessionVersion) await this.refresh();
+          } catch (error) {
+            if (sessionVersion === this.sessionVersion) {
+              status.textContent = Object.hasOwn(POLICY_ERRORS, error.message) ? POLICY_ERRORS[error.message] : error.message;
+            }
+          } finally {
+            save.disabled = false;
+          }
+        } },
+        input('repos', 'Repositories', fields.repos),
+        input('permissions', 'Permissions (name=level)', fields.permissions),
+        input('actions', 'Actions', fields.actions),
+        input('forbid', 'Restrictions', fields.forbid),
+        save, status)));
+    }
 
     const creds = el('div');
     for (const c of a.credentials || []) {

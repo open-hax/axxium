@@ -52,7 +52,7 @@
                (gi/live? st did (js/Date.)))
       did)))
 
-(def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke" "github_comment"
+(def tools #{"actor_list" "actor_provision" "actor_set_policy" "actor_suspend" "actor_resume" "actor_revoke" "github_comment"
              "credential_provision" "credential_rotate" "credential_revoke" "token_for"
              "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"
              "mailbox_bind" "mailbox_unbind"
@@ -184,6 +184,11 @@
                          (effect-out (gi/provision-actor lg st caller (get a :actor/parent caller)
                                                            did (:actor/name a) (:actor/policy a)
                                                            (or (:actor/kind a) :bot) (ids))))
+      "actor_set_policy"
+      (let [{:keys [ledger error] :as out}
+            (gi/set-policy lg st caller did (:actor/policy a) (:actor/expected-policy a) (ids))]
+        (js/Promise.resolve
+         (if error {:ledger ledger :error error} (effect-out out))))
       "actor_suspend" (js/Promise.resolve (effect-out (gi/suspend lg st caller did (ids))))
       "actor_resume" (js/Promise.resolve (effect-out (gi/resume lg st caller did (ids))))
       "actor_revoke" (js/Promise.resolve (effect-out (gi/revoke-actor lg st caller did (ids))))
@@ -294,6 +299,8 @@
            (and (= tool "mailbox_unbind") (string? (:mailbox/did a)))
            (string? (:actor/did a)))
        (or (not= "mailbox_bind" tool) (string? (:mailbox/did a)))
+       (or (not= "actor_set_policy" tool)
+           (and (law/valid-policy? (:actor/policy a)) (law/valid-policy? (:actor/expected-policy a))))
        (or (not= "actor_provision" tool) (not (contains? a :actor/parent)) (string? (:actor/parent a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))
@@ -320,7 +327,10 @@
         (.then (call deps {:actor caller} tool args)
                (fn [out]
                  (if-let [e (:error out)]
-                   {:status (if (#{:forbidden :unauthenticated} e) 403 400)
+                   {:status (cond
+                              (#{:forbidden :unauthenticated} e) 403
+                              (#{:policy-changed :descendant-policy-conflict} e) 409
+                              :else 400)
                     :body {:error (name e)} :ledger (:ledger out)}
                    (let [st (state/fold (or (:ledger out) (:ledger deps)))
                          pols (into {} (map (fn [a] [(:actor/did a) (gi/policy-of st (:actor/did a))]))

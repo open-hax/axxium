@@ -15,3 +15,14 @@ test('policy fields round-trip', () => {
   assert.deepEqual(policyFromFields(fieldsFromPolicy(p)), p);
   assert.deepEqual(parsePermissions('contents=write,, bad, issues=read'), { contents: 'write', issues: 'read' });
 });
+
+test('editing a policy distinguishes a clear from malformed permissions', () => {
+  const options = { strictPermissions: true };
+  assert.deepEqual(policyFromFields({ permissions: '' }, options),
+    { repos: [], permissions: {}, actions: [], forbid: [] });
+  assert.deepEqual(policyFromFields({ permissions: 'issues=write' }, options).permissions,
+    { issues: 'write' });
+  for (const permissions of ['issues', 'issues=', 'issues=write=read', 'issues=read issues=write']) {
+    assert.throws(() => policyFromFields({ permissions }, options), /name=level/);
+  }
+});

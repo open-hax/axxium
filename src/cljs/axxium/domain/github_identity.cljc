@@ -109,12 +109,33 @@
 (defn suspend [lg state operator did ids] (set-status lg state operator did :suspended ids))
 (defn resume [lg state operator did ids] (set-status lg state operator did :active ids))
 
-(defn set-policy [lg state operator did pol ids]
-  (let [n (actor-node state did)]
-    (act lg state operator :set-policy
-         (assoc-in (or n (node did nil "?" pol :active)) [:resource/metadata :actor/policy] pol)
-         (and n (may-manage? state operator did)
-              (law/policy-within? pol (policy-of state (parent-of state did)))) ids)))
+(defn- surviving-descendant-policies [state did]
+  (keep (fn [{:resource/keys [kind owner]}]
+          (when (= kind law/actor-kind)
+            (let [ancestors (ancestors-of state owner)]
+              (when (and (some #{did} ancestors)
+                         (not-any? #(= :revoked (status-of state %)) (cons owner ancestors)))
+                (policy-of state owner)))))
+        (vals (:resources state))))
+
+(defn set-policy
+  "A managing ancestor may replace a policy between its ancestors' and descendants' bounds."
+  ([lg state operator did pol ids]
+   (set-policy lg state operator did pol (policy-of state did) ids))
+  ([lg state operator did pol expected ids]
+   (let [n (actor-node state did)
+         ancestors (ancestors-of state did)
+         denial (cond
+                  (not (and n (not= :revoked (status-of state did))
+                            (may-manage? state operator did))) :forbidden
+                  (not= expected (policy-of state did)) :policy-changed
+                  (not (every? #(law/policy-within? pol (policy-of state %)) ancestors)) :forbidden
+                  (not (every? #(law/policy-within? % pol) (surviving-descendant-policies state did)))
+                  :descendant-policy-conflict)
+         outcome (act lg state operator :set-policy
+                      (assoc-in (or n (node did nil "?" pol :active)) [:resource/metadata :actor/policy] pol)
+                      (nil? denial) ids)]
+     (cond-> outcome denial (assoc :error denial)))))
 
 ;; -------------------------------------------------------------- credentials
 

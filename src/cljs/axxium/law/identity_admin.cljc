@@ -5,12 +5,14 @@
 
    Secrets flow one way: provision/rotate accept a secret, no view ever
    carries one back. A bootstrap key is the one value shown, once, at issue."
-  (:require [clojure.string :as str]))
+  (:require [axxium.law.github-identity :as identity]
+            [clojure.string :as str]))
 
 (def ops
   "Admin op -> identity MCP tool."
   {"list" "actor_list"
    "create" "actor_provision"
+   "set-policy" "actor_set_policy"
    "suspend" "actor_suspend"
    "resume" "actor_resume"
    "revoke" "actor_revoke"
@@ -36,6 +38,15 @@
    :policy/permissions (into {} (map (fn [[k v]] [(name k) (str v)])) permissions)
    :policy/actions (kws actions)
    :policy/forbid (kws forbid)})
+
+(defn- policy-json? [{:keys [repos permissions actions forbid] :as p}]
+  (and (map? p) (= (set (keys p)) #{:repos :permissions :actions :forbid})
+       (every? (fn [values] (and (vector? values) (every? string? values))) [repos actions forbid])
+       (every? #(not (str/blank? %)) repos)
+       (map? permissions)
+       (every? (fn [[name level]]
+                 (and (or (keyword? name) (string? name)) (string? level))) permissions)
+       (identity/valid-policy? (json->policy p))))
 
 (defn policy->json [p]
   (when p
@@ -73,6 +84,13 @@
                             (contains? request :parent) (assoc :actor/parent parent))]))
       ("suspend" "resume" "revoke" "bootstrap-issue")
       (if (string? did) [tool {:actor/did did}] {:error "did required"})
+      "set-policy"
+      (let [expected (:expectedPolicy request)]
+        (cond
+          (not (string? did)) {:error "did required"}
+          (not (and (policy-json? policy) (policy-json? expected))) {:error "valid policy and expectedPolicy required"}
+          :else [tool {:actor/did did :actor/policy (json->policy policy)
+                       :actor/expected-policy (json->policy expected)}]))
       "credential-provision"
       (cond (not (string? did)) {:error "did required"}
             (not (provisionable-types type)) {:error "unsupported credential type"}
