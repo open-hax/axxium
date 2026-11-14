@@ -3,6 +3,7 @@
   (:require [axxium.auth.session :as session]
             [axxium.auth.token :as token]
             [axxium.db :as db]
+            [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.http :as http]
             [axxium.law.actor :as actor]
             [axxium.shape.db :as shape]
@@ -130,4 +131,30 @@
   (async done
     (-> (work-owner-proof*)
         (.catch (fn [e] (is false (str "Work owner session proof rejected: " (pr-str e)))))
+        (.finally done))))
+
+(defn- ^:async human-session-recheck* []
+  (let [context {:auth/actor-id "actor_1" :auth/cred-id cred-id}
+        queries (atom [])
+        actor (atom (actor-row))]
+    (with-redefs [http/authorization (fn [req] (:authorization req))
+                  http/cookie (fn [req _] (:browser-session req))
+                  db/query-one-sql (fn [_] (throw (js/Error. "Unbounded session recheck")))
+                  db/query-auth-proof! (fn [query]
+                                         (swap! queries conj query)
+                                         (js/Promise.resolve @actor))]
+      (is (nil? (await (session/active-human-session? {:authorization "Bearer axx_fixture"} context))))
+      (is (nil? (await (session/active-human-session? {:browser-session "fixture-session"} {}))))
+      (is (empty? @queries))
+      (let [req {:browser-session "fixture-session"}]
+        (is (true? (await (session/active-human-session? req context))))
+        (is (= [(db/q-select-active-human-session "actor_1" (secrets/token-hash "fixture-session") cred-id)]
+               @queries))
+        (reset! actor nil)
+        (is (false? (await (session/active-human-session? req context))))))))
+
+(deftest human-session-rechecks-use-the-bounded-proof-query
+  (async done
+    (-> (human-session-recheck*)
+        (.catch (fn [e] (is false (str "Human session recheck rejected: " (pr-str e)))))
         (.finally done))))

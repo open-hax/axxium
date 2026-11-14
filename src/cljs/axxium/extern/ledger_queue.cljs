@@ -29,3 +29,29 @@
                                 out)))))]
     (reset! queue (.catch run (fn [_] nil)))
     run))
+
+(defn submit-checkpointed!
+  "Run f exclusively with a durable checkpoint for an external effect.
+   f receives the current ledger and a synchronous `checkpoint!` function.
+   Final state still persists through submit!. The checkpoint cannot be used
+   after f completes and never admits a different ledger prefix."
+  [{:keys [ledger storage] :as writer} path f]
+  (submit! writer path
+           (fn ^:async with-checkpoints [before]
+             (let [current (volatile! before)
+                   active? (volatile! true)
+                   checkpoint! (fn [after]
+                                 (let [prefix @current]
+                                   (when-not (and @active? (vector? after)
+                                                  (< (count prefix) (count after))
+                                                  (= prefix (subvec after 0 (count prefix))))
+                                     (throw (js/Error. "Unsafe ledger checkpoint")))
+                                   (reset! ledger nil)
+                                   (let [committed ((get storage :append! disk/append-batch!) path prefix after)]
+                                     (vreset! current committed)
+                                     (reset! ledger committed))))]
+               (try
+                 (let [{after :ledger :as out} (await (f before checkpoint!))]
+                   (when (and after (not= @current after)) (checkpoint! after))
+                   (dissoc out :ledger))
+                 (finally (vreset! active? false)))))))

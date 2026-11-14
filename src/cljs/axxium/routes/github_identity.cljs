@@ -171,11 +171,17 @@
           args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))]
       (if (= ::bad args)
         (http/send! reply 400 {:error "arguments must be one EDN map"})
-        (let [out (await (serialized
-                          (fn ^:async call-identity-tool [lg]
+        (let [out (await (ledger-queue/submit-checkpointed!
+                          ledger-writer (ledger-path)
+                          (fn ^:async call-identity-tool [lg checkpoint!]
                             (let [st (state/fold lg)
                                   actor (await (caller req context st))
-                                  out (await (mcp/call (deps lg) {:actor actor} tool args))
+                                  reauthorize! (fn ^:async recheck-human []
+                                                 (and (some? actor)
+                                                      (await (session/active-human-session? req context))
+                                                      (= actor (await (caller req context st)))))
+                                  out (await (mcp/call (assoc (deps lg) :checkpoint! checkpoint! :reauthorize! reauthorize!)
+                                                       {:actor actor} tool args))
                                   delivery-error
                                   (when (and (:result out) (= "token_for" tool)
                                              (= actor (:root-did (root-binding))))
@@ -191,15 +197,18 @@
 
 (defn ^:async agent-operation
   "Authenticate and execute an agent tool against one serialized ledger snapshot."
-  [lg did key tool args]
-  (let [self (when (not= did (:root-did (root-binding)))
-               (mcp/authenticate (state/fold lg) did key))]
+  ([lg did key tool args] (await (agent-operation lg did key tool args nil)))
+  ([lg did key tool args checkpoint!]
+   (let [st (state/fold lg)
+         authenticate! (fn [] (when (not= did (:root-did (root-binding))) (mcp/authenticate st did key)))
+         self (authenticate!)]
     (cond
       (nil? self) {:agent/status 401 :agent/error "unknown agent or bad bootstrap key"}
       (not (contains? mcp/agent-tools tool)) {:agent/status 403 :agent/error "tool not open to agents"}
       (= ::bad args) {:agent/status 400 :agent/error "arguments must be one EDN map"}
-      :else (let [out (await (mcp/call (deps lg) {:actor self} tool args))]
-              (assoc out :agent/status (if (:error out) 400 200))))))
+      :else (let [out (await (mcp/call (assoc (deps lg) :checkpoint! checkpoint! :reauthorize! authenticate!)
+                                       {:actor self} tool args))]
+              (assoc out :agent/status (if (:error out) 400 200)))))))
 
 (defn- ^:async agent! [req reply _context]
   (if-not (configured?)
@@ -209,7 +218,8 @@
           body (http/body req)
           tool (:tool body)
           args (try (edn/read-one (or (:arguments body) "{}")) (catch :default _ ::bad))
-          out (await (serialized #(agent-operation % did key tool args)))
+          out (await (ledger-queue/submit-checkpointed!
+                     ledger-writer (ledger-path) #(agent-operation %1 did key tool args %2)))
           status (:agent/status out)]
       (if-let [error (:agent/error out)]
         (http/send! reply status {:error error})
