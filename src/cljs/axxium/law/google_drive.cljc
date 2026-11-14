@@ -107,6 +107,10 @@
 
 (def credential-kind :resource/google-drive-credential)
 (def file-kind :resource/google-drive-file)
+(def put-intent-kind :resource/google-drive-put-intent)
+
+(defn file-id? [value]
+  (and (string? value) (boolean (re-matches #"[A-Za-z0-9_-]{1,256}" value))))
 
 (defn credential-resource-id
   "One Drive credential per owner DID."
@@ -135,6 +139,18 @@
    [:drive/folder-id {:optional true} [:string {:min 1}]]
    [:drive/refs {:optional true} [:vector EventRef]]
    [:drive/value :any]])
+
+(def ActorPutValueRequest
+  "One small, create-only upload to the consented Drive root."
+  [:map {:closed true}
+   [:drive/name FileName]
+   [:drive/idempotency-key [:re #"[A-Za-z0-9._-]{1,128}"]]
+   [:drive/refs {:optional true} [:vector {:max 100} EventRef]]
+   [:drive/value :any]])
+
+(def actor-put-max-bytes (* 1024 1024))
+
+(defn valid-actor-put-value? [r] (m/validate ActorPutValueRequest r))
 
 (def GetValueRequest
   [:map {:closed true} [:resource/id [:string {:min 1}]]])

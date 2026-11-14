@@ -59,3 +59,17 @@
           (.setAuthTag d (unb64u tag))
           (str (.update d (unb64u ct) nil "utf8") (.final d "utf8")))))
     (catch :default _ nil)))
+
+(defn fingerprint
+  "Bind a private request to a stable keyed digest without persisting its contents."
+  [key purpose value]
+  (-> (crypto/createHmac "sha256" key)
+      (.update (pr-str [purpose value]) "utf8")
+      (.digest "hex")))
+
+(defn stable-digest
+  "Hash a nonsecret ID without depending on the renewable sealing key."
+  [purpose value]
+  (-> (crypto/createHash "sha256")
+      (.update (pr-str [purpose value]) "utf8")
+      (.digest "hex")))

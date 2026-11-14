@@ -114,13 +114,35 @@ approval and sealing the refresh token to the actor.
 A Codex, Claude or OpenCode process authenticates independently as a managed
 agent or bot. Send the agent's `x-axxium-actor` DID header and bootstrap bearer
 to `POST /api/drive/agent`, using the same JSON/EDN envelope as the human RPC.
-The available tools are `drive_list` and `drive_get`. A client adapter is
-required for standard MCP discovery. The caller cannot name another owner, use
+The available tools are `drive_list`, `drive_get` and `drive_put`. A client
+adapter is required for standard MCP discovery. The caller cannot name another owner, use
 the human's token or read another actor's registered resource. Authorization is
 checked again before a result is returned, so key rotation or suspension during
 a Drive read suppresses that result.
 
-Consent does not import files. An enrolled actor with no registered resources
-sees an empty list. This read-only entry point does not include a way to create
-or adopt actor files. A managed create operation still needs a durable
-request and a way to reconcile a Google create whose local receipt failed.
+Consent starts the actor with an empty registry. `drive_put` writes a new EDN
+file in the consented My Drive root and registers it under that actor:
+
+```clojure
+{:drive/name "work-notes.edn"
+ :drive/idempotency-key "work-notes-2026-11-14"
+ :drive/refs ["<event-id>"]
+ :drive/value {:status "draft"}}
+```
+
+The idempotency key is 1–128 ASCII letters, digits, periods, underscores or
+hyphens and belongs to the actor. The EDN value can be up to 1 MiB. An actor
+can create files and read its registered files. Folder selection, import,
+overwrite and delete are outside this API.
+
+Before upload, Axxium records the allowing decision and the reserved Google
+file ID. Repeating the exact request returns the existing receipt or looks up
+that exact reserved ID and verifies its name, media type and bytes. A repeat
+with different args returns `:idempotency-conflict`. A same-name unrelated
+file yields `:exists-untracked`, without exposing another actor's file ID. On
+`:reconciliation-required`, retry only with the same key and identical args.
+A replaced Google grant cannot continue a pending upload from the prior grant.
+Google can hold duplicate names from writes outside this route. The reserved
+ID prevents creating a second file for a retried Axxium request.
+
+[Google Drive API guidance on pre-generated IDs](https://developers.google.com/workspace/drive/api/guides/manage-uploads#use_a_pre-generated_id_to_upload_files)

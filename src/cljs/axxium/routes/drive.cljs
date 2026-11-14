@@ -236,6 +236,14 @@
   (and (eligible-actor? st root-did actor-did)
        (= actor-did (agent-auth/authenticate st actor-did key))))
 
+(defn- authorized-drive-step [authorize? {:keys [root-did operator-id actor-did]} step]
+  (serialized (fn [lg]
+                (cond
+                  (not (authorize?)) {:error :unauthenticated}
+                  (not (drive/actor-connected? (state/fold lg) root-did operator-id actor-did))
+                  {:error :not-connected}
+                  :else (step lg)))))
+
 (defn- ^:async agent! [req reply]
   (try
     (let [{:keys [host origin]} (http/origin-settings (base-url) law/callback-path)
@@ -257,22 +265,24 @@
 
         :else
         (let [{:keys [tool] :as body} (http/body req)
-              args (rpc-args body)]
+              args (rpc-args body)
+              authorize? #(actor-bootstrap? (identity/current-actor-state) root-did actor-did key)
+              principal {:root-did root-did :operator-id actor-id :actor-did actor-did}
+              step! (partial authorized-drive-step authorize? principal)]
           (cond
-            (not (contains? #{"drive_list" "drive_get"} tool))
-            (http/send-secret! reply 403 {:error "Actor Drive exposes only drive_list and drive_get"})
+            (not (contains? drive-mcp/tools tool))
+            (http/send-secret! reply 403 {:error "Unknown actor Drive tool"})
 
             (= ::bad args)
             (http/send-secret! reply 400 {:error "arguments must be one EDN map"})
 
             :else
-            (let [out (await (serialized
-                              (fn [lg]
-                                (when (actor-bootstrap? (identity/current-actor-state) root-did actor-did key)
-                                  (if (drive/actor-connected? (state/fold lg) root-did actor-id actor-did)
-                                    (call-drive lg actor-did tool args)
-                                    {:error :not-connected})))))]
-              (if (and out (actor-bootstrap? (identity/current-actor-state) root-did actor-did key))
+            (let [out (if (= "drive_put" tool)
+                        (await (drive-mcp/actor-put! {:fetch gd/timed-fetch :token-key (token-key)
+                                                     :client (google/drive-client) :ids ids}
+                                 principal args step! authorize?))
+                        (await (step! #(call-drive % actor-did tool args))))]
+              (if (and (not= :unauthenticated (:error out)) (authorize?))
                 (respond-edn! reply out)
                 (http/send-secret! reply 401 {:error "A current Drive actor credential is required"})))))))
     (catch :default _

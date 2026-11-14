@@ -87,6 +87,108 @@
 (defn- list! [st owner {:drive/keys [ref]}]
   (js/Promise.resolve {:result {:resources (drive/owned-files st owner ref)}}))
 
+(defn- grant-binding [key st actor-did]
+  (tc/fingerprint key :drive/actor-grant (drive/sealed-credential st actor-did)))
+
+(defn- ^:async reserve! [{:keys [fetch token-key ids] :as deps} lg
+                         {:keys [actor-did intent-id request-binding] :as request} authorize?]
+  (let [st (state/fold lg)]
+    (if-let [intent (drive/actor-put-intent st actor-did intent-id)]
+      (if (= request-binding (:drive/request-binding intent))
+        {:result intent}
+        {:error :idempotency-conflict})
+      (let [at (await (access-token deps st actor-did))
+            file-id (await (gd/generate-file-id fetch at))]
+        (if (authorize?)
+          (let [out (drive/reserve-actor-put lg st
+                      (assoc request :file-id file-id :grant-binding (grant-binding token-key st actor-did)) (ids))]
+            (if-let [effect (:effect out)]
+              {:ledger (:ledger out) :result (get-in effect [:event/body :resource/metadata])}
+              {:error :reconciliation-required}))
+          {:error :unauthenticated})))))
+
+(defn- ^:async file-or-missing [fetch at file-id]
+  (try
+    (await (gd/get-file fetch at file-id))
+    (catch :default e
+      (when-not (= 404 (:status (ex-data e))) (throw e)))))
+
+(defn- matches-upload? [file file-id name content]
+  (and (= file-id (:drive/file-id file)) (= name (:drive/name file))
+       (= law/edn-mime-type (:drive/mime-type file)) (= content (:drive/content file))))
+
+(defn- ^:async create-reserved! [fetch at st actor-did file-id args content authorize?]
+  (try
+    (let [name (:drive/name args)
+          matches (await (find-existing fetch at (law/same-name-query args)))]
+      (if (seq matches)
+        {:error (:drive/reason (drive/put-plan st actor-did matches args))}
+        (if (authorize?)
+          (let [file (await (gd/create-file fetch at {:drive/file-id file-id :drive/name name
+                                                      :drive/mime-type law/edn-mime-type :drive/content content}))]
+            (if (and (= file-id (:drive/file-id file)) (= name (:drive/name file))
+                     (= law/edn-mime-type (:drive/mime-type file)))
+              {:result file}
+              {:error :reconciliation-required}))
+          {:error :unauthenticated})))
+    (catch :default e
+      (if (= 409 (:status (ex-data e)))
+        (let [file (await (file-or-missing fetch at file-id))]
+          (if (matches-upload? file file-id (:drive/name args) content)
+            {:result file}
+            {:error :reconciliation-required}))
+        {:error :reconciliation-required}))))
+
+(defn- ^:async finish-reserved! [{:keys [fetch ids token-key] :as deps} lg
+                                {:keys [actor-did intent-id]} args content
+                                {:drive/keys [file-id] :as intent} authorize?]
+  (let [st (state/fold lg)]
+    (cond
+      (not= (:drive/grant-binding intent) (grant-binding token-key st actor-did))
+      {:error :reconciliation-required}
+
+      (drive/owned-file st actor-did (law/file-resource-id file-id))
+      {:result (drive/owned-file st actor-did (law/file-resource-id file-id))}
+
+      :else
+      (let [at (await (access-token deps st actor-did))
+            existing (await (file-or-missing fetch at file-id))
+            {:keys [result error]} (if existing
+                                    (if (matches-upload? existing file-id (:drive/name args) content)
+                                      {:result existing}
+                                      {:error :reconciliation-required})
+                                    (await (create-reserved! fetch at st actor-did file-id args content authorize?)))]
+        (cond
+          error {:error error}
+          (not (authorize?)) {:error :unauthenticated}
+          :else
+          (let [out (drive/complete-actor-put lg st actor-did intent-id result (:drive/refs args []) (ids))]
+            (if-let [effect (:effect out)]
+              {:ledger (:ledger out) :result (:event/body effect)}
+              {:error :reconciliation-required})))))))
+
+(defn ^:async actor-put!
+  "Durably reserve a Google-generated ID before attempting an actor's upload.
+   A retry reconciles that ID and cannot allocate a second Google file."
+  [{:keys [token-key] :as deps} {:keys [actor-did] :as principal} args serialize! authorize?]
+  (if-not (law/valid-actor-put-value? args)
+    {:error :invalid}
+    (let [content (pr-str (:drive/value args))]
+      (if (> (js/Buffer.byteLength content "utf8") law/actor-put-max-bytes)
+        {:error :invalid}
+        (try
+          (let [intent-id (str "google-drive-put:" (tc/stable-digest :drive/actor-put-key
+                                                       [actor-did (:drive/idempotency-key args)]))
+                request (assoc principal :intent-id intent-id
+                          :request-binding (tc/fingerprint token-key :drive/actor-put-request
+                                             [(:drive/name args) (:drive/refs args []) content]))
+                {:keys [result error]} (await (serialize! #(reserve! deps % request authorize?)))]
+            (if error
+              {:error error}
+              (await (serialize! #(finish-reserved! deps % request args content result authorize?)))))
+          (catch :default e
+            {:error (or (:axxium/error (ex-data e)) :reconciliation-required)}))))))
+
 (defn call
   [{:keys [ledger] :as deps} {:keys [owner]} tool args]
   (let [st (state/fold ledger)]

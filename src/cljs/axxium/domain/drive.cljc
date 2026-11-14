@@ -82,6 +82,39 @@
     (when (and (= law/file-kind (:resource/kind r)) (= owner (:resource/owner r)))
       r)))
 
+(defn actor-put-intent
+  "Return only a reservation made by this actor for this request key."
+  [state owner intent-id]
+  (let [r (get-in state [:resources intent-id])]
+    (when (and (= owner (:resource/owner r)) (= law/put-intent-kind (:resource/kind r)))
+      (:resource/metadata r))))
+
+(defn reserve-actor-put
+  "Record the actor's allowing decision and its reserved external ID before upload."
+  [lg state {:keys [root-did operator-id actor-did intent-id file-id request-binding grant-binding]} {:keys [at] :as ids}]
+  (let [allowed? (and (law/file-id? file-id)
+                      (actor-connected? state root-did operator-id actor-did)
+                      (nil? (get-in state [:resources intent-id]))
+                      (nil? (get-in state [:resources (law/file-resource-id file-id)])))
+        intent {:resource/id intent-id :resource/owner actor-did
+                :resource/kind law/put-intent-kind :resource/store :axxium
+                :resource/metadata {:drive/file-id file-id :drive/request-binding request-binding
+                                    :drive/grant-binding grant-binding}}]
+    (when allowed?
+      (policy/act lg state
+        {:actor actor-did :resource intent-id :action :drive-create :at at}
+        {:stream "resources" :type :axxium.resource/registered :actor actor-did :body intent}
+        ids (constantly true)))))
+
+(defn complete-actor-put
+  "Register only an actor's reserved file ID. Do not replace an existing resource."
+  [lg state owner intent-id file refs ids]
+  (let [intent (actor-put-intent state owner intent-id)
+        file-id (:drive/file-id file)]
+    (when (and intent (= file-id (:drive/file-id intent))
+               (nil? (get-in state [:resources (law/file-resource-id file-id)])))
+      (record-put lg state owner file refs ids))))
+
 (defn owned-files
   "The owner's Drive file resources, optionally only those referring to
    event `ref`, sorted by resource id."

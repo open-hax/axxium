@@ -123,17 +123,27 @@
         other-session "12345678-1234-1234-1234-123456789abd"
         proof (atom {:actor-id owner-id :cred-id browser-session})
         durable (atom [])
+        fail-file-append? (atom false)
         writer (queue/create {:load! (fn [_] @durable)
                               :append! (fn [_ before after]
                                          (is (= before @durable))
+                                         (when (and @fail-file-append?
+                                                    (= law/file-kind (get-in (last after) [:event/body :resource/kind])))
+                                           (reset! fail-file-append? false)
+                                           (throw (js/Error. "injected file registration failure")))
                                          (reset! durable after))})
         response (atom nil)
         state-cookie (atom nil)
         sealed-key (crypto/randomBytes 32)
         exchange-count (atom 0)
         fetch-count (atom 0)
+        generated (atom 0)
+        uploads (atom 0)
+        remote (atom {})
+        interrupted-upload? (atom false)
         suspend-on-exchange (atom false)
         suspend-on-read (atom false)
+        suspend-on-search (atom false)
         enabled? (atom true)
         reply! (fn [_ status body] (reset! response {:status status :body body}))
         origin "https://drive-actor.test"
@@ -200,10 +210,30 @@
                                             (is (= "actor-refresh" (:refresh-token request)))
                                             (js/Promise.resolve "actor-access"))
                   gd/get-file (fn [_ _ file-id]
-                                (swap! fetch-count inc)
-                                (is (= "fixture-file" file-id))
-                                (when @suspend-on-read (reset! tree inactive))
-                                (js/Promise.resolve {:drive/content "{:fixture true}"}))]
+                                (if (= "fixture-file" file-id)
+                                  (do
+                                    (swap! fetch-count inc)
+                                    (when @suspend-on-read (reset! tree inactive))
+                                    (js/Promise.resolve {:drive/content "{:fixture true}"}))
+                                  (if-let [file (get @remote file-id)]
+                                    (js/Promise.resolve file)
+                                    (js/Promise.reject (ex-info "fixture file missing" {:status 404})))))
+                  gd/generate-file-id (fn [_ _] (js/Promise.resolve (str "generated-" (swap! generated inc))))
+                  gd/list-files (fn [_ _ {:keys [q]}]
+                                  (when @suspend-on-search (reset! tree inactive))
+                                  (js/Promise.resolve
+                                    {:drive/files (vec (filter #(= q (law/same-name-query %)) (vals @remote)))}))
+                  gd/create-file (fn [_ _ file]
+                                   (swap! uploads inc)
+                                   (is (some (fn [e] (and (= law/put-intent-kind (get-in e [:event/body :resource/kind]))
+                                                        (= (:drive/file-id file) (get-in e [:event/body :resource/metadata :drive/file-id]))))
+                                         @durable) "The upload must have a durable allowing reservation.")
+                                   (is (policy/decision-before-effect? @durable))
+                                   (is (nil? (:drive/folder-id file)))
+                                   (swap! remote assoc (:drive/file-id file) file)
+                                   (if (compare-and-set! interrupted-upload? true false)
+                                     (js/Promise.reject (ex-info "upload response lost" {:status 503}))
+                                     (js/Promise.resolve (dissoc file :drive/content))))]
       (is (= 403 (:status (await (call! "/api/drive/actor/connect" (enrollment "https://other.test" actor))))))
       (is (= 403 (:status (await (call! "/api/drive/actor/connect" (enrollment origin root))))))
       (reset! enabled? false)
@@ -217,9 +247,9 @@
                       (when-not (= 200 (:status out))
                         (throw (ex-info "Expected actor enrollment to open consent" out)))
                       (let [url (js/URL. (get-in out [:body :authorization-url]))]
-                      (is (not (str/includes? (.-href url) target)))
-                      (is (= law/drive-file-scope (.get (.-searchParams url) "scope")))
-                      (.get (.-searchParams url) "state"))))]
+                        (is (not (str/includes? (.-href url) target)))
+                        (is (= law/drive-file-scope (.get (.-searchParams url) "scope")))
+                        (.get (.-searchParams url) "state"))))]
         (let [oauth-state (await (start actor))]
           (is (nil? (await (jose/verify-google-state! @state-cookie signing))))
           (swap! proof assoc :cred-id other-session)
@@ -259,15 +289,54 @@
           (is (= 401 (:status (await (call! "/api/drive/agent" (agent actor sibling-key "drive_list" {}))))))
           (is (= 400 (:status (await (call! "/api/drive/agent" (agent sibling sibling-key "drive_get" {:resource/id id}))))))
           (is (= :not-found (:error (result))))
-          (is (= 403 (:status (await (call! "/api/drive/agent" (agent actor actor-key "drive_put" {}))))))
+          (is (= 400 (:status (await (call! "/api/drive/agent" (agent actor actor-key "drive_put" {}))))))
+          (is (= :invalid (:error (result))))
           (is (zero? @fetch-count))
           (is (= 200 (:status (await (call! "/api/drive/agent" reading)))))
           (is (= {:fixture true} (get-in (result) [:result :drive/value])))
           (reset! suspend-on-read true)
           (is (= 401 (:status (await (call! "/api/drive/agent" reading)))))
-          (is (nil? (get-in @response [:body :edn]))))))))
+          (is (nil? (get-in @response [:body :edn])))
+          (reset! tree active))
+        (let [payload {:drive/name "created.edn" :drive/idempotency-key "actor-create-1"
+                       :drive/refs ["fixture-ref"] :drive/value {:value "actor-fixture-content"}}
+              put! (fn ^:async put-with [args]
+                     (await (call! "/api/drive/agent" (agent actor actor-key "drive_put" args))))
+              file-id "google-drive:generated-1"]
+          (is (= 400 (:status (await (put! (assoc payload :drive/folder-id "arbitrary-folder"))))))
+          (is (= :invalid (:error (result))))
+          (is (zero? @generated))
+          (reset! fail-file-append? true)
+          (is (= 400 (:status (await (put! payload)))))
+          (is (= :reconciliation-required (:error (result))))
+          (is (= 1 @uploads @generated))
+          (is (nil? (drive/owned-file (state/fold @durable) actor file-id)))
+          (is (not (str/includes? (pr-str @durable) "actor-fixture-content")))
+          (is (not (str/includes? (pr-str @durable) "actor-create-1")))
+          (is (= 400 (:status (await (put! (assoc payload :drive/value :changed))))))
+          (is (= :idempotency-conflict (:error (result))))
+          (is (= 200 (:status (await (put! payload)))))
+          (is (= file-id (get-in (result) [:result :resource/id])))
+          (is (= actor (get-in (result) [:result :resource/owner])))
+          (is (= 200 (:status (await (put! payload)))))
+          (is (= 1 @uploads @generated))
+          (is (= 400 (:status (await (call! "/api/drive/agent" (agent sibling sibling-key "drive_get" {:resource/id file-id}))))))
+          (is (= :not-found (:error (result))))
+          (is (= 400 (:status (await (put! (assoc payload :drive/idempotency-key "a-new-key"))))))
+          (is (= :exists (:error (result))))
+          (let [ambiguous (assoc payload :drive/name "ambiguous.edn" :drive/idempotency-key "unknown-outcome")]
+            (reset! interrupted-upload? true)
+            (is (= 400 (:status (await (put! ambiguous)))))
+            (is (= :reconciliation-required (:error (result))))
+            (is (= 200 (:status (await (put! ambiguous)))))
+            (is (= "google-drive:generated-3" (get-in (result) [:result :resource/id])))
+            (is (= 2 @uploads) "A lost provider response does not cause a second upload."))
+          (reset! suspend-on-search true)
+          (is (= 401 (:status (await (put! (assoc payload :drive/name "blocked.edn" :drive/idempotency-key "suspended"))))))
+          (is (= 2 @uploads) "Suspension while searching stops the upload.")
+          (is (policy/decision-before-effect? @durable)))))))
 
-(deftest actor-drive-consent-and-own-resource-reads
+(deftest actor-drive-consent-and-own-resource-access
   (async done
     (-> (actor-drive*)
         (.catch (fn [error] (is false (pr-str error))))
