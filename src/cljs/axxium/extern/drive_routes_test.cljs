@@ -111,6 +111,7 @@
   (let [registered (handlers)
         root "did:web:drive-actor.test:actors:owner"
         actor (str root ":codex")
+        managed (drive/actor-owner actor)
         sibling (str root ":claude")
         actor-key (str "axb_" (apply str (repeat 43 "a")))
         sibling-key (str "axb_" (apply str (repeat 43 "b")))
@@ -124,6 +125,9 @@
         proof (atom {:actor-id owner-id :cred-id browser-session})
         durable (atom [])
         fail-file-append? (atom false)
+        fail-reservation-fsync? (atom false)
+        fail-recovery-fsync? (atom false)
+        fsynced (atom [])
         writer (queue/create {:load! (fn [_] @durable)
                               :append! (fn [_ before after]
                                          (is (= before @durable))
@@ -131,7 +135,11 @@
                                                     (= law/file-kind (get-in (last after) [:event/body :resource/kind])))
                                            (reset! fail-file-append? false)
                                            (throw (js/Error. "injected file registration failure")))
-                                         (reset! durable after))})
+                                         (reset! durable after)
+                                         (when (and (= law/put-intent-kind (get-in (last after) [:event/body :resource/kind]))
+                                                    (compare-and-set! fail-reservation-fsync? true false))
+                                           (throw (js/Error. "reservation fsync failed after writing bytes")))
+                                         (reset! fsynced after))})
         response (atom nil)
         state-cookie (atom nil)
         sealed-key (crypto/randomBytes 32)
@@ -205,6 +213,11 @@
                   http/send-secret! reply!
                   queue/submit! (let [submit! queue/submit!]
                                   (fn [_ path f] (submit! writer path f)))
+                  disk/sync-drive-ledger! (fn [_ expected]
+                                            (is (= expected @durable))
+                                            (when (compare-and-set! fail-recovery-fsync? true false)
+                                              (throw (js/Error. "recovery fsync failed")))
+                                            (reset! fsynced expected))
                   gd/exchange-code (fn [_ _]
                                      (swap! exchange-count inc)
                                      (when @suspend-on-exchange (reset! tree inactive))
@@ -233,7 +246,7 @@
                                    (swap! uploads inc)
                                    (is (some (fn [e] (and (= law/put-intent-kind (get-in e [:event/body :resource/kind]))
                                                         (= (:drive/file-id file) (get-in e [:event/body :resource/metadata :drive/file-id]))))
-                                         @durable) "The upload must have a durable allowing reservation.")
+                                         @fsynced) "The upload must have a durable allowing reservation.")
                                    (is (policy/decision-before-effect? @durable))
                                    (is (nil? (:drive/folder-id file)))
                                    (swap! remote assoc (:drive/file-id file) file)
@@ -276,8 +289,17 @@
         (is (not (str/includes? (pr-str @durable) "actor-refresh")))
         (is (policy/decision-before-effect? @durable))
         (is (= root (:event/actor (last @durable))) "Enrollment is attributed to the authorizing human root.")
-        (is (= "actor-refresh" (tc/open-sealed sealed-key actor (drive/sealed-credential (state/fold @durable) actor))))
-        (is (nil? (drive/sealed-credential (state/fold @durable) sibling)))
+        (is (= "actor-refresh" (tc/open-sealed sealed-key (drive/credential-aad managed)
+                                  (drive/sealed-credential (state/fold @durable) managed))))
+        (is (nil? (drive/sealed-credential (state/fold @durable) (drive/actor-owner sibling))))
+        (await (queue/submit! writer "actor-drive-fixture"
+                 (fn [lg] (drive/connect lg (state/fold lg) actor (tc/seal sealed-key actor "human-refresh")
+                            (agent-auth/event-ids)))))
+        (await (queue/submit! writer "actor-drive-fixture"
+                 (fn [lg] (drive/record-put lg (state/fold lg) actor
+                            {:drive/file-id "human-file" :drive/name "human.edn"} [] (agent-auth/event-ids)))))
+        (is (= "human-refresh" (tc/open-sealed sealed-key actor (drive/sealed-credential (state/fold @durable) actor))))
+        (is (nil? (tc/open-sealed sealed-key actor (drive/sealed-credential (state/fold @durable) managed))))
         (let [id "google-drive:fixture-file"
               listing (agent actor actor-key "drive_list" {})
               reading (agent actor actor-key "drive_get" {:resource/id id})]
@@ -290,8 +312,13 @@
                    (:redirect (await (call! law/callback-path (callback oauth-state)))))))
           (await (queue/submit! writer "actor-drive-fixture"
                    (fn [lg]
-                     (drive/record-put lg (state/fold lg) actor
+                     (drive/record-put lg (state/fold lg) managed
                        {:drive/file-id "fixture-file" :drive/name "fixture.edn"} [] (agent-auth/event-ids)))))
+          (is (= 400 (:status (await (call! "/api/drive/agent"
+                                      (agent actor actor-key "drive_get" {:resource/id "google-drive:human-file"}))))))
+          (is (= :not-found (:error (result))))
+          (is (= ["google-drive:human-file"] (mapv :resource/id (drive/owned-files (state/fold @durable) actor))))
+          (is (nil? (drive/owned-file (state/fold @durable) actor id)))
           (is (= 401 (:status (await (call! "/api/drive/agent" (agent actor sibling-key "drive_list" {}))))))
           (is (= 400 (:status (await (call! "/api/drive/agent" (agent sibling sibling-key "drive_get" {:resource/id id}))))))
           (is (= :not-found (:error (result))))
@@ -316,7 +343,7 @@
           (is (= 400 (:status (await (put! payload)))))
           (is (= :reconciliation-required (:error (result))))
           (is (= 1 @uploads @generated))
-          (is (nil? (drive/owned-file (state/fold @durable) actor file-id)))
+          (is (nil? (drive/owned-file (state/fold @durable) managed file-id)))
           (is (not (str/includes? (pr-str @durable) "actor-fixture-content")))
           (is (not (str/includes? (pr-str @durable) "actor-create-1")))
           (is (= 400 (:status (await (put! (assoc payload :drive/value :changed))))))
@@ -351,9 +378,22 @@
               (is (= :reconciliation-required (:error (result))))
               (is (= before [@refresh-count @generated @uploads @lookup-count @search-count])
                   "Completed receipts replay locally after reconnection; old pending writes stay quarantined.")))
+          (let [uncertain (assoc payload :drive/name "fsync.edn" :drive/idempotency-key "fsync-failure")]
+            (reset! fail-reservation-fsync? true)
+            (is (= 400 (:status (await (put! uncertain)))))
+            (is (= :reconciliation-required (:error (result))))
+            (is (not= @fsynced @durable) "The complete reservation is visible but its fsync failed.")
+            (is (= 3 @uploads))
+            (reset! fail-recovery-fsync? true)
+            (is (= 400 (:status (await (put! uncertain)))))
+            (is (= :reconciliation-required (:error (result))))
+            (is (= 3 @uploads))
+            (is (= 200 (:status (await (put! uncertain)))))
+            (is (= "google-drive:generated-5" (get-in (result) [:result :resource/id])))
+            (is (= 4 @uploads)))
           (reset! suspend-on-search true)
           (is (= 401 (:status (await (put! (assoc payload :drive/name "blocked.edn" :drive/idempotency-key "suspended"))))))
-          (is (= 3 @uploads) "Suspension while searching stops the upload.")
+          (is (= 4 @uploads) "Suspension while searching stops the upload.")
           (is (policy/decision-before-effect? @durable)))))))
 
 (deftest actor-drive-consent-and-own-resource-access

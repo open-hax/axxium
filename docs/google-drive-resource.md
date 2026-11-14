@@ -101,7 +101,9 @@ not authorize adoption, replacement or a duplicate upload.
 
 `AXXIUM_DRIVE_ACTOR_ACCESS_ENABLED=true` enables these routes when a Drive
 client, sealing key and ledger and an identity ledger and root operator are
-configured. It defaults to off.
+configured. It defaults to off. Before enabling actor uploads, provision the
+Drive ledger as a regular mode `0600` file owned by the Axxium service user.
+Retain its contents when enabling this on an existing Drive installation.
 
 From the configured human owner's signed-in Axxium browser, send a same-origin
 `POST /api/drive/actor/connect` with JSON `{"actor-did":"<exact managed actor DID>"}`.
@@ -110,6 +112,8 @@ Google uses the same registered `/api/drive/callback` as human Drive consent.
 The signed enrollment state pins the selected actor, the owner's exact session,
 and the configured root. Axxium rechecks them before recording the owner's
 approval and sealing the refresh token to the actor.
+The managed-actor grant and its file registry are separate from a human
+browser grant, including when the two have the same DID string.
 
 A Codex, Claude or OpenCode process authenticates independently as a managed
 agent or bot. Send the agent's `x-axxium-actor` DID header and bootstrap bearer
@@ -136,7 +140,8 @@ can create files and read its registered files. Folder selection, import,
 overwrite and delete are outside this API.
 
 Before upload, Axxium records the allowing decision and the reserved Google
-file ID. Repeating the exact request returns the existing receipt or looks up
+file ID and explicitly syncs the current ledger before an upload attempt,
+including after a previous flush failed. Repeating the exact request returns the existing receipt or looks up
 that exact reserved ID and verifies its name, media type and bytes. A repeat
 with different args returns `:idempotency-conflict`. A same-name unrelated
 file yields `:exists-untracked`, without exposing another actor's file ID. On

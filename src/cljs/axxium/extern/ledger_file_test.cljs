@@ -34,6 +34,28 @@
       (is (zero? (.-size (fs/statSync p))) "no complete line means no admitted bytes")
       (finally (fs/rmSync dir #js {:recursive true})))))
 
+(deftest drive-sync-verifies-the-pre-provisioned-ledger
+  (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-drive-sync-"))
+        p (path/join dir "ledger.edn")
+        link (path/join dir "link.edn")
+        lg (:ledger (mm/call [] {:principal mailbox-fixture/alice
+                                 :audience mailbox-fixture/aud :now fx/t0}
+                              :open_session {:audience mailbox-fixture/aud :ttl-ms 3600000}))]
+    (try
+      (is (thrown? js/Error (lf/sync-drive-ledger! p [])))
+      (fs/writeFileSync p "" #js {:mode 8r600})
+      (lf/append-batch! p [] lg)
+      (is (nil? (lf/sync-drive-ledger! p lg)))
+      (is (thrown? js/Error (lf/sync-drive-ledger! p [])))
+      (fs/symlinkSync p link)
+      (is (thrown? js/Error (lf/sync-drive-ledger! link lg)))
+      (fs/chmodSync p 8r644)
+      (is (thrown? js/Error (lf/sync-drive-ledger! p lg)))
+      (fs/chmodSync p 8r600)
+      (fs/appendFileSync p "torn")
+      (is (thrown? js/Error (lf/sync-drive-ledger! p lg)))
+      (finally (fs/rmSync dir #js {:recursive true})))))
+
 (deftest mailbox-batches-recover-as-complete-operations
   (let [dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-batch-"))
         p (path/join dir "ledger.edn")

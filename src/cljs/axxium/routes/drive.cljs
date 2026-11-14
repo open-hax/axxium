@@ -19,6 +19,7 @@
             [axxium.extern.google-drive :as gd]
             [axxium.extern.http :as http]
             [axxium.extern.jose :as jose]
+            [axxium.extern.ledger-file :as ledger-file]
             [axxium.extern.ledger-queue :as ledger-queue]
             [axxium.extern.signing-key :as signing-key]
             [axxium.extern.token-crypto :as tc]
@@ -142,7 +143,8 @@
                                    (when (= expected (await (operator-proof! req)))
                                      (drive/connect-actor lg (state/fold lg) st
                                        {:root-did root-did :operator-id operator-id :actor-did actor-did}
-                                       (tc/seal (token-key) actor-did refresh-token) (ids))))))))))]
+                                       (tc/seal (token-key) (drive/credential-aad (drive/actor-owner actor-did)) refresh-token)
+                                       (ids))))))))))]
     (if (:effect outcome)
       (http/redirect! reply "/portal/index.html?drive=actor-connected")
       (http/send-secret! reply 403 {:error "Drive enrollment authority no longer current"}))))
@@ -213,10 +215,10 @@
   (try (edn/read-one (or (:arguments body) "{}"))
        (catch :default _ ::bad)))
 
-(defn- call-drive [lg owner-did tool args]
+(defn- call-drive [lg owner tool args]
   (drive-mcp/call {:fetch gd/timed-fetch :token-key (token-key)
                    :client (google/drive-client) :ledger lg :ids ids}
-                  {:owner owner-did} tool args))
+                  {:owner owner} tool args))
 
 (defn- respond-edn! [reply out]
   (http/send-secret! reply (if (:error out) 400 200)
@@ -279,9 +281,10 @@
             :else
             (let [out (if (= "drive_put" tool)
                         (await (drive-mcp/actor-put! {:fetch gd/timed-fetch :token-key (token-key)
-                                                     :client (google/drive-client) :ids ids}
+                                                     :client (google/drive-client) :ids ids
+                                                     :sync-ledger! (partial ledger-file/sync-drive-ledger! (ledger-path))}
                                  principal args step! authorize?))
-                        (await (step! #(call-drive % actor-did tool args))))]
+                        (await (step! #(call-drive % (drive/actor-owner actor-did) tool args))))]
               (if (and (not= :unauthenticated (:error out)) (authorize?))
                 (respond-edn! reply out)
                 (http/send-secret! reply 401 {:error "A current Drive actor credential is required"})))))))
