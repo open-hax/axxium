@@ -145,13 +145,15 @@
 
 (defn- ^:async active-stream-session?
   [writer path oauth proof ctx]
-  (let [st (identity/current-actor-state)]
-    (and (await (active-proof! oauth proof st))
-         (stream-eligible? true proof st (gi/mailbox-bindings st))
-         (let [lg (queue/current-ledger writer path)
-               now (secrets/now)]
-           (and (bound-inbox-active? lg proof now)
-                (mailbox/streaming-session? lg (assoc ctx :now now)))))))
+  (let [node? (some? (:node/digest proof))]
+    (when (or node? (await (active-proof! oauth proof)))
+      (let [st (identity/current-actor-state)]
+        (and (or (not node?) (identity/node-proof-active? st proof))
+             (stream-eligible? true proof st (gi/mailbox-bindings st))
+             (let [lg (queue/current-ledger writer path)
+                   now (secrets/now)]
+               (and (bound-inbox-active? lg proof now)
+                    (mailbox/streaming-session? lg (assoc ctx :now now)))))))))
 
 (defn- ^:async listen-inbox!
   [writer path oauth resource stream-runtime req reply proof]
@@ -208,9 +210,11 @@
                  (let [out (await
                             (queue/submit! writer path
                                            (fn ^:async apply-mailbox [lg]
-                                             (let [now (secrets/now)]
-                                               (if (and (await (active-proof! oauth proof (:directory/state ctx)))
-                                                        (bound-inbox-active? lg proof now))
+                                             (let [active? (if (:node/digest proof)
+                                                             (active-proof! oauth proof (:directory/state ctx))
+                                                             (await (active-proof! oauth proof)))
+                                                   now (secrets/now)]
+                                               (if (and active? (bound-inbox-active? lg proof now))
                                                  (operation lg (assoc ctx :now now) body)
                                                  {:unauthenticated? true})))))]
                    (when-let [recipient (and stream-runtime (:notify-to out))]

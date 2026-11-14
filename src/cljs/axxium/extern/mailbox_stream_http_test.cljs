@@ -248,7 +248,28 @@
             (is (= 401 (:status (await (post! fresh whoami)))))
             (is (= codex-at (get (structured (await (post! at-client whoami))) "did")))))))))
 
-(defn- ^:async verify-native-stream! [bound-bootstrap?]
+(defn- ^:async verify-live-authority-after-proof!
+  [base {:keys [codex-token root codex actor-ledger clock after-proof]}]
+  (let [client (await (initialize! (assoc base :bearer codex-token)))
+        started @clock
+        expire-on (atom 2)]
+    (reset! after-proof #(when (zero? (swap! expire-on dec))
+                           (reset! clock (secrets/instant-after started 3600000))))
+    (is (= 404 (:status (await (post! client (tool "whoami" {})))))
+        "An MCP session that expires during the live AT proof no longer admits a tool.")
+    (is (zero? @expire-on))
+    (reset! clock started)
+    (let [suspend-on (atom 2)]
+      (reset! after-proof
+              #(when (zero? (swap! suspend-on dec))
+                 (swap! actor-ledger
+                        (fn [lg]
+                          (:ledger (gi/suspend lg (state/fold lg) root codex (fixture-ids)))))))
+      (is (= 404 (await (denied-stream-status! client)))
+          "GET rechecks the actor tree after the live AT proof completes.")
+      (is (zero? @suspend-on)))))
+
+(defn- ^:async verify-native-stream! [scenario]
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-stream-"))
         ledger (path/join dir "mailbox.edn")
@@ -263,6 +284,8 @@
         actor-ledger (atom (fixture-ledger root grok codex grok-key codex-key))
         actor-state #(state/fold @actor-ledger)
         opt-in (atom nil)
+        clock (atom (secrets/now))
+        after-proof (atom (fn [] nil))
         controller (js/AbortController.)
         deadline (js/setTimeout #(.abort controller) 12000)
         app (fastify/create-app)
@@ -274,7 +297,12 @@
         (let [codex-token (await (token/create-atproto-token! {:id actor-id} cred-id codex-at))
               query (db/q-select-actor-by-atproto-session actor-id (secrets/token-hash codex-token)
                                                          cred-id codex-at)]
-          (with-redefs [db/query-auth-proof! (fn [q] (js/Promise.resolve (when (= q query) {:id actor-id})))
+          (with-redefs [db/query-auth-proof! (fn ^:async verify-at-proof [q]
+                                              (when (= q query)
+                                                (await (js/Promise.resolve nil))
+                                                (@after-proof)
+                                                {:id actor-id}))
+                        secrets/now #(deref clock)
                         identity/current-actor-state actor-state
                         identity/with-current-actor-state! (fn ^:async with-fixture-state [f]
                                                             {:result (await (f (actor-state)))})
@@ -296,11 +324,16 @@
             (routes/register-mailbox-routes! app)
             (let [url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)
                   base {:url url :signal (.-signal controller)}]
-              (if bound-bootstrap?
+              (case scenario
+                :bound-bootstrap
                 (await (verify-bound-bootstrap! base {:grok grok :grok-key grok-key :codex codex :codex-key codex-key
-                                                       :codex-token codex-token :root root :actor-ledger actor-ledger
-                                                       :opt-in opt-in}))
-                (await (roundtrip! base grok-key grok codex-token)))))))
+                                                     :codex-token codex-token :root root :actor-ledger actor-ledger
+                                                     :opt-in opt-in}))
+                :proof-timing
+                (await (verify-live-authority-after-proof! base {:codex-token codex-token :root root :codex codex
+                                                                :actor-ledger actor-ledger :clock clock
+                                                                :after-proof after-proof}))
+                :roundtrip (await (roundtrip! base grok-key grok codex-token)))))))
       (finally
         (js/clearTimeout deadline)
         (.abort controller)
@@ -309,12 +342,18 @@
 
 (deftest bootstrap-and-bound-at-actors-deliver-over-native-sse
   (async done
-    (-> (verify-native-stream! false)
+    (-> (verify-native-stream! :roundtrip)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
 
 (deftest explicitly-pinned-bootstrap-preserves-the-at-mailbox-and-invalidates-old-streams
   (async done
-    (-> (verify-native-stream! true)
+    (-> (verify-native-stream! :bound-bootstrap)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(deftest mailbox-rechecks-expiry-and-tree-after-live-at-proof
+  (async done
+    (-> (verify-native-stream! :proof-timing)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
