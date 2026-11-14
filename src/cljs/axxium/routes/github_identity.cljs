@@ -266,40 +266,48 @@
   (when (and mailbox-did (configured?))
     (get (gi/mailbox-bindings (current-actor-state)) mailbox-did)))
 
-(defn- mailbox-bootstrap-node?
+(defn- mailbox-bootstrap-address
   [st did]
-  (let [root-did (:root-did (root-binding))]
-    (and (gi/active-owner-delegation? st root-did did)
-         (gi/live? st did (js/Date.))
-         (let [kind (gi/kind-of st did)]
-           (or (and (= :session kind) (gi/lease-of st did))
-               (and (contains? #{:agent :bot} kind)
-                    (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did))))
-         (let [bindings (gi/mailbox-bindings st)]
-           (and (not (contains? bindings did))
-                (not-any? #{did} (vals bindings)))))))
+  (when (and (gi/active-owner-delegation? st (:root-did (root-binding)) did)
+             (gi/live? st did (js/Date.)))
+    (let [kind (gi/kind-of st did)
+          bindings (gi/mailbox-bindings st)
+          pinned (get (cfg/get-in-config [:mailbox/bound-bootstrap-bindings]) did)
+          agent? (contains? #{:agent :bot} kind)]
+      (when-not (contains? bindings did)
+        (if pinned
+          (when (and agent? (not (gi/actor-node st pinned))
+                     (= [pinned] (into [] (keep (fn [[mailbox actor]] (when (= did actor) mailbox))) bindings)))
+            (when-let [generation (gi/mailbox-binding-generation st pinned)]
+              {:address pinned :generation generation}))
+          (when (and (not-any? #{did} (vals bindings))
+                     (or (and (= :session kind) (gi/lease-of st did))
+                         (and agent? (contains? (cfg/get-in-config [:mailbox/bootstrap-actor-dids]) did))))
+            {:address did}))))))
 
 (defn node-proof
-  "Authenticate an eligible child of the configured owner at its own unbound DID."
+  "Authenticate a child of the configured owner at its admitted mailbox address."
   [did key]
   (when (and (string? did) (string? key) (configured?))
     (let [st (current-actor-state)]
-      (when (and (mailbox-bootstrap-node? st did) (mcp/authenticate st did key))
-        (let [digest (gi/bootstrap-digest st did)]
-          (when-let [p (principal/from-actor-node did)]
-            {:principal p :cred-id (pr-str ["actor-node" did digest]) :node/digest digest}))))))
+      (when-let [{:keys [address generation]} (mailbox-bootstrap-address st did)]
+        (when (mcp/authenticate st did key)
+          (let [digest (gi/bootstrap-digest st did)
+                binding (cond-> ["actor-node" did digest] generation (conj address generation))]
+            (when-let [p (principal/from-actor-node did address)]
+              (cond-> {:principal p :cred-id (pr-str binding) :node/digest digest}
+                generation (assoc :node/mailbox-generation generation)))))))))
 
 (defn node-proof-active?
-  "Recheck current generation, configured owner delegation, liveness and the
-   unbound address. Long-lived agents also need a current opt-in."
-  [{:keys [principal] :node/keys [digest]}]
-  (let [st (current-actor-state)
-        did (:auth/did principal)]
-    (boolean
-     (and digest (= :actor-node (:auth/method principal))
-          (= did (principal/address principal))
-          (mailbox-bootstrap-node? st did)
-          (= digest (gi/bootstrap-digest st did))))))
+  "Recheck current credential, owner, liveness, and exact mailbox incarnation."
+  ([proof] (node-proof-active? (current-actor-state) proof))
+  ([st {:keys [principal] :node/keys [digest mailbox-generation]}]
+   (let [did (:auth/did principal)
+         {:keys [address generation]} (mailbox-bootstrap-address st did)]
+     (boolean (and digest (= :actor-node (:auth/method principal))
+                   (= address (principal/address principal))
+                   (= generation mailbox-generation)
+                   (= digest (gi/bootstrap-digest st did)))))))
 
 (defn actor-node?
   "True when `did` names a node of the identity tree."
