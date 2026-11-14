@@ -90,14 +90,40 @@
           (finally (fs/closeSync fd)))))
     after))
 
-(defn- with-private-file [path expected flags f]
+(defn- with-private-file [path expected flags file-error f]
   (let [fd (fs/openSync path (bit-or flags (.-O_NOFOLLOW fs/constants) (.-O_NONBLOCK fs/constants)))]
     (try
       (let [stat (fs/fstatSync fd)]
         (when-not (and (private-stat? stat) (same-file? stat expected))
-          (throw (private-file-error)))
+          (throw (file-error)))
         (f fd stat))
       (finally (fs/closeSync fd)))))
+
+(defn- with-drive-ledger [path expected-events mode f]
+  (let [expected-stat (fs/lstatSync path)
+        invalid-file #(ex-info "Drive ledger must be a service-owned regular 0600 file" {})]
+    (when-not (private-stat? expected-stat)
+      (throw (invalid-file)))
+    (with-private-file path expected-stat mode invalid-file
+      (fn [fd _]
+        (let [{:keys [events tail-bytes]} (decode-ledger (fs/readFileSync fd "utf8"))]
+          (when-not (and (nil? tail-bytes) (= expected-events events))
+            (throw (ex-info "Drive ledger changed before upload" {})))
+          (f fd))))))
+
+(defn sync-drive-ledger!
+  "Durably confirm the exact reservations visible in a pre-provisioned private Drive ledger."
+  [path expected-events]
+  (with-drive-ledger path expected-events (.-O_RDWR fs/constants) fs/fsyncSync))
+
+(defn append-drive-batch!
+  "Append to the verified existing Drive ledger without O_CREAT."
+  [path before after]
+  (with-drive-ledger path before (bit-or (.-O_RDWR fs/constants) (.-O_APPEND fs/constants))
+    (fn [fd]
+      (let [batch (subvec (vec after) (count before))]
+        (when (seq batch) (append-text! fd (edn-lines/export-lines batch)))
+        after))))
 
 (defn private-ledger-storage
   "Pin an existing private mailbox file. Every load and append checks the
@@ -116,7 +142,7 @@
                         {:reason :mailbox-ledger-shared-file}))))
     {:load! (fn [path]
               (with-private-file
-                path expected (.-O_RDWR fs/constants)
+                path expected (.-O_RDWR fs/constants) private-file-error
                 (fn [fd stat]
                   (require-mailbox-capacity! (.-size stat) mailbox-capacity-bytes)
                   (let [{:keys [events tail-bytes]} (decode-mailbox-ledger (fs/readFileSync fd))]
@@ -125,7 +151,7 @@
      :append! (fn [path before after]
                 (let [batch (subvec (vec after) (count before))]
                   (with-private-file
-                    path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants))
+                    path expected (bit-or (.-O_WRONLY fs/constants) (.-O_APPEND fs/constants)) private-file-error
                     (fn [fd stat]
                       (when (seq batch)
                         (let [frame (str (pr-str (into [mailbox-batch-tag] batch)) "\n")

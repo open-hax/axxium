@@ -11,7 +11,8 @@
    ctx = {:principal (law.principal) :session/id :audience :now}. The
    principal comes from a verified AT Protocol sign-in or service token;
    nil means anonymous and every tool refuses."
-  (:require [axxium.domain.ledger :as ledger]
+  (:require [axxium.domain.authority :as authority]
+            [axxium.domain.ledger :as ledger]
             [axxium.domain.mailbox :as mailbox]
             [axxium.domain.mailbox-directory :as directory]
             [axxium.domain.policy :as policy]
@@ -95,6 +96,15 @@
   [lg ctx]
   (and (not (session-error lg ctx))
        (true? (:session/push? (session lg (:session/id ctx))))))
+
+(defn existing-inbox?
+  "An existing mailbox must still be owned by its address and allow self-read."
+  [lg owner now]
+  (let [st (state/fold lg)
+        box (mailbox/stream owner)
+        {:resource/keys [kind] :as registered} (get-in st [:resources box])]
+    (and (= :resource/mailbox kind) (= owner (:resource/owner registered))
+         (authority/allowed? st owner box :read now))))
 
 (def ^:private secret-key
   #"(?i)(token|secret|password|passwd|cookie|authorization|api[_-]?key|credential|callback|private[_-]?key)")
