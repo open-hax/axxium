@@ -31,6 +31,9 @@
 
 (deftest request-translation
   (is (= {:error "unknown op"} (admin/request->call alice {:op "drop-table"} edn/read-one host)))
+  (is (= {"example/issues" "write" "issues" "read"}
+         (:policy/permissions (admin/json->policy (assoc team-json :permissions
+                                                          {:example/issues "write" :issues "read"})))))
   (is (:error (admin/request->call alice {:op "create" :slug "Bad Slug" :kind "bot" :policy team-json} edn/read-one host)))
   (is (:error (admin/request->call alice {:op "create" :slug "x" :kind "human" :policy team-json} edn/read-one host))
       "a root cannot be created from the portal")
@@ -76,6 +79,69 @@
 (deftest portal-creates-beneath-the-authorized-selected-parent
   (async done
     (-> (selected-parent-creation)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
+(defn- ^:async verify-actor-policy-edits []
+  (let [ids (counter-ids)
+        before (seeded ids)
+        policy-json (fn [lg did] (admin/policy->json (gi/policy-of (state/fold lg) did)))
+        admin! (fn [lg caller req]
+                 (mcp/admin {:ledger lg :ids ids} caller req {:read-edn edn/read-one :host host}))
+        edit (fn [lg did desired]
+               {:op "set-policy" :did did :policy desired :expectedPolicy (policy-json lg did)})
+        leaf (str laptop ":helper")
+        created (await (admin! before laptop {:op "create" :slug "helper" :kind "agent" :policy team-json}))
+        lg (:ledger created)
+        grant (assoc team-json :permissions {:issues "write"} :actions ["comment"])
+        request (edit lg leaf grant)]
+    (is (= 200 (:status created)))
+    (doseq [invalid [(dissoc request :expectedPolicy)
+                     (update request :policy dissoc :forbid)
+                     (assoc-in request [:policy :repos] [" "])
+                     (assoc-in request [:policy :repos] "example-org/website")
+                     (assoc-in request [:policy :permissions] {:issues nil})]]
+      (is (= 400 (:status (await (admin! lg alice invalid))))))
+    (doseq [[caller denied] [[leaf request]
+                              [(did "alice:bots") request]
+                              [alice (edit lg alice team-json)]
+                              [alice (assoc-in request [:policy :repos] ["*"])]
+                              [alice (assoc-in request [:policy :permissions] {:example/issues "write"})]
+                              [alice (assoc-in request [:policy :forbid] [])]]]
+      (let [out (await (admin! lg caller denied))]
+        (is (= 403 (:status out)))
+        (is (= (state/fold lg) (state/fold (:ledger out))))))
+    (is (not (contains? mcp/agent-tools "actor_set_policy")))
+    (let [{:keys [status ledger]} (await (admin! lg laptop request))
+          st (state/fold ledger)
+          stale (await (admin! ledger alice request))]
+      (is (= 200 status))
+      (is (= (admin/json->policy grant) (gi/policy-of st leaf)))
+      (is (= laptop (gi/parent-of st leaf)))
+      (is (= (gi/policy-of (state/fold lg) laptop) (gi/policy-of st laptop)))
+      (is (= 409 (:status stale)))
+      (is (= {:error "policy-changed"} (:body stale)))
+      (is (= st (state/fold (:ledger stale)))))
+    (let [suspended (await (admin! before alice {:op "suspend" :did agent}))
+          narrowed-too-soon (await (admin! (:ledger suspended) alice (edit (:ledger suspended) laptop team-json)))
+          leaf-edit (await (admin! (:ledger suspended) alice (edit (:ledger suspended) agent team-json)))
+          parent-edit (await (admin! (:ledger leaf-edit) alice (edit (:ledger leaf-edit) laptop team-json)))
+          revoked (await (admin! before alice {:op "revoke" :did agent}))
+          on-revoked (await (admin! (:ledger revoked) alice (edit (:ledger revoked) agent team-json)))
+          clear (assoc team-json :repos [] :permissions {} :actions [])
+          clear-parent (await (admin! (:ledger revoked) alice (edit (:ledger revoked) laptop clear)))]
+      (is (= 409 (:status narrowed-too-soon)) "Suspension does not remove a descendant's stored policy.")
+      (is (= {:error "descendant-policy-conflict"} (:body narrowed-too-soon)))
+      (is (= (state/fold (:ledger suspended)) (state/fold (:ledger narrowed-too-soon))))
+      (is (= [200 200] (mapv :status [leaf-edit parent-edit])))
+      (is (= 403 (:status on-revoked)))
+      (is (= 200 (:status clear-parent)))
+      (is (= (admin/json->policy clear) (gi/policy-of (state/fold (:ledger clear-parent)) laptop)))
+      (is (policy/decision-before-effect? (:ledger parent-edit))))))
+
+(deftest portal-editing-preserves-policy-bounds-and-checks-the-current-value
+  (async done
+    (-> (verify-actor-policy-edits)
         (.catch (fn [error] (is false (pr-str error))))
         (.finally done))))
 

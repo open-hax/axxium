@@ -24,10 +24,17 @@ export function treeRows(actors) {
 const list = s => String(s || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
 
 // "contents=write, issues=read" -> {contents:"write", issues:"read"}
-export function parsePermissions(text) {
+export function parsePermissions(text, strict = false) {
+  const entries = list(text).map(pair => pair.split('='));
+  if (strict) {
+    if (entries.some(parts => parts.length !== 2 || parts.some(part => !part)) ||
+        new Set(entries.map(([name]) => name)).size !== entries.length) {
+      throw new Error('Enter each permission once as name=level.');
+    }
+    return Object.fromEntries(entries);
+  }
   const out = {};
-  for (const pair of list(text)) {
-    const [k, v] = pair.split('=');
+  for (const [k, v] of entries) {
     if (k && v) out[k] = v;
   }
   return out;
@@ -38,8 +45,8 @@ export function formatPermissions(perms) {
 }
 
 // Form fields -> policy JSON for POST /api/identity/admin.
-export function policyFromFields({ repos, permissions, actions, forbid }) {
-  return { repos: list(repos), permissions: parsePermissions(permissions),
+export function policyFromFields({ repos, permissions, actions, forbid }, { strictPermissions = false } = {}) {
+  return { repos: list(repos), permissions: parsePermissions(permissions, strictPermissions),
            actions: list(actions), forbid: list(forbid) };
 }
 

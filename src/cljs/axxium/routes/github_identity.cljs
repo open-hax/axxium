@@ -163,6 +163,13 @@
           (println "GitHub manifest conversion failed:" (:status (ex-data err)))
           (http/send! reply 502 {:error "GitHub manifest conversion failed"}))))))
 
+(defn- tool-response [out]
+  (let [{:github/keys [http-status provider-request-id target-kind phase] :as diagnostics}
+        (law/comment-provider-diagnostics (:github/diagnostics out))]
+    (cond-> {:edn (pr-str (dissoc out :ledger :agent/status :github/diagnostics))}
+      diagnostics (assoc :github (cond-> {:http_status http-status :target_kind (name target-kind) :phase (name phase)}
+                                   provider-request-id (assoc :request_id provider-request-id))))))
+
 (defn- ^:async mcp! [req reply context]
   (if-not (configured?)
     (http/send! reply 503 {:error "GitHub identities are not configured on this Axxium"})
@@ -193,7 +200,7 @@
                                 (-> out (dissoc :result) (assoc :error delivery-error))
                                 out)))))
               status (case (:error out) :unauthenticated 403 :session-unavailable 503 nil 200 400)]
-          (http/send-secret! reply status {:edn (pr-str (dissoc out :ledger))}))))))
+          (http/send-secret! reply status (tool-response out)))))))
 
 (defn ^:async agent-operation
   "Authenticate and execute an agent tool against one serialized ledger snapshot."
@@ -223,7 +230,7 @@
           status (:agent/status out)]
       (if-let [error (:agent/error out)]
         (http/send! reply status {:error error})
-        (http/send-secret! reply status {:edn (pr-str (dissoc out :ledger :agent/status))})))))
+        (http/send-secret! reply status (tool-response out))))))
 
 (defn- host [] (str/replace (base-url) #"^https?://" ""))
 

@@ -52,7 +52,7 @@
                (gi/live? st did (js/Date.)))
       did)))
 
-(def tools #{"actor_list" "actor_provision" "actor_suspend" "actor_resume" "actor_revoke" "github_comment"
+(def tools #{"actor_list" "actor_provision" "actor_set_policy" "actor_suspend" "actor_resume" "actor_revoke" "github_comment"
              "credential_provision" "credential_rotate" "credential_revoke" "token_for"
              "bootstrap_issue" "credentials_self" "subtree_export" "subtree_import"
              "mailbox_bind" "mailbox_unbind"
@@ -90,13 +90,19 @@
       (await (gh/revoke-installation-token! fetch token (js/AbortSignal.timeout 2000)))
       (catch :default _ false))))
 
+(defn- comment-error [error diagnostics]
+  (cond-> {:error error} diagnostics (assoc :github/diagnostics diagnostics)))
+
 (defn- ^:async deliver-comment!
-  [{:keys [fetch ids checkpoint! reauthorize!] :as deps} lg st caller request fingerprint credential]
+  [{:keys [fetch ids checkpoint! reauthorize!] :as deps} lg st caller request fingerprint
+   {:keys [credential targets]}]
   (let [{:actor/keys [did] :github/keys [repo number body request-id]} request
         {app-id :github/app-id app-slug :github/app-slug installation :github/installation-id}
         (:resource/metadata credential)
         metadata-token (volatile! nil)
+        read-token (volatile! nil)
         write-token (volatile! nil)
+        response-diagnostics (volatile! nil)
         intended? (volatile! false)
         signal (js/AbortSignal.timeout 20000)]
     (try
@@ -104,31 +110,54 @@
                     (private-key deps did credential))]
         (let [jwt (gh/app-jwt app-id pem (js/Date.now))
               scope (await (gh/verify-installation-scope fetch jwt app-id installation
-                                                         (comment/scope repo) signal
-                                                         {:expected-app-slug app-slug
+                                                         {:scope/repos [repo] :scope/permissions {}} signal
+                                                         {:candidate-permissions (mapv comment/target-permissions targets)
+                                                          :expected-app-slug app-slug
                                                           :on-metadata-token #(vreset! metadata-token %)}))
-              {:keys [token]} (await (gh/mint-installation-token fetch jwt scope comment/comment-permissions signal
-                                                                 #(vreset! write-token %)))]
-          (if-not (and (await (reauthorize!))
-                       (comment/eligible-credential st caller request (:at (ids))))
+              candidates (:candidate-permissions scope)
+              read-permissions (into {} (map #(vector % "read")) (mapcat keys candidates))
+              probe (await (gh/mint-installation-token fetch jwt scope read-permissions signal
+                                                        #(vreset! read-token %)))
+              target (await (gh/comment-target! fetch (:token probe) repo number read-permissions signal))
+              write-permissions (comment/target-permissions target)]
+          (cond
+            (nil? target) {:error :github-unavailable}
+            (not (some #{write-permissions} candidates)) {:error :forbidden}
+            (not (and (await (reauthorize!))
+                      (comment/eligible-credential st caller request (:at (ids)) target)))
             {:error :unauthenticated}
-            (let [{:keys [ledger effect]} (comment/decision lg st caller request fingerprint true (ids))]
-              (checkpoint! ledger)
-              (vreset! intended? true)
-              (or (when (and (await (reauthorize!))
-                             (comment/eligible-credential st caller request (:at (ids))))
-                    (when-let [receipt (await (gh/post-issue-comment! fetch token repo number body app-id app-slug signal))]
-                      (let [result (assoc receipt :github/request-id request-id :github/repo repo :github/number number
-                                          :actor/did did)]
-                        (checkpoint! (comment/record-receipt ledger caller effect result (ids)))
-                        {:result result})))
-                  {:error :comment-outcome-unknown}))))
+            :else
+            (let [{:keys [token]} (await (gh/mint-installation-token fetch jwt scope write-permissions signal
+                                                                    #(vreset! write-token %)))]
+              (if-not (and (await (reauthorize!))
+                           (comment/eligible-credential st caller request (:at (ids)) target))
+                {:error :unauthenticated}
+                (let [{:keys [ledger effect]} (comment/decision lg st caller request fingerprint true target (ids))]
+                  (checkpoint! ledger)
+                  (vreset! intended? true)
+                  (if-not (and (await (reauthorize!))
+                               (comment/eligible-credential st caller request (:at (ids)) target))
+                    {:error :comment-outcome-unknown}
+                    (let [{:keys [outcome diagnostics receipt]} (await (gh/post-issue-comment! fetch token repo number
+                                                                       body app-id app-slug target signal))
+                          evidence (merge diagnostics receipt
+                                          {:github/request-id request-id :github/repo repo :github/number number
+                                           :actor/did did})]
+                      (vreset! response-diagnostics diagnostics)
+                      (when (or receipt diagnostics)
+                        (checkpoint! (comment/record-provider-response ledger caller effect outcome evidence (ids))))
+                      (case outcome
+                        :posted {:result evidence}
+                        :rejected (comment-error :comment-provider-rejected diagnostics)
+                        (comment-error :comment-outcome-unknown diagnostics)))))))))
         {:error :key-unavailable})
       (catch :default error
-        {:error (if @intended? :comment-outcome-unknown
-                    (or (:axxium/error (ex-data error)) :github-unavailable))})
+        (if @intended?
+          (comment-error :comment-outcome-unknown @response-diagnostics)
+          {:error (or (:axxium/error (ex-data error)) :github-unavailable)}))
       (finally
         (await (js/Promise.all #js [(revoke-comment-token! fetch @metadata-token)
+                                   (revoke-comment-token! fetch @read-token)
                                    (revoke-comment-token! fetch @write-token)]))))))
 
 (defn- ^:async github-comment!
@@ -139,16 +168,22 @@
     (let [request (-> input (update :github/repo str/lower-case) (update :github/request-id str/lower-case))
           fingerprint (digest (pr-str (into (sorted-map) request)))
           prior (comment/previous-operation lg request)
-          credential (comment/eligible-credential st caller request (:at (ids)))]
+          ;; Before target typing, every comment used Issues:write. Keep that
+          ;; admission requirement when reading a legacy intent or receipt.
+          target (when prior (or (:target prior) :issue))
+          admission (comment/eligible-credential st caller request (:at (ids)) target)]
       (cond
-        (not credential)
-        {:error :forbidden :ledger (:ledger (comment/decision lg st caller request fingerprint false (ids)))}
+        (not admission)
+        {:error :forbidden :ledger (:ledger (comment/decision lg st caller request fingerprint false nil (ids)))}
 
         (and prior (not= fingerprint (:fingerprint prior))) {:error :comment-request-conflict}
         prior (if (await (reauthorize!))
-                (if-let [receipt (:receipt prior)] {:result receipt} {:error :comment-outcome-unknown})
+                (cond
+                  (:receipt prior) {:result (:receipt prior)}
+                  (:provider-rejected? prior) (comment-error :comment-provider-rejected (:diagnostics prior))
+                  :else (comment-error :comment-outcome-unknown (:diagnostics prior)))
                 {:error :unauthenticated})
-        :else (await (deliver-comment! deps lg st caller request fingerprint credential))))))
+        :else (await (deliver-comment! deps lg st caller request fingerprint admission))))))
 
 (defn- ^:async token-for! [{:keys [fetch ids cache now] :or {now #(js/Date.now)} :as deps} lg st caller
                            {:actor/keys [did] :credential/keys [label] :as args}]
@@ -184,6 +219,11 @@
                          (effect-out (gi/provision-actor lg st caller (get a :actor/parent caller)
                                                            did (:actor/name a) (:actor/policy a)
                                                            (or (:actor/kind a) :bot) (ids))))
+      "actor_set_policy"
+      (let [{:keys [ledger error] :as out}
+            (gi/set-policy lg st caller did (:actor/policy a) (:actor/expected-policy a) (ids))]
+        (js/Promise.resolve
+         (if error {:ledger ledger :error error} (effect-out out))))
       "actor_suspend" (js/Promise.resolve (effect-out (gi/suspend lg st caller did (ids))))
       "actor_resume" (js/Promise.resolve (effect-out (gi/resume lg st caller did (ids))))
       "actor_revoke" (js/Promise.resolve (effect-out (gi/revoke-actor lg st caller did (ids))))
@@ -294,6 +334,8 @@
            (and (= tool "mailbox_unbind") (string? (:mailbox/did a)))
            (string? (:actor/did a)))
        (or (not= "mailbox_bind" tool) (string? (:mailbox/did a)))
+       (or (not= "actor_set_policy" tool)
+           (and (law/valid-policy? (:actor/policy a)) (law/valid-policy? (:actor/expected-policy a))))
        (or (not= "actor_provision" tool) (not (contains? a :actor/parent)) (string? (:actor/parent a)))
        (or (not (#{"credential_provision" "credential_rotate" "credential_revoke" "token_for"} tool))
            (string? (:credential/label a)))))
@@ -320,7 +362,10 @@
         (.then (call deps {:actor caller} tool args)
                (fn [out]
                  (if-let [e (:error out)]
-                   {:status (if (#{:forbidden :unauthenticated} e) 403 400)
+                   {:status (cond
+                              (#{:forbidden :unauthenticated} e) 403
+                              (#{:policy-changed :descendant-policy-conflict} e) 409
+                              :else 400)
                     :body {:error (name e)} :ledger (:ledger out)}
                    (let [st (state/fold (or (:ledger out) (:ledger deps)))
                          pols (into {} (map (fn [a] [(:actor/did a) (gi/policy-of st (:actor/did a))]))
