@@ -304,7 +304,7 @@
         (.then (fn []
                  (cond (nil? actor) (refuse :unauthenticated)
                        (not (contains? tools tool)) (refuse :unknown-tool)
-                             (and (= tool "github_comment") (not (comment/valid-request? args))) (refuse :invalid)
+                       (and (= tool "github_comment") (not (law/valid-comment-request? args))) (refuse :invalid)
                        (not (valid? tool args)) (refuse :invalid)
                        :else (run deps ledger st actor tool args))))
         (.catch (fn [e] {:error (or (:axxium/error (ex-data e)) :github-unavailable)})))))

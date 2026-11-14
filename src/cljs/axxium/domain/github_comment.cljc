@@ -3,25 +3,10 @@
   (:require [axxium.domain.github-identity :as identity]
             [axxium.domain.ledger :as ledger]
             [axxium.domain.policy :as policy]
-            [axxium.law.event :as event]
             [axxium.law.github-identity :as law]
             [clojure.string :as str]))
 
 (def comment-permissions {"issues" "write"})
-
-(defn valid-request?
-  "Accept a single exact target, one idempotency key and a bounded comment."
-  [{:github/keys [repo number body request-id] :as request}]
-  (and (map? request)
-       (= (set (keys request)) #{:actor/did :credential/label :github/repo :github/number :github/body :github/request-id})
-       (string? (:actor/did request)) (<= 1 (count (:actor/did request)) 1024)
-       (string? (:credential/label request)) (<= 1 (count (:credential/label request)) 128)
-       (string? repo) (<= (count repo) 217)
-       (re-matches #"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+" repo)
-       (not (#{"." ".."} (last (str/split repo #"/"))))
-       (integer? number) (<= 1 number 2147483647)
-       (event/uuid-string? request-id)
-       (string? body) (not (str/blank? body)) (<= (count body) 16384)))
 
 (defn scope [repo]
   {:scope/repos [repo] :scope/permissions comment-permissions})

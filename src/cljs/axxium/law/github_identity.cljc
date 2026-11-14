@@ -17,7 +17,8 @@
    A credential is generic over :credential/type; :github-app is the first
    (GitHub blocks automated user sign-up, so each bot is its own App and
    shows as <slug>[bot]). :github-pat and :ssh-key share the same tree."
-  (:require [clojure.set :as set]
+  (:require [axxium.law.event :as event]
+            [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]))
 
@@ -129,6 +130,20 @@
   (and (contains? (:policy/actions policy) action)
        (not (and own? (= action :approve) (contains? (:policy/forbid policy) :approve-own)))
        (not (and own? (= action :merge) (contains? (:policy/forbid policy) :merge-own)))))
+
+(defn valid-comment-request?
+  "Accept a single exact target, one idempotency key and a bounded comment."
+  [{:github/keys [repo number body request-id] :as request}]
+  (and (map? request)
+       (= (set (keys request)) #{:actor/did :credential/label :github/repo :github/number :github/body :github/request-id})
+       (string? (:actor/did request)) (<= 1 (count (:actor/did request)) 1024)
+       (string? (:credential/label request)) (<= 1 (count (:credential/label request)) 128)
+       (string? repo) (<= (count repo) 217)
+       (re-matches #"[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+" repo)
+       (not (#{"." ".."} (last (str/split repo #"/"))))
+       (integer? number) (<= 1 number 2147483647)
+       (event/uuid-string? request-id)
+       (string? body) (not (str/blank? body)) (<= (count body) 16384)))
 
 ;; ------------------------------------------------------------ app manifest
 
