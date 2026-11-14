@@ -31,6 +31,9 @@
 
 (deftest request-translation
   (is (= {:error "unknown op"} (admin/request->call alice {:op "drop-table"} edn/read-one host)))
+  (is (= {"example/issues" "write" "issues" "read"}
+         (:policy/permissions (admin/json->policy (assoc team-json :permissions
+                                                          {:example/issues "write" :issues "read"})))))
   (is (:error (admin/request->call alice {:op "create" :slug "Bad Slug" :kind "bot" :policy team-json} edn/read-one host)))
   (is (:error (admin/request->call alice {:op "create" :slug "x" :kind "human" :policy team-json} edn/read-one host))
       "a root cannot be created from the portal")
@@ -103,6 +106,7 @@
                               [(did "alice:bots") request]
                               [alice (edit lg alice team-json)]
                               [alice (assoc-in request [:policy :repos] ["*"])]
+                              [alice (assoc-in request [:policy :permissions] {:example/issues "write"})]
                               [alice (assoc-in request [:policy :forbid] [])]]]
       (let [out (await (admin! lg caller denied))]
         (is (= 403 (:status out)))

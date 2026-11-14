@@ -35,7 +35,7 @@
   "{repos [..] permissions {name level} actions [..] forbid [..]} -> Policy."
   [{:keys [repos permissions actions forbid]}]
   {:policy/repos (strs repos)
-   :policy/permissions (into {} (map (fn [[k v]] [(name k) (str v)])) permissions)
+   :policy/permissions (into {} (map (fn [[k v]] [(if (keyword? k) (subs (str k) 1) (name k)) (str v)])) permissions)
    :policy/actions (kws actions)
    :policy/forbid (kws forbid)})
 
