@@ -126,6 +126,19 @@
               (is (= status (:status out)))
               (is (= {:error error} (edn/read-one (get-in out [:body :edn]))))
               (is (not= before @durable) "the decision ledger survives discarded token delivery")))))
+      (reset! human-live? true)
+      (with-redefs [mcp/call (constantly {:error :comment-provider-rejected
+                                          :github/diagnostics {:github/http-status 403 :github/phase :comment-post
+                                                               :github/target-kind :pull-request
+                                                               :github/provider-request-id "ab12:cd34:ef56"
+                                                               :private "never render"}})]
+        (let [out (await (invoke! "/api/github/mcp" operator "verified-session"
+                                  {:tool "github_comment" :arguments "{}"}))]
+          (is (= 400 (:status out)))
+          (is (= {:edn "{:error :comment-provider-rejected}"
+                  :github {:http_status 403 :phase "comment-post" :target_kind "pull-request"
+                           :request_id "AB12:CD34:EF56"}}
+                 (:body out)))))
       (reset! binding nil)
       (is (= 200 (:status (await (call! unrelated "other-session" {:op "list"}))))
           "without a binding, the existing canonical DID behavior remains"))))

@@ -145,6 +145,16 @@
        (event/uuid-string? request-id)
        (string? body) (not (str/blank? body)) (<= (count body) 16384)))
 
+(defn comment-provider-diagnostics
+  "Admit only safe GitHub comment response metadata for storage or output."
+  [{:github/keys [phase target-kind http-status provider-request-id]}]
+  (when (and (= :comment-post phase) (contains? #{:issue :pull-request} target-kind)
+             (integer? http-status) (<= 100 http-status 599))
+    (cond-> {:github/phase phase :github/target-kind target-kind :github/http-status http-status}
+      (and (string? provider-request-id)
+           (re-matches #"[A-Fa-f0-9]{1,16}(?::[A-Fa-f0-9]{1,16}){2,7}" provider-request-id))
+      (assoc :github/provider-request-id (str/upper-case provider-request-id)))))
+
 ;; ------------------------------------------------------------ app manifest
 
 (def manifest-callback-path "/api/github/manifest/callback")

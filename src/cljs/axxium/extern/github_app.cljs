@@ -133,7 +133,7 @@
   ([fetch jwt app-id installation-id scope signal]
    (await (verify-installation-scope fetch jwt app-id installation-id scope signal nil)))
   ([fetch jwt app-id installation-id {:scope/keys [repos permissions]} signal
-    {:keys [on-metadata-token expected-app-slug]}]
+    {:keys [on-metadata-token expected-app-slug candidate-permissions]}]
    (let [app-id (credential-id app-id)
          installation-id (credential-id installation-id)
          names (vec (distinct (map str/lower-case repos)))
@@ -144,18 +144,22 @@
      (let [{:keys [id app_id app_slug account target_id target_type suspended_at] granted :permissions}
            (await (github-get fetch (str api "/app/installations/" installation-id) jwt signal))
            owner-login (folded-name (:login account))
-           owner-id (:id account)]
+           owner-id (:id account)
+           candidates (when candidate-permissions
+                        (filterv #(installation-grants-scope? granted %) candidate-permissions))]
        (when-not (and (= installation-id id) (= app-id app_id)
                       (#{"Organization" "User"} target_type)
                       (nil? suspended_at) (valid-id? owner-id) (= owner-id target_id)
                       (or (nil? expected-app-slug) (= (folded-name expected-app-slug) (folded-name app_slug)))
                       (installation-grants-scope? granted permissions)
+                      (or (nil? candidates) (seq candidates))
                       (seq owner-login) (every? #(= owner-login (first %)) parts))
          (reject-scope!))
        (let [scope {:installation-id installation-id :owner-id owner-id
                     :owner-login owner-login :names names}
              proof (await (scoped-token fetch jwt scope {:repositories (mapv second parts)} {} signal on-metadata-token))]
-         (assoc scope :repository-ids (:repository-ids proof)))))))
+         (cond-> (assoc scope :repository-ids (:repository-ids proof))
+           candidates (assoc :candidate-permissions candidates)))))))
 
 (defn ^:async mint-installation-token
   "Mint with verified immutable repository IDs and admit only a matching result."
@@ -169,9 +173,46 @@
      (when-not (= repository-ids (:repository-ids result)) (reject-scope!))
      (dissoc result :repository-ids))))
 
+(defn ^:async comment-target!
+  "Identify the exact GitHub conversation with a one-repository read token.
+   Check the PR directly when authorized. Only a 404 permits the separate
+   issues read, when that is also authorized."
+  [fetch token repo number read-permissions signal]
+  (let [repo-url (str api "/repos/" repo)
+        issue-url (str repo-url "/issues/" number)
+        pr-url (str repo-url "/pulls/" number)
+        opts #js {:method "GET" :headers (headers (str "Bearer " token)) :redirect "error" :signal signal}
+        pr (when (contains? read-permissions "pull_requests") (await (fetch pr-url opts)))]
+    (cond
+      (and pr (= 200 (.-status pr)))
+      (let [target (await (json pr))]
+        (when (and (= number (:number target))
+                   (= pr-url (folded-name (:url target)))
+                   (= issue-url (folded-name (:issue_url target)))
+                   (= repo-url (folded-name (get-in target [:base :repo :url]))))
+          :pull-request))
+
+      (and (contains? read-permissions "issues") (or (nil? pr) (= 404 (.-status pr))))
+      (let [issue (await (fetch issue-url opts))]
+        (when (= 200 (.-status issue))
+          (let [target (await (json issue))]
+            (when (and (= number (:number target))
+                       (= issue-url (folded-name (:url target)))
+                       (= repo-url (folded-name (:repository_url target))))
+              (if (contains? target :pull_request)
+                (when (and (nil? pr) (= pr-url (folded-name (get-in target [:pull_request :url])))) :pull-request)
+                :issue)))))
+      :else nil)))
+
+(defn- post-diagnostics [response target]
+  (law/comment-provider-diagnostics
+   {:github/phase :comment-post :github/target-kind target :github/http-status (.-status response)
+    :github/provider-request-id (some-> response .-headers (.get "x-github-request-id"))}))
+
 (defn ^:async post-issue-comment!
-  "Create one conversation comment and validate GitHub's native response."
-  [fetch token repo number body app-id app-slug signal]
+  "Post exactly once. Keep sanitized response metadata even if receipt decoding
+   or verification fails. Never parse a rejection body."
+  [fetch token repo number body app-id app-slug target signal]
   (let [path (str "/repos/" repo "/issues/" number)
         response (await (fetch (str api path "/comments")
                                #js {:method "POST"
@@ -179,21 +220,31 @@
                                                (aset "content-type" "application/json"))
                                     :body (js/JSON.stringify #js {:body body})
                                     :redirect "error" :signal signal}))
-        {:keys [id user html_url issue_url performed_via_github_app] created :body} (await (json response))]
-    (when (and (= 201 (.-status response)) (valid-id? id)
-               (= (folded-name issue_url) (folded-name (str api path)))
-               (= body created)
-               (= "Bot" (:type user))
-               (valid-id? (:id user))
-               (= (str (folded-name app-slug) "[bot]") (folded-name (:login user)))
-               (or (nil? performed_via_github_app)
-                   (and (= (credential-id app-id) (:id performed_via_github_app))
-                        (= (folded-name app-slug) (folded-name (:slug performed_via_github_app)))))
-               (contains? #{(str "https://github.com/" repo "/issues/" number "#issuecomment-" id)
-                            (str "https://github.com/" repo "/pull/" number "#issuecomment-" id)}
-                          (folded-name html_url)))
-      {:github/comment-id id :github/comment-url html_url :github/actor (:login user)
-       :github/actor-id (:id user)})))
+        details (post-diagnostics response target)
+        status (:github/http-status details)
+        outcome (if (contains? #{400 401 403 404 410 422 429} status) :rejected :unverified)
+        refused {:outcome outcome :diagnostics details}]
+    (if-not (= 201 status)
+      refused
+      (try
+        (let [{:keys [id user html_url issue_url performed_via_github_app] created :body} (await (json response))]
+          (if (and (valid-id? id)
+                   (= (folded-name issue_url) (folded-name (str api path)))
+                   (= body created)
+                   (= "Bot" (:type user))
+                   (valid-id? (:id user))
+                   (= (str (folded-name app-slug) "[bot]") (folded-name (:login user)))
+                   (or (nil? performed_via_github_app)
+                       (and (= (credential-id app-id) (:id performed_via_github_app))
+                            (= (folded-name app-slug) (folded-name (:slug performed_via_github_app)))))
+                   (contains? #{(str "https://github.com/" repo "/issues/" number "#issuecomment-" id)
+                                (str "https://github.com/" repo "/pull/" number "#issuecomment-" id)}
+                              (folded-name html_url)))
+            {:outcome :posted :diagnostics details
+             :receipt {:github/comment-id id :github/comment-url html_url :github/actor (:login user)
+                       :github/actor-id (:id user)}}
+            refused))
+        (catch :default _ refused)))))
 
 (defn ^:async revoke-installation-token!
   "Best-effort caller-owned cleanup for an internal installation token."
