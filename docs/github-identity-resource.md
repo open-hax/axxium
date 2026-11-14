@@ -104,13 +104,15 @@ routes accept the existing JSON tool envelope with an EDN `arguments` value.
 
 The result contains the comment ID and URL, the verified App bot login, the
 actor DID, and the target and request ID. Retain the original request ID
-across ambiguous responses. Axxium durably records intent before sending the
-comment and stores the provider receipt after validating it. Repeating the
-same request with active authority returns the existing receipt. Reusing an
-ID with different input returns `:comment-request-conflict`. A pending
-intent returns `:comment-outcome-unknown`. Check GitHub for the outcome
-before using a new request ID. Issue and PR review comments are separate
-surfaces. This operation posts only to the issue or PR conversation.
+across ambiguous responses. Axxium durably records intent, then checks the
+caller and actor lease again before sending the comment. It confirms success
+after saving the verified provider receipt. Repeating the same request with
+active authority returns the existing receipt. Reusing an ID with different
+input returns `:comment-request-conflict`. A pending intent returns
+`:comment-outcome-unknown`, including when authority is lost after intent or
+receipt storage fails. Check GitHub for the outcome before using a new request
+ID. Issue and PR review comments are separate surfaces. This operation posts
+only to the issue or PR conversation.
 
 `token_for` also returns `:axxium/marker` (`<!-- axxium-actor:v1 did=… -->`) to
 identify the actor for consumers that record attribution.

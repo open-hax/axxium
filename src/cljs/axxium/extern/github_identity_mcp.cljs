@@ -115,11 +115,14 @@
             (let [{:keys [ledger effect]} (comment/decision lg st caller request fingerprint true (ids))]
               (checkpoint! ledger)
               (vreset! intended? true)
-              (if-let [receipt (await (gh/post-issue-comment! fetch token repo number body app-id app-slug signal))]
-                (let [result (assoc receipt :github/request-id request-id :github/repo repo :github/number number
-                                    :actor/did did)]
-                  {:ledger (comment/record-receipt ledger caller effect result (ids)) :result result})
-                {:error :comment-outcome-unknown}))))
+              (or (when (and (await (reauthorize!))
+                             (comment/eligible-credential st caller request (:at (ids))))
+                    (when-let [receipt (await (gh/post-issue-comment! fetch token repo number body app-id app-slug signal))]
+                      (let [result (assoc receipt :github/request-id request-id :github/repo repo :github/number number
+                                          :actor/did did)]
+                        (checkpoint! (comment/record-receipt ledger caller effect result (ids)))
+                        {:result result})))
+                  {:error :comment-outcome-unknown}))))
         {:error :key-unavailable})
       (catch :default error
         {:error (if @intended? :comment-outcome-unknown

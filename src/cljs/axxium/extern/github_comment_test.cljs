@@ -9,6 +9,7 @@
 
 (def root "did:web:example.invalid:actors:owner")
 (def actor (str root ":codex"))
+(def leased-actor (str actor ":session"))
 (def outsider (str root ":other"))
 (def repo "example/widgets")
 (def request {:actor/did actor :credential/label "github-app" :github/repo repo :github/number 42
@@ -18,16 +19,22 @@
              :policy/actions #{:read :comment}
              :policy/forbid #{:force-push}})
 
-(defn- fixture-state []
+(defn- fixture-state [lease-until]
   (let [counter (atom 100)
+        clock (atom fixture/t1)
         ids (fn [] {:decision-id (fixture/event-uuid (swap! counter inc))
-                    :effect-id (fixture/event-uuid (swap! counter inc)) :at fixture/t1})
+                    :effect-id (fixture/event-uuid (swap! counter inc)) :at @clock})
         seed {:root {:id root :name "Root" :policy policy}
               :nodes [{:id actor :parent root :name "Codex" :policy policy}
                       {:id outsider :parent root :name "Other" :policy policy}]}
         seeded (:ledger (identity/seed-ledger (identity/resolve-seed seed "example.invalid") ids))
+        seeded (if lease-until
+                 (:ledger (identity/open-session seeded (state/fold seeded) actor actor leased-actor
+                                                "Session" policy lease-until @clock (ids)))
+                 seeded)
+        credential-holder (if lease-until leased-actor actor)
         lg (:ledger (identity/provision-credential
-                     seeded (state/fold seeded) root actor "github-app" :github-app
+                     seeded (state/fold seeded) root credential-holder "github-app" :github-app
                      {:credential/key-file "/synthetic"}
                      {:github/app-id 56 :github/app-slug "codex-test" :github/installation-id 78}
                      (ids)))
@@ -39,7 +46,7 @@
                             (when (= (count after) @fail-size)
                               (throw (js/Error. "synthetic append failure")))
                             (reset! durable after))}]
-    {:durable durable :storage storage :fail-size fail-size :ids ids}))
+    {:durable durable :storage storage :fail-size fail-size :ids ids :clock clock}))
 
 (defn- invoke! [writer {:keys [ids]} initiator args fetch reauthorize!]
   (queue/submit-checkpointed!
@@ -95,7 +102,7 @@
 (defn- ^:async verify-managed-comment* []
   (with-redefs [app/read-key-file (fn [_ _] "fixture-pem")
                 app/app-jwt (fn [& _] "fixture-jwt")]
-    (let [{:keys [durable storage] :as fixture} (fixture-state)
+    (let [{:keys [durable storage] :as fixture} (fixture-state nil)
           writer (queue/create storage)
           calls (atom [])
           fetch (provider durable calls :ok)]
@@ -129,7 +136,7 @@
   (with-redefs [app/read-key-file (fn [_ _] "fixture-pem")
                 app/app-jwt (fn [& _] "fixture-jwt")]
     (doseq [outcome [:timeout :foreign :intent-failure :receipt-failure :revoked]]
-      (let [{:keys [durable storage fail-size] :as fixture} (fixture-state)
+      (let [{:keys [durable storage fail-size] :as fixture} (fixture-state nil)
             calls (atom [])
             fetch (provider durable calls outcome)
             writer (queue/create storage)
@@ -139,12 +146,8 @@
           :intent-failure (reset! fail-size (+ before 2))
           :receipt-failure (reset! fail-size (+ before 3))
           nil)
-        (if (= :receipt-failure outcome)
-          (try (await (invoke! writer fixture actor request fetch active?))
-               (is false "receipt write failure surfaced as success")
-               (catch :default _ (is true)))
-          (is (= (case outcome :revoked :unauthenticated :intent-failure :github-unavailable :comment-outcome-unknown)
-                 (:error (await (invoke! writer fixture actor request fetch active?))))))
+        (is (= (case outcome :revoked :unauthenticated :intent-failure :github-unavailable :comment-outcome-unknown)
+               (:error (await (invoke! writer fixture actor request fetch active?)))))
         (if (contains? #{:intent-failure :revoked} outcome)
           (do (is (= before (count @durable))) (is (= 5 (count @calls))))
           (do
@@ -152,6 +155,34 @@
             (is (= :comment-outcome-unknown
                    (:error (await (invoke! (queue/create storage) fixture actor request fetch (constantly true))))))
             (is (= 6 (count @calls)))))))))
+
+(defn- ^:async verify-authority-at-provider-send* []
+  (with-redefs [app/read-key-file (fn [_ _] "fixture-pem")
+                app/app-jwt (fn [& _] "fixture-jwt")]
+    (doseq [loss [:session-revoked :lease-expired]]
+      (let [lease-until (when (= :lease-expired loss) fixture/t2)
+            {:keys [clock durable storage] :as fixture} (fixture-state lease-until)
+            session-active? (atom true)
+            calls (atom [])
+            fetch (provider durable calls :ok)
+            args (cond-> request lease-until (assoc :actor/did leased-actor))
+            append! (:append! storage)
+            storage (assoc storage :append!
+                           (fn [path before after]
+                             (let [saved (append! path before after)]
+                               (when (= :axxium.github/comment-intended (:event/type (last saved)))
+                                 (case loss
+                                   :session-revoked (reset! session-active? false)
+                                   :lease-expired (reset! clock lease-until)))
+                               saved)))]
+        (is (= :comment-outcome-unknown
+               (:error (await (invoke! (queue/create storage) fixture root args fetch #(deref session-active?))))))
+        (is (= :axxium.github/comment-intended (:event/type (last @durable))))
+        (is (= 5 (count @calls)) "Provider traffic is limited to credential setup and cleanup")
+        (reset! session-active? true)
+        (is (= (if lease-until :forbidden :comment-outcome-unknown)
+               (:error (await (invoke! (queue/create storage) fixture root args fetch (constantly true))))))
+        (is (= 5 (count @calls)))))))
 
 (deftest managed-comment-is-scoped-attributed-and-deduplicated
   (async done
@@ -162,5 +193,11 @@
 (deftest managed-comment-ambiguity-never-posts-again
   (async done
     (-> (verify-unknown-and-checkpoint-failure*)
+        (.catch (fn [error] (is false (pr-str error))))
+        (.finally done))))
+
+(deftest managed-comment-rechecks-authority-after-intent-is-durable
+  (async done
+    (-> (verify-authority-at-provider-send*)
         (.catch (fn [error] (is false (pr-str error))))
         (.finally done))))
