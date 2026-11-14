@@ -48,8 +48,12 @@
 
          (str/includes? url "q=")
          (let [q (js/decodeURIComponent (second (re-find #"q=([^&]*)" url)))
-               wanted (second (re-find #"name = '((?:[^'\\]|\\.)*)'" q))]
-           (respond 200 {:files (for [[id f] @files :when (= wanted (:name f))]
+               wanted (second (re-find #"name = '((?:[^'\\]|\\.)*)'" q))
+               parent (second (re-find #"'((?:[^'\\]|\\.)*)' in parents" q))]
+           (respond 200 {:files (for [[id f] @files
+                                     :let [parents (or (:parents f) ["root"])]
+                                     :when (and (= wanted (:name f))
+                                                (or (nil? parent) (some #{parent} parents)))]
                                   {:id id :name (:name f)})}))
 
          (str/includes? url "alt=media")
@@ -230,6 +234,32 @@
 (deftest duplicate-search-must-finish-before-upload
   (async done
     (-> (duplicate-search-pages*)
+        (.catch (fn [e] (is false (pr-str e))))
+        (.finally done))))
+
+(defn- ^:async put-searches-the-destination-folder* []
+  (let [key (crypto/randomBytes 32)
+        files (atom {"subfolder-file" {:name "evidence.edn" :parents ["F"]}})
+        calls (atom [])
+        deps {:fetch (fake-drive files calls "1//refresh-alice") :token-key key
+              :client {:client-id "cid" :client-secret "csecret"}
+              :ids (counter-ids) :ledger (ctx-ledger key)}
+        args {:drive/name "evidence.edn" :drive/value 1}
+        created (await (mcp/call deps {:owner fx/alice} "drive_put" args))
+        root-retry (await (mcp/call (assoc deps :ledger (:ledger created))
+                                    {:owner fx/alice} "drive_put" args))
+        in-folder (await (mcp/call deps {:owner fx/alice} "drive_put"
+                                   (assoc args :drive/folder-id "F")))]
+    (is (nil? (:error created)) "the same name in a subfolder does not block a root put")
+    (is (= "google-drive:file2" (get-in created [:result :resource/id])))
+    (is (= :exists (:error root-retry)) "the resulting root duplicate is refused")
+    (is (= :exists-untracked (:error in-folder)) "an explicit folder still checks its own duplicates")
+    (is (= ["subfolder-file"] (:drive/existing in-folder)))
+    (is (= 2 (count @files)))))
+
+(deftest put-searches-the-destination-folder
+  (async done
+    (-> (put-searches-the-destination-folder*)
         (.catch (fn [e] (is false (pr-str e))))
         (.finally done))))
 

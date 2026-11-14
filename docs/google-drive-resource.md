@@ -41,9 +41,14 @@ Laws:
 2. Credentials, by either:
    - `GOOGLE_DRIVE_CLIENT_ID` + `GOOGLE_DRIVE_CLIENT_SECRET`, or
    - the existing sign-in client file `GOOGLE_OAUTH_CLIENT_FILE` (fallback).
-3. `AXXIUM_DRIVE_TOKEN_KEY_FILE`: a file holding 32 random bytes, base64
-   (`openssl rand -base64 32 > drive-token.key; chmod 600`). Never commit it.
-   Losing it means every user reconnects.
+3. Set `AXXIUM_DRIVE_TOKEN_KEY_FILE` to the path of a file holding 32 random
+   bytes encoded as base64. Create it once:
+
+   ```sh
+   (umask 077 && set -C && : > drive-token.key && chmod 600 drive-token.key && openssl rand -base64 32 >> drive-token.key)
+   ```
+
+   Never commit the key. Losing it means every user reconnects.
 4. `AXXIUM_DRIVE_LEDGER_FILE`: path of the append-only EDN ledger
    (`axxium.extern.ledger-file`) holding the resource events.
 
