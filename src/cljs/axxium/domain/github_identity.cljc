@@ -336,6 +336,12 @@
                   [(:binding/mailbox metadata) (:binding/actor metadata)])))
         (vals (:resources state))))
 
+(defn mailbox-binding-generation
+  "Identify the current bound incarnation, including bindings from old ledgers."
+  [state mailbox-did]
+  (when (bound-actor state mailbox-did)
+    (get-in state [:mailbox/binding-generations (law/binding-resource-id mailbox-did)])))
+
 (defn- binding-node [mailbox-did actor-did status]
   {:resource/id (law/binding-resource-id mailbox-did)
    :resource/kind law/binding-kind

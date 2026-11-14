@@ -48,6 +48,19 @@
     (doseq [invalid ["" " " fixture/alice (str bot ",") (str bot "," bot) (str bot ", " agent)]]
       (is (thrown? js/Error (config/mailbox-bootstrap-actor-dids invalid))))))
 
+(deftest bound-bootstrap-pins-a-unique-actor-and-mailbox-pair
+  (let [a "did:web:axxium.test:actors:owner:codex"
+        b "did:web:axxium.test:actors:owner:agent"]
+    (is (nil? (config/mailbox-bound-bootstrap-bindings nil)))
+    (is (= {a fixture/alice b fixture/bob}
+           (config/mailbox-bound-bootstrap-bindings (pr-str [[fixture/alice a] [fixture/bob b]]))))
+    (doseq [pairs [[[fixture/alice a] [fixture/alice b]]
+                   [[fixture/alice a] [fixture/bob a]]
+                   [[fixture/alice fixture/bob]]
+                   [[a a]]
+                   [["a.b" b]]]]
+      (is (thrown? js/Error (config/mailbox-bound-bootstrap-bindings (pr-str pairs)))))))
+
 (deftest schema-pool-has-only-its-own-statement-timeout
   (let [seen (atom nil)]
     (with-redefs [pg/create-pool! (fn [options] (reset! seen options) :schema-pool)]
