@@ -29,6 +29,12 @@
 (deftest normalizes-email-but-never-password
   (is (= {:email "person@example.test" :password " secret with spaces "}
          (identity/normalize-credentials {:email " PERSON@example.test " :password " secret with spaces "}))))
+(deftest login-accepts-legacy-credentials
+  (let [legacy {:email "legacy-user" :password "12345678"}]
+    (is (= legacy (law/require-valid! law/login-credentials legacy)))
+    (is (thrown? cljs.core/ExceptionInfo (law/require-valid! law/credentials legacy)))
+    (is (thrown? cljs.core/ExceptionInfo
+                 (law/require-valid! law/login-credentials (assoc legacy :password ""))))))
 (deftest query-parameters-remain-separate-and-structured
   (let [[statement & params] (sql/format (queries/insert-actor
                              {:id "actor_one" :entity-id "entity_one" :email "person@example.test"
