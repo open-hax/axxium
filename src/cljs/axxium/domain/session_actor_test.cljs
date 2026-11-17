@@ -1,10 +1,12 @@
 (ns axxium.domain.session-actor-test
   "S1-S3: leased session nodes, self-advertisement at ancestor anchors, and
    find(v, anchor, q) over the advert fold."
-  (:require [axxium.domain.github-identity :as gi]
+  (:require [axxium.domain.authority :as authority]
+            [axxium.domain.github-identity :as gi]
             [axxium.domain.kernel-fixture :as fx]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.domain.policy :as policy]
+            [axxium.domain.resource :as resource]
             [axxium.domain.state :as state]
             [cljs.test :refer [deftest is testing]]))
 
@@ -40,6 +42,129 @@
 
 (defn- open [lg operator parent did pol lease ids]
   (gi/open-session lg (state/fold lg) operator parent did "session" pol lease fx/t0 (ids)))
+
+(defn- claim-proof []
+  {:claim/owner-did root :claim/connector-did codex
+   :claim/issuer "https://connector.example" :claim/client-id "codex-app" :claim/subject "member-1"
+   :claim/product :codex :claim/context [:project "project-1"]
+   :claim/conversation-id "conversation-1" :claim/session-id "session-1"
+   :claim/expires-at (at (* 2 hour))})
+
+(defn- claim-candidate [did]
+  {:actor/did did :actor/name "A conversation title" :actor/lease-until (at hour)})
+
+(deftest verified-session-claims-retry-without-creating-authority
+  (let [ids (counter)
+        lg (tree ids)
+        lg (:ledger (gi/set-policy lg (state/fold lg) root codex
+                                  (assoc wide :policy/forbid #{:force-push}) (ids)))
+        proof (claim-proof)
+        first-claim (gi/claim-session lg codex proof (claim-candidate s1) (ids))
+        claimed (:ledger first-claim)
+        st (state/fold claimed)
+        metadata (:resource/metadata (gi/actor-node st s1))
+        retry (gi/claim-session claimed codex (assoc proof :claim/expires-at (at (* 3 hour)))
+                                (assoc (claim-candidate s2) :actor/name "A renamed conversation"
+                                       :actor/lease-until (at (* 2 hour)))
+                                (assoc (ids) :at (at 1000)))
+        second-claim (gi/claim-session claimed codex (assoc proof :claim/session-id "session-2")
+                                       (claim-candidate s2) (ids))
+        second-state (state/fold (:ledger second-claim))
+        other-owner (gi/claim-session claimed outside
+                                      (assoc proof :claim/owner-did other-root :claim/connector-did outside)
+                                      (claim-candidate o1) (ids))]
+    (is (= {:actor/did s1 :actor/lease-until (at hour)} (:result first-claim)))
+    (is (= (+ 2 (count lg)) (count claimed)))
+    (is (policy/decision-before-effect? claimed))
+    (is (= :session (gi/kind-of st s1)))
+    (is (= codex (gi/parent-of st s1)))
+    (is (= (dissoc proof :claim/expires-at) (:actor/session-claim metadata)))
+    (is (= {:policy/repos #{} :policy/permissions {} :policy/actions #{} :policy/forbid #{:force-push}}
+           (gi/policy-of st s1)))
+    (is (= (:grants (state/fold lg)) (:grants st)))
+    (is (empty? (gi/credentials st s1)))
+    (is (empty? (gi/mailbox-bindings st)))
+    (is (= {:ledger claimed :result (:result first-claim)} retry))
+    (is (= s2 (get-in second-claim [:result :actor/did])))
+    (is (= o1 (get-in other-owner [:result :actor/did])) "opaque IDs are scoped to their verified owner and connector")
+    (is (= "conversation-1" (get-in (gi/actor-node second-state s2)
+                                     [:resource/metadata :actor/session-claim :claim/conversation-id])))
+    (is (= "session-2" (get-in (gi/actor-node second-state s2)
+                                [:resource/metadata :actor/session-claim :claim/session-id])))))
+
+(deftest new-session-claims-require-an-address-without-grants
+  (let [ids (counter)
+        lg (tree ids)
+        file (resource/local-file root "/fixture/session.txt" {})
+        {registered :ledger} (resource/register lg (state/fold lg) root file (ids))
+        grant {:grant/id "session-read" :grant/actor s1 :grant/resource (:resource/id file)
+               :grant/actions [:read]}
+        add-grant (fn [journal g] (resource/issue-grant journal (state/fold journal) root g (ids)))
+        {pregranted :ledger pregrant :effect} (add-grant registered grant)
+        proof (claim-proof)
+        candidate (claim-candidate s1)
+        {claimed :ledger result :result} (gi/claim-session registered codex proof candidate (ids))
+        {postgranted :ledger postgrant :effect} (add-grant claimed grant)]
+    (is (some? pregrant))
+    (is (= {:ledger pregranted :error :forbidden}
+           (gi/claim-session pregranted codex proof candidate (ids))))
+    (is (= s1 (:actor/did result)))
+    (is (some? postgrant))
+    (is (= {:ledger postgranted :result result}
+           (gi/claim-session postgranted codex proof candidate (ids))))
+    (testing "prior membership with inherited access also disqualifies a candidate"
+      (let [membership (authority/membership-grant "session-member" s1 fx/team)
+            team {:resource/id (:grant/resource membership) :resource/kind :resource/actor
+                  :resource/owner root :resource/store :local}
+            {with-team :ledger} (resource/register registered (state/fold registered) root team (ids))
+            {with-permission :ledger}
+            (add-grant with-team (assoc grant :grant/id "team-read" :grant/actor fx/team))
+            {with-member :ledger joined :effect} (add-grant with-permission membership)]
+        (is (some? joined))
+        (is (authority/allowed? (state/fold with-member) s1 (:resource/id file) :read fx/t0)
+            "membership carries authority")
+        (is (= {:ledger with-member :error :forbidden}
+               (gi/claim-session with-member codex proof candidate (ids))))))))
+
+(deftest session-claims-fail-closed-on-unverified-scope-and-stale-identity
+  (let [ids (counter)
+        lg (tree ids)
+        proof (claim-proof)
+        candidate (claim-candidate s1)
+        opened (:ledger (gi/claim-session lg codex proof candidate (ids)))
+        revocation (:ledger (gi/revoke-actor opened (state/fold opened) codex s1 (ids)))
+        suspended (:ledger (gi/suspend opened (state/fold opened) root codex (ids)))]
+    (testing "a connector cannot speak for another connector or a different owner"
+      (doseq [[operator scope child] [[root proof candidate]
+                                      [work proof candidate]
+                                      [outside (assoc proof :claim/connector-did outside) (claim-candidate o1)]
+                                      [codex (assoc proof :claim/owner-did other-root) candidate]
+                                      [codex proof (claim-candidate w1)]
+                                      [codex proof (claim-candidate (str s1 ":nested"))]]]
+        (is (= {:ledger lg :error :forbidden}
+               (gi/claim-session lg operator scope child (ids))))))
+    (testing "unbounded proof or provider fields cannot be smuggled into a claim"
+      (is (= {:ledger lg :error :invalid}
+             (gi/claim-session lg codex (dissoc proof :claim/subject) candidate (ids))))
+      (is (= {:ledger lg :error :invalid}
+             (gi/claim-session lg codex proof (assoc candidate :actor/policy wide) (ids))))
+      (is (= {:ledger lg :error :invalid}
+             (gi/claim-session lg codex (assoc proof :claim/context [:general "arbitrary"]) candidate (ids)))))
+    (testing "a candidate lease cannot outlive the verified proof"
+      (is (= {:ledger lg :error :forbidden}
+             (gi/claim-session lg codex (assoc proof :claim/expires-at (at 1000)) candidate (ids)))))
+    (testing "an unrelated occupied DID cannot be adopted"
+      (let [unclaimed (:ledger (open lg codex codex s2 narrow (at hour) ids))
+            occupied (:ledger (open opened codex codex s2 narrow (at hour) ids))]
+        (is (= {:ledger unclaimed :error :forbidden}
+               (gi/claim-session unclaimed codex proof (claim-candidate s2) (ids))))
+        (is (= {:ledger occupied :error :forbidden}
+               (gi/claim-session occupied codex proof (claim-candidate s2) (ids))))))
+    (testing "a retry never returns an expired, suspended or revoked actor"
+      (doseq [[journal now] [[opened (at (* 2 hour))] [opened (at hour)]
+                             [revocation fx/t0] [suspended fx/t0]]]
+        (is (= {:ledger journal :error :forbidden}
+               (gi/claim-session journal codex proof candidate (assoc (ids) :at now))))))))
 
 (deftest sessions-are-leased-attenuated-children
   (let [ids (counter)

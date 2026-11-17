@@ -66,8 +66,12 @@
 (defn- refuse [e] (js/Promise.resolve {:error e}))
 
 (defn- effect-out [{:keys [ledger effect]}]
-  (if effect {:ledger ledger :result (select-keys (:event/body effect) [:resource/id :resource/metadata])}
-      {:ledger ledger :error :forbidden}))
+  (if effect
+    (let [body (:event/body effect)]
+      {:ledger ledger
+       :result (cond-> (select-keys body [:resource/id :resource/metadata])
+                 (:resource/metadata body) (update :resource/metadata dissoc :actor/session-claim))})
+    {:ledger ledger :error :forbidden}))
 
 (defn- secret
   "Seal a PEM to the actor DID, or reference an imported key file."

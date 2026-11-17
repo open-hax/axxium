@@ -270,6 +270,65 @@
             (session-lease-ok? state parent lease-until now)
             (law/policy-within? pol (policy-of state parent))) ids))
 
+(defn- claimed-sessions [state claim-key]
+  (->> (:resources state)
+       vals
+       (filter #(and (= law/actor-kind (:resource/kind %))
+                     (= claim-key (get-in % [:resource/metadata :actor/session-claim]))))
+       (take 2)
+       vec))
+
+(defn claim-session
+  "Claim one leased connector child for an already verified owner delegation.
+   The boundary supplies the authenticated connector, verified proof, and
+   Axxium-chosen candidate. Only the verified, non-secret binding is persisted.
+   The caller serializes the ledger read and append. A retry reads the existing
+   live identity without issuing a credential, applying a policy or extending a lease."
+  [lg operator {:claim/keys [owner-did connector-did expires-at] :as verified-proof}
+   {:actor/keys [did name lease-until] :as candidate} {:keys [at] :as ids}]
+  (if-not (and (inst? at) (law/valid-session-claim? verified-proof candidate))
+    {:ledger lg :error :invalid}
+    (let [state (state/fold lg)
+          denied {:ledger lg :error :forbidden}]
+      (if-not (and (= operator connector-did)
+                   (< (inst-ms at) (inst-ms expires-at))
+                   (active-owner-delegation? state owner-did connector-did)
+                   (contains? #{:agent :bot} (kind-of state connector-did))
+                   (live? state connector-did at)
+                   (law/direct-session-child? connector-did did))
+        denied
+        (let [claim-key (dissoc verified-proof :claim/expires-at)
+              matches (claimed-sessions state claim-key)
+              existing (:resource/owner (first matches))
+              occupied? (contains? (:resources state) (law/actor-resource-id did))
+              result (fn [actor lease] {:actor/did actor :actor/lease-until lease})
+              parent-policy (policy-of state connector-did)
+              empty-policy {:policy/repos #{} :policy/permissions {} :policy/actions #{}
+                            :policy/forbid (:policy/forbid parent-policy)}]
+          (cond
+            (or (< 1 (count matches)) (and occupied? (not= did existing))) denied
+
+            existing
+            (if (and (= :session (kind-of state existing))
+                     (= connector-did (parent-of state existing))
+                     (inst? (lease-of state existing))
+                     (live? state existing at))
+              {:ledger lg :result (result existing (lease-of state existing))}
+              denied)
+
+            (and (session-lease-ok? state connector-did lease-until at)
+                 (<= (inst-ms lease-until) (inst-ms expires-at))
+                 (not-any? #(and (= did (:grant/actor %)) (seq (:grant/actions %)))
+                           (vals (:grants state)))
+                 (law/policy-within? empty-policy parent-policy))
+            (let [session (update (node did connector-did name empty-policy :active :session)
+                                  :resource/metadata assoc
+                                  :actor/lease-until lease-until :actor/session-claim claim-key)]
+              (assoc (act lg state operator :provision session true ids)
+                     :result (result did lease-until)))
+
+            :else denied))))))
+
 (defn- advert [state did]
   (let [r (get-in state [:resources (law/advert-resource-id did)])]
     (when (= law/advert-kind (:resource/kind r)) r)))
