@@ -12,8 +12,10 @@
             [axxium.extern.http :as http-server]
             [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.signing-key :as signing]
+            [axxium.extern.token-crypto :as crypto]
             [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox :as routes]
+            [cljs.reader :as reader]
             [clojure.string :as str]
             [cljs.test :refer [async deftest is]]
             ["@fastify/cookie" :default fastify-cookie]
@@ -271,6 +273,39 @@
           "GET rechecks the actor tree after the live AT proof completes.")
       (is (zero? @suspend-on)))))
 
+(defn- ^:async deny-fresh-webhook-proofs! [base subscribe proofs challenges ledger]
+  (doseq [case-name (keys proofs)]
+    (let [client (assoc base :bearer case-name)
+          initialized (await (post! client (rpc "initialize" nil)))
+          sid (:sid initialized)
+          before (fs/readFileSync ledger "utf8")
+          challenge-count @challenges
+          rejected (await (post! (assoc client :sid sid) subscribe))]
+      (is (= 200 (:status initialized)) case-name)
+      (is (string? sid) case-name)
+      (is (not (contains? (get (result initialized) "capabilities") "events")) case-name)
+      (is (= -32601 (get-in rejected [:json "error" "code"])) case-name)
+      (is (= challenge-count @challenges) case-name)
+      (is (= before (fs/readFileSync ledger "utf8")) case-name))))
+
+(defn- ^:async deny-retained-webhook-proofs! [tick proofs deliveries ledger]
+  (let [open-sealed crypto/open-sealed
+        before (fs/readFileSync ledger "utf8")
+        delivery-count (count @deliveries)]
+    (doseq [[case-name proof] proofs]
+      (let [opened? (atom false)]
+        ;; The worker must open a due, sealed binding before checking its proof.
+        (with-redefs [crypto/open-sealed
+                      (fn [key aad sealed]
+                        (when-let [plaintext (open-sealed key aad sealed)]
+                          (reset! opened? true)
+                          (pr-str (assoc (reader/read-string plaintext)
+                                         :proof (dissoc proof :mailbox/actors?)))))]
+          (await (tick)))
+        (is @opened? case-name)
+        (is (= delivery-count (count @deliveries)) case-name)
+        (is (= before (fs/readFileSync ledger "utf8")) case-name)))))
+
 (defn- ^:async verify-native-stream! [scenario]
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-stream-"))
@@ -301,14 +336,24 @@
                      :oauth/grant-id "fixture-grant" :oauth/client-id "fixture-client"
                      :mailbox/owner-root-did root :mailbox/bound-actor-did codex
                      :mailbox/actors? true}
+        rejected-proofs {"fixture-other-root"
+                         (assoc owner-proof :mailbox/owner-root-did "did:web:axxium.test:actors:other-owner")
+                         "fixture-atproto-method"
+                         ;; Keep the same mailbox and an equal bound/principal DID
+                         ;; while using a well-formed direct AT Protocol principal.
+                         (assoc owner-proof :principal {:auth/did codex-at :auth/method :atproto}
+                                            :mailbox/bound-actor-did codex-at)
+                         "fixture-other-bound-actor"
+                         (assoc owner-proof :mailbox/bound-actor-did grok)}
+        access-proofs (assoc rejected-proofs "fixture-owner" owner-proof)
+        grant-proofs (into #{} (map #(dissoc % :mailbox/actors?)) (vals access-proofs))
         oauth (when coexistence?
                 {:issuer (str origin "/oidc") :resource (str origin endpoint)
                  :scope "mailbox:events" :actor-messaging? true :owner-delegated? true
-                 :access-proof! #(when (= "fixture-owner" %) owner-proof)
+                 :access-proof! access-proofs
                  :active-grant? (fn [proof]
                                   (and @active-grant?
-                                       (or (= owner-proof proof)
-                                           (= (dissoc owner-proof :mailbox/actors?) proof))))})
+                                       (contains? grant-proofs (dissoc proof :mailbox/actors?))))})
         opt-in (atom nil)
         clock (atom (secrets/now))
         after-proof (atom (fn [] nil))
@@ -392,6 +437,7 @@
                   (is (= {} (result (await (post! receiver (resource-request "resources/subscribe" inbox))))))
                   (is (= -32601 (get-in (await (post! receiver subscribe)) [:json "error" "code"])))
                   (is (zero? @challenges))
+                  (await (deny-fresh-webhook-proofs! base subscribe rejected-proofs challenges ledger))
                   (let [events (get (result (await (post! work (rpc "events/list" nil)))) "events")]
                     (is (= ["message.available"] (mapv #(get % "name") events))))
                   (let [old (structured (await (post! sender (send codex-at "before-subscribe" body))))]
@@ -409,6 +455,7 @@
                     (await (acknowledge (get old "message_id"))))
                   (let [stream (await (connect! receiver))
                         receipt (structured (await (post! sender send-once)))]
+                    (await (deny-retained-webhook-proofs! @callback-tick rejected-proofs deliveries ledger))
                     (await (expect-message! receiver stream grok body receipt))
                     (is (= (get receipt "message_id")
                            (get (structured (await (acknowledge (get receipt "message_id")))) "message_id")))
