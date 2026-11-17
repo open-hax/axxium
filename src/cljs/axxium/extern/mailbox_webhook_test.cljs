@@ -4,8 +4,10 @@
             [clojure.string :as str]
             ["node:crypto" :as crypto]))
 
-(defn- encode-key [size]
-  (str "whsec_" (.toString (js/Buffer.alloc size 255) "base64")))
+(defn- encode-key
+  ([size] (encode-key size 255))
+  ([size value]
+   (str "whsec_" (.toString (js/Buffer.alloc size value) "base64"))))
 
 (def ^:private callback
   {:id "sub_fixture"
@@ -53,26 +55,31 @@
                (str/replace (encode-key 32) #"8=$" "9=")]]
     (is (not (webhook/valid-secret? key)))))
 
-(defn- ^:async request-evidence [request opts]
-  (let [headers (.-headers request)
-        body (await (.text request))
-        event-id (.get headers "webhook-id")
-        timestamp (.get headers "webhook-timestamp")
-        key (js/Buffer.from (subs (:secret callback) 6) "base64")
-        signed (str event-id "." timestamp "." body)
-        expected (str "v1," (-> (.createHmac crypto "sha256" key)
-                                 (.update signed "utf8")
-                                 (.digest "base64")))]
-    (is (= (:url callback) (.-url request)))
-    (is (= "POST" (.-method request)))
-    (is (= "error" (.-redirect request)))
-    (is (some? (.-dispatcher opts)) "the base fetch receives the SSRF-guarded dispatcher")
-    (is (some? (.-signal opts)))
-    (is (= "application/json" (.get headers "content-type")))
-    (is (= (:id callback) (.get headers "x-mcp-subscription-id")))
-    (is (re-matches #"\d{10}" timestamp))
-    (is (= expected (.get headers "webhook-signature")))
-    {:event-id event-id :body body :payload (js->clj (js/JSON.parse body))}))
+(defn- expected-signature [signed secret]
+  (let [key (js/Buffer.from (subs secret 6) "base64")]
+    (str "v1," (-> (.createHmac crypto "sha256" key)
+                   (.update signed "utf8")
+                   (.digest "base64")))))
+
+(defn- ^:async request-evidence
+  ([request opts] (await (request-evidence request opts [(:secret callback)])))
+  ([request opts signing-secrets]
+   (let [headers (.-headers request)
+         body (await (.text request))
+         event-id (.get headers "webhook-id")
+         timestamp (.get headers "webhook-timestamp")
+         signed (str event-id "." timestamp "." body)
+         expected (str/join " " (map #(expected-signature signed %) signing-secrets))]
+     (is (= (:url callback) (.-url request)))
+     (is (= "POST" (.-method request)))
+     (is (= "error" (.-redirect request)))
+     (is (some? (.-dispatcher opts)) "the base fetch receives the SSRF-guarded dispatcher")
+     (is (some? (.-signal opts)))
+     (is (= "application/json" (.get headers "content-type")))
+     (is (= (:id callback) (.get headers "x-mcp-subscription-id")))
+     (is (re-matches #"\d{10}" timestamp))
+     (is (= expected (.get headers "webhook-signature")))
+     {:event-id event-id :body body :payload (js->clj (js/JSON.parse body))})))
 
 (defn- ^:async challenge-roundtrip* []
   (let [attempts (atom [])
@@ -123,6 +130,33 @@
   (async done
     (-> (delivery-roundtrip*)
         (.catch (fn [_] (is false "delivery test rejected")))
+        (.finally done))))
+
+(defn- ^:async signing-key-overlap* []
+  (let [current (encode-key 32 7)
+        previous (:secret callback)
+        subscription (assoc callback :secret current :previous-secret previous)
+        challenge (webhook/guarded-fetch
+                   (fn ^:async verified-with-current-key [request opts]
+                     (let [proof (await (request-evidence request opts [current]))]
+                       (js/Response. (js/JSON.stringify (clj->js (:payload proof))) #js {:status 200}))))
+        deliver (fn [signers]
+                  (webhook/guarded-fetch
+                   (fn ^:async observe-delivery [request opts]
+                     (let [proof (await (request-evidence request opts signers))]
+                       (is (= event (:payload proof)))
+                       (js/Response. nil #js {:status 204})))))]
+    (is (= {:verified? true} (await (webhook/verify! challenge subscription))))
+    (is (= {:accepted? true :status 204}
+           (await (webhook/deliver! (deliver [current previous]) subscription event))))
+    (is (= {:accepted? true :status 204}
+           (await (webhook/deliver! (deliver [current])
+                    (assoc subscription :previous-secret (str/replace current #"=+$" "")) event))))))
+
+(deftest challenge-signs-with-current-key-and-delivery-accepts-one-prior-key
+  (async done
+    (-> (signing-key-overlap*)
+        (.catch (fn [_] (is false "signing key overlap test rejected")))
         (.finally done))))
 
 (defn- ^:async response-request-id* []

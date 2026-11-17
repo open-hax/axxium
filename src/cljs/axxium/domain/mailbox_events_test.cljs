@@ -162,6 +162,24 @@
     (is (= :delivery-not-current
            (:error (events/settle (:ledger terminal) third-attempt 200 t30))))))
 
+(deftest webhook-retry-deadlines-double-and-preserve-event-id
+  (let [lg (-> (subscribed) (accept fx/bob 300))
+        first-attempt (due lg fx/t0)
+        stored (successful (events/attempt lg first-attempt fx/t0))
+        first-retry (successful (events/settle stored first-attempt 503 fx/t0))
+        second-attempt (due first-retry t5)
+        stored-again (successful (events/attempt first-retry second-attempt t5))
+        second-retry (successful (events/settle stored-again second-attempt 408 t5))
+        third-attempt (due second-retry t15)
+        final-attempt (successful (events/attempt second-retry third-attempt t15))
+        terminal (successful (events/settle final-attempt third-attempt 503 t15))]
+    (is (nil? (due first-retry #inst "2026-11-01T00:00:04.999Z")))
+    (is (nil? (due second-retry #inst "2026-11-01T00:00:14.999Z")))
+    (is (= [1 2 3] (mapv :attempt [first-attempt second-attempt third-attempt])))
+    (is (apply = (map :event-id [first-attempt second-attempt third-attempt])))
+    (is (= :axxium.outbox/webhook-terminal (:event/type (peek terminal))))
+    (is (nil? (due terminal t30)))))
+
 (deftest terminal-and-historical-polling-never-claim-webhook-receipt
   (let [lg (-> (subscribed) (accept fx/bob 300))
         candidate (due lg fx/t0)

@@ -17,6 +17,7 @@
 (def ^:private event-name "message.available")
 (def ^:private max-ttl-ms 3600000)
 (def ^:private verification-cache-ms 300000)
+(def ^:private signing-overlap-ms 60000)
 
 (def ^:private descriptor
   {"name" event-name
@@ -67,6 +68,25 @@
     (try (reader/read-string plaintext)
          (catch :default _ nil))))
 
+(defn- active-previous-key [{:keys [secret until]} at]
+  (when (and (int? until)
+             (<= 1 (- until (inst-ms at)) signing-overlap-ms)
+             (webhook/valid-secret? secret))
+    {:secret secret :until until}))
+
+(defn- refresh-previous-key [prior previous proof same-key? {:keys [at expires]}]
+  (when (and (:oauth/grant-id proof)
+             (= proof (:proof prior))
+             (> (inst-ms (:expires previous)) (inst-ms at)))
+    (let [overlap (if same-key?
+                    (active-previous-key (:previous-key prior) at)
+                    (when (webhook/valid-secret? (:secret prior))
+                      {:secret (:secret prior)
+                       :until (min (inst-ms (:expires previous))
+                                   (+ (inst-ms at) signing-overlap-ms))}))]
+      (when overlap
+        (update overlap :until min (inst-ms expires))))))
+
 (defn- subscription-result [id subscription]
   (success id {"id" (:id subscription)
                "refreshBefore" (secrets/instant-iso (:expires subscription))
@@ -96,14 +116,16 @@
   [{:keys [owner key] :as runtime} proof ctx rpc-id {:keys [url secret ttl]} previous
    {:keys [id cancelled?]}]
   (let [at (secrets/now)
-        prior (when (= id (:id previous)) (open-binding key previous))
-        same-key? (= secret (:secret prior))
+        opened (when (= id (:id previous)) (open-binding key previous))
+        prior (when (= url (:url opened)) opened)
+        same-key? (webhook/same-secret? secret (:secret prior))
+        same-proof? (= proof (:proof prior))
         remaining (when previous (- (inst-ms (:expires previous)) (inst-ms at)))
-        duplicate? (and same-key? (= proof (:proof prior)) remaining
+        duplicate? (and same-key? same-proof? remaining
                         (<= (/ ttl 2) remaining ttl))]
     (if duplicate?
       (subscription-result rpc-id previous)
-      (let [cached? (and same-key? (number? (:verified-at prior))
+      (let [cached? (and same-key? same-proof? (number? (:verified-at prior))
                          (<= 0 (- (inst-ms at) (:verified-at prior)) verification-cache-ms))
             verification (if cached? {:verified? true}
                               (await (webhook/verify! {:id id :url url :secret secret})))]
@@ -116,8 +138,10 @@
                        (let [at (secrets/now)
                              sub {:id id :owner owner :generation (secrets/secure-id)
                                   :at at :expires (secrets/instant-after at ttl)}
-                             binding {:url url :secret secret :proof proof
-                                      :verified-at (if cached? (:verified-at prior) (inst-ms at))}
+                             previous-key (refresh-previous-key prior previous proof same-key? sub)
+                             binding (cond-> {:url url :secret secret :proof proof
+                                              :verified-at (if cached? (:verified-at prior) (inst-ms at))}
+                                       previous-key (assoc :previous-key previous-key))
                              out (events/subscribe lg (assoc sub :sealed (crypto/seal key (aad sub) (pr-str binding))))]
                          (if (:error out)
                            (rpc-error rpc-id -32000 "Subscription refused")
@@ -167,7 +191,8 @@
                        (merge (select-keys out [:ledger]) (success id {})))))))
         (rpc-error id -32602 "Invalid event arguments")))))
 
-(defn- ^:async send-attempt! [{:keys [writer path active-proof!] :as runtime} candidate subscription {:keys [url secret proof]}]
+(defn- ^:async send-attempt! [{:keys [writer path active-proof!] :as runtime} candidate subscription
+                             {:keys [url secret proof previous-key]}]
   (let [attempt (await (submit-proof! runtime proof
                          (fn [lg] (events/attempt lg candidate (secrets/now)))))
         authorized? (and (:result attempt)
@@ -179,7 +204,10 @@
                (= (:generation subscription) (:generation current))
                (> (inst-ms (:expires current)) (inst-ms now))
                (events/authorized? lg (:owner candidate) now))
-      (let [response (await (webhook/deliver! {:id (:id subscription) :url url :secret secret}
+      (let [prior (active-previous-key previous-key now)
+            binding (cond-> {:id (:id subscription) :url url :secret secret}
+                      prior (assoc :previous-secret (:secret prior)))
+            response (await (webhook/deliver! binding
                               {"eventId" (:event-id candidate) "name" event-name
                                "timestamp" (secrets/instant-iso (:message-at candidate))
                                "data" {"message_id" (:message-id candidate)} "cursor" nil}))]
