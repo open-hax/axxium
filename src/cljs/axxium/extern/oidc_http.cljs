@@ -411,6 +411,7 @@
         (if mailbox-resource
           {:resource mailbox-resource :issuer issuer :scope law/mailbox-scope
            :scopes resource-scopes :actor-messaging? actor-messaging? :inbox? inbox-enabled?
+           :owner-delegated? (some? delegation)
            :access-proof! (fn [bearer] (engine/mailbox-access-proof! provider pool config mailbox-actor-did
                                          mailbox-bound-actor-did bearer delegation))
            :renew-after-use!

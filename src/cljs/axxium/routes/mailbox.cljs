@@ -321,6 +321,10 @@
                         (some? (cfg/get-in-config [:mailbox/actor-bindings])))
          allowed-dids (cfg/get-in-config [:mailbox/pilot-allowed-dids])
          streaming? (cfg/get-in-config [:mailbox/stream-enabled?])
+         coexistence? (cfg/get-in-config [:mailbox/transport-coexistence?])
+         root-binding (cfg/get-in-config [:identity/root-operator-binding])
+         owner (cfg/get-in-config [:mailbox/webhook-actor-did])
+         webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
          bound-bootstrap (cfg/get-in-config [:mailbox/bound-bootstrap-bindings])
          subscriptions-disabled? (false? (cfg/get-in-config [:mailbox/subscriptions-enabled?]))]
      (when (or (and directory? (or (not path) allowed-dids (str/blank? identity-path)))
@@ -331,21 +335,26 @@
                 (not (and directory? (cfg/get-in-config [:identity/root-operator-binding]))))
        (throw (ex-info "Bound mailbox bootstrap requires an owner directory"
                        {:reason :invalid-mailbox-bound-bootstrap-config})))
-     (when (and streaming? (not (and directory? subscriptions-disabled?
-                                      (cfg/get-in-config [:identity/root-operator-binding]))))
-       (throw (ex-info "Mailbox notifications require the owner directory with webhook subscriptions disabled"
+     (when (and coexistence?
+                (not (and streaming? directory? (:root-did root-binding)
+                          (not subscriptions-disabled?) owner webhook-key-file
+                          (:owner-delegated? oauth))))
+       (throw (ex-info "Mailbox coexistence requires explicit owner-directory transport and OAuth configuration"
+                       {:reason :invalid-mailbox-coexistence-config})))
+     (when (and streaming? (not (and directory? root-binding
+                                      (or subscriptions-disabled? coexistence?))))
+       (throw (ex-info "Mailbox notifications require the owner directory and explicit webhook opt-in"
                        {:reason :invalid-mailbox-stream-config})))
      (when path
        (let [origin (http/origin-settings (cfg/get-in-config [:axxium/public-base-url]) endpoint)
              resource-metadata (when oauth (str (:origin origin) resource-metadata-path))
-             owner (cfg/get-in-config [:mailbox/webhook-actor-did])
-             webhook-key-file (cfg/get-in-config [:mailbox/webhook-key-file])
              storage (disk/private-ledger-storage path [(cfg/get-in-config [:drive/ledger-file]) identity-path]
                                                   (some? owner))
              writer (queue/create storage)
              stream-runtime (when streaming? (stream/create! app))
              runtime (when-not subscriptions-disabled?
-                       (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)))
+                       (events/install! app writer path owner webhook-key-file (partial active-proof! oauth)
+                                        (when coexistence? (:root-did root-binding))))
              no-stream (authorized origin oauth resource-metadata allowed-dids directory?
                                    (fn [_ reply _]
                                      (http/set-header! reply "Allow" "POST")

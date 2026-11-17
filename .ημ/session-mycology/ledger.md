@@ -58,3 +58,11 @@
   p-skill-candidate: 0.25
   receipt-refs: native4370612174; heartbeat5-authority-route-red.log; heartbeat5-authority-route-postgres.log
   note: Exercise unknown paths through the actual mounted protocol engine. A post-next middleware callback can observe absent route context even while every known happy path passes; nil-safe reads should preserve the engine-owned404 without broad exception recovery. Existing required owned-PG fixture is the right regression home. No spore promoted.
+
+- ts: 2026-11-17T16:31:26Z
+  origin: axxium-85-owner-proof-coverage
+  p-efficiency: 0.91
+  p-friction: 0.16
+  p-skill-candidate: 0.29
+  receipt-refs: open-hax/axxium#85 owner-proof denial coverage
+  note: Keep the alternate principal well formed and hold the mailbox address and bound-DID equality constant to isolate auth method. Prove a retained binding was opened with a due message before asserting no attempt or callback.

@@ -9,9 +9,13 @@
             [axxium.extern.agent-credentials :as secrets]
             [axxium.extern.fastify :as fastify]
             [axxium.extern.github-identity-mcp :as bootstrap]
+            [axxium.extern.http :as http-server]
+            [axxium.extern.mailbox-webhook :as webhook]
             [axxium.extern.signing-key :as signing]
+            [axxium.extern.token-crypto :as crypto]
             [axxium.routes.github-identity :as identity]
             [axxium.routes.mailbox :as routes]
+            [cljs.reader :as reader]
             [clojure.string :as str]
             [cljs.test :refer [async deftest is]]
             ["@fastify/cookie" :default fastify-cookie]
@@ -269,6 +273,39 @@
           "GET rechecks the actor tree after the live AT proof completes.")
       (is (zero? @suspend-on)))))
 
+(defn- ^:async deny-fresh-webhook-proofs! [base subscribe proofs challenges ledger]
+  (doseq [case-name (keys proofs)]
+    (let [client (assoc base :bearer case-name)
+          initialized (await (post! client (rpc "initialize" nil)))
+          sid (:sid initialized)
+          before (fs/readFileSync ledger "utf8")
+          challenge-count @challenges
+          rejected (await (post! (assoc client :sid sid) subscribe))]
+      (is (= 200 (:status initialized)) case-name)
+      (is (string? sid) case-name)
+      (is (not (contains? (get (result initialized) "capabilities") "events")) case-name)
+      (is (= -32601 (get-in rejected [:json "error" "code"])) case-name)
+      (is (= challenge-count @challenges) case-name)
+      (is (= before (fs/readFileSync ledger "utf8")) case-name))))
+
+(defn- ^:async deny-retained-webhook-proofs! [tick proofs deliveries ledger]
+  (let [open-sealed crypto/open-sealed
+        before (fs/readFileSync ledger "utf8")
+        delivery-count (count @deliveries)]
+    (doseq [[case-name proof] proofs]
+      (let [opened? (atom false)]
+        ;; The worker must open a due, sealed binding before checking its proof.
+        (with-redefs [crypto/open-sealed
+                      (fn [key aad sealed]
+                        (when-let [plaintext (open-sealed key aad sealed)]
+                          (reset! opened? true)
+                          (pr-str (assoc (reader/read-string plaintext)
+                                         :proof (dissoc proof :mailbox/actors?)))))]
+          (await (tick)))
+        (is @opened? case-name)
+        (is (= delivery-count (count @deliveries)) case-name)
+        (is (= before (fs/readFileSync ledger "utf8")) case-name)))))
+
 (defn- ^:async verify-native-stream! [scenario]
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-stream-"))
@@ -283,6 +320,40 @@
         cred-id (secrets/secure-id)
         actor-ledger (atom (fixture-ledger root grok codex grok-key codex-key))
         actor-state #(state/fold @actor-ledger)
+        coexistence? (= :coexistence scenario)
+        callback-key (path/join dir "webhook-key")
+        callback-tick (atom nil)
+        challenges (atom 0)
+        deliveries (atom [])
+        verify-callback (fn []
+                          (swap! challenges inc)
+                          {:verified? true})
+        record-delivery (fn [event]
+                          (swap! deliveries conj event)
+                          {:accepted? true :status 202 :response-request-id "req_fixture_work"})
+        active-grant? (atom true)
+        owner-proof {:principal {:auth/did codex :auth/method :actor-node :auth/mailbox codex-at}
+                     :oauth/grant-id "fixture-grant" :oauth/client-id "fixture-client"
+                     :mailbox/owner-root-did root :mailbox/bound-actor-did codex
+                     :mailbox/actors? true}
+        rejected-proofs {"fixture-other-root"
+                         (assoc owner-proof :mailbox/owner-root-did "did:web:axxium.test:actors:other-owner")
+                         "fixture-atproto-method"
+                         ;; Keep the same mailbox and an equal bound/principal DID
+                         ;; while using a well-formed direct AT Protocol principal.
+                         (assoc owner-proof :principal {:auth/did codex-at :auth/method :atproto}
+                                            :mailbox/bound-actor-did codex-at)
+                         "fixture-other-bound-actor"
+                         (assoc owner-proof :mailbox/bound-actor-did grok)}
+        access-proofs (assoc rejected-proofs "fixture-owner" owner-proof)
+        grant-proofs (into #{} (map #(dissoc % :mailbox/actors?)) (vals access-proofs))
+        oauth (when coexistence?
+                {:issuer (str origin "/oidc") :resource (str origin endpoint)
+                 :scope "mailbox:events" :actor-messaging? true :owner-delegated? true
+                 :access-proof! access-proofs
+                 :active-grant? (fn [proof]
+                                  (and @active-grant?
+                                       (contains? grant-proofs (dissoc proof :mailbox/actors?))))})
         opt-in (atom nil)
         clock (atom (secrets/now))
         after-proof (atom (fn [] nil))
@@ -293,6 +364,8 @@
     (try
       (fs/writeFileSync ledger "" #js {:mode 384})
       (fs/writeFileSync identity-key (.toString (js/Buffer.alloc 32 6) "base64") #js {:mode 384})
+      (when coexistence?
+        (fs/writeFileSync callback-key (.toString (js/Buffer.alloc 32 8) "base64") #js {:mode 384}))
       (with-redefs [signing/current! (constantly keys)]
         (let [codex-token (await (token/create-atproto-token! {:id actor-id} cred-id codex-at))
               query (db/q-select-actor-by-atproto-session actor-id (secrets/token-hash codex-token)
@@ -306,6 +379,10 @@
                         identity/current-actor-state actor-state
                         identity/with-current-actor-state! (fn ^:async with-fixture-state [f]
                                                             {:result (await (f (actor-state)))})
+                        http-server/on-interval! (fn [_ _ tick] (reset! callback-tick tick))
+                        webhook/verify! (fn ([_] (verify-callback)) ([_ _] (verify-callback)))
+                        webhook/deliver! (fn ([_ event] (record-delivery event))
+                                           ([_ _ event] (record-delivery event)))
                         cfg/get-in-config (fn [ks]
                                             (case (first ks)
                                               :mailbox/ledger-file ledger
@@ -313,7 +390,10 @@
                                               :mailbox/bootstrap-actor-dids #{grok}
                                               :mailbox/bound-bootstrap-bindings @opt-in
                                               :mailbox/stream-enabled? true
-                                              :mailbox/subscriptions-enabled? false
+                                              :mailbox/subscriptions-enabled? coexistence?
+                                              :mailbox/transport-coexistence? coexistence?
+                                              :mailbox/webhook-actor-did (when coexistence? codex-at)
+                                              :mailbox/webhook-key-file (when coexistence? callback-key)
                                               :github-identity/ledger-file (path/join dir "actors.edn")
                                               :github-identity/token-key-file identity-key
                                               :identity/root-operator-binding
@@ -321,10 +401,85 @@
                                               :axxium/public-base-url origin
                                               (config ks)))]
             (.register app fastify-cookie)
-            (routes/register-mailbox-routes! app)
+            (when coexistence?
+              (is (= :invalid-mailbox-coexistence-config
+                     (try
+                       (routes/register-mailbox-routes! app (dissoc oauth :owner-delegated?))
+                       (catch :default error (:reason (ex-data error))))))
+              (is (nil? @callback-tick)))
+            (routes/register-mailbox-routes! app oauth)
             (let [url (str (await (.listen app #js {:port 0 :host "127.0.0.1"})) endpoint)
                   base {:url url :signal (.-signal controller)}]
               (case scenario
+                :coexistence
+                (let [sender (await (initialize! (assoc base :bearer grok-key :did grok)))
+                      receiver (await (initialize! (assoc base :bearer codex-token)))
+                      oauth-client (assoc base :bearer "fixture-owner")
+                      oauth-init (await (post! oauth-client (rpc "initialize" nil)))
+                      oauth-capabilities (get (result oauth-init) "capabilities")
+                      work (assoc oauth-client :sid (:sid oauth-init))
+                      event-params {"name" "message.available"
+                                    "delivery" {"mode" "webhook" "url" "https://callback.example.com/inbox"}}
+                      subscribe (rpc "events/subscribe"
+                                     (-> event-params
+                                         (assoc "ttlMs" 60000)
+                                         (assoc-in ["delivery" "secret"]
+                                                   (str "whsec_" (.toString (js/Buffer.alloc 32 7) "base64")))))
+                      body {"text" "Synthetic coexistence"}
+                      send-once (send codex-at "combined-fixture" body)
+                      acknowledge #(post! receiver (tool "acknowledge_message" {"message_id" %}))]
+                  (is (= 200 (:status oauth-init)))
+                  (is (contains? oauth-capabilities "events"))
+                  (is (not (contains? oauth-capabilities "resources")))
+                  (is (= 405 (await (denied-stream-status! work))))
+                  (await (post! receiver (tool "register_mailbox" {})))
+                  (await (post! sender (tool "register_mailbox" {})))
+                  (is (= {} (result (await (post! receiver (resource-request "resources/subscribe" inbox))))))
+                  (is (= -32601 (get-in (await (post! receiver subscribe)) [:json "error" "code"])))
+                  (is (zero? @challenges))
+                  (await (deny-fresh-webhook-proofs! base subscribe rejected-proofs challenges ledger))
+                  (let [events (get (result (await (post! work (rpc "events/list" nil)))) "events")]
+                    (is (= ["message.available"] (mapv #(get % "name") events))))
+                  (let [old (structured (await (post! sender (send codex-at "before-subscribe" body))))]
+                    (is (= "accepted" (get old "accepted")))
+                    (let [original (result (await (post! work subscribe)))]
+                      (is (string? (get original "id")))
+                      (swap! clock secrets/instant-after 31000)
+                      (let [refreshed (result (await (post! work subscribe)))]
+                        (is (= (get original "id") (get refreshed "id")))
+                        (is (pos? (compare (get refreshed "refreshBefore")
+                                           (get original "refreshBefore"))))))
+                    (is (= 1 @challenges))
+                    (await (@callback-tick))
+                    (is (empty? @deliveries))
+                    (await (acknowledge (get old "message_id"))))
+                  (let [stream (await (connect! receiver))
+                        receipt (structured (await (post! sender send-once)))]
+                    (await (deny-retained-webhook-proofs! @callback-tick rejected-proofs deliveries ledger))
+                    (await (expect-message! receiver stream grok body receipt))
+                    (is (= (get receipt "message_id")
+                           (get (structured (await (acknowledge (get receipt "message_id")))) "message_id")))
+                    (await (@callback-tick))
+                    (is (= 1 (count @deliveries)))
+                    (is (= {"message_id" (get receipt "message_id")} (get-in @deliveries [0 "data"])))
+                    (is (= (get receipt "message_id") (get (structured (await (post! sender send-once))) "message_id")))
+                    (await (@callback-tick))
+                    (is (= 1 (count @deliveries)))
+                    (reset! active-grant? false)
+                    (let [second-body {"text" "Native stream after Work grant revocation"}
+                          second (structured (await (post! sender (send codex-at "combined-revoked" second-body))))]
+                      (await (expect-message! receiver stream grok second-body second))
+                      (await (@callback-tick))
+                      (is (= 1 (count @deliveries)))
+                      (reset! active-grant? true)
+                      (is (= {} (result (await (post! work (rpc "events/unsubscribe" event-params))))))
+                      (await (acknowledge (get second "message_id"))))
+                    (let [third-body {"text" "Native stream after webhook unsubscribe"}
+                          third (structured (await (post! sender (send codex-at "combined-removed" third-body))))]
+                      (await (expect-message! receiver stream grok third-body third))
+                      (await (@callback-tick))
+                      (is (= 1 (count @deliveries))))
+                    (await (expect-no-extra-update! stream))))
                 :bound-bootstrap
                 (await (verify-bound-bootstrap! base {:grok grok :grok-key grok-key :codex codex :codex-key codex-key
                                                      :codex-token codex-token :root root :actor-ledger actor-ledger
@@ -343,6 +498,12 @@
 (deftest bootstrap-and-bound-at-actors-deliver-over-native-sse
   (async done
     (-> (verify-native-stream! :roundtrip)
+        (.catch (fn [error] (is false (str error))))
+        (.finally done))))
+
+(deftest authorized-webhook-and-native-sse-can-share-one-mailbox
+  (async done
+    (-> (verify-native-stream! :coexistence)
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
 

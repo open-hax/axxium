@@ -206,6 +206,7 @@
      :mailbox/ledger-file (present (env "AXXIUM_MAILBOX_LEDGER_FILE"))
      :mailbox/subscriptions-enabled? (env-bool "AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED" true)
      :mailbox/stream-enabled? (env-bool "AXXIUM_MAILBOX_STREAM_ENABLED" false)
+     :mailbox/transport-coexistence? (env-bool "AXXIUM_MAILBOX_TRANSPORT_COEXISTENCE" false)
      :mailbox/webhook-key-file (present (env "AXXIUM_MAILBOX_WEBHOOK_KEY_FILE"))
      :mailbox/webhook-actor-did webhook-actor
      :mailbox/pilot-allowed-dids (mailbox-pilot-allowed-dids (env "AXXIUM_MAILBOX_PILOT_ALLOWED_DIDS") webhook-actor)
