@@ -27,7 +27,14 @@
                     "required" ["message_id"] "additionalProperties" false}})
 
 (defn enabled? [runtime proof]
-  (and runtime (= (:owner runtime) (principal/address (:principal proof)))))
+  (and runtime
+       (= (:owner runtime) (principal/address (:principal proof)))
+       (if-let [root (:owner-root-did runtime)]
+         (and (some? (:oauth/grant-id proof))
+              (= root (:mailbox/owner-root-did proof))
+              (= :actor-node (get-in proof [:principal :auth/method]))
+              (= (:mailbox/bound-actor-did proof) (get-in proof [:principal :auth/did])))
+         true)))
 
 (defn- success [id result]
   {:response {"jsonrpc" "2.0" "id" id "result" result}})
@@ -192,17 +199,18 @@
     (when-let [candidate (first (filter #(= owner (:owner %)) (events/due-deliveries lg (secrets/now))))]
       (let [subscription (events/subscription lg owner)
             binding (open-binding key subscription)]
-        (when (and (:proof binding) (= (:generation candidate) (:generation subscription)))
+        (when (and (enabled? runtime (:proof binding))
+                   (= (:generation candidate) (:generation subscription)))
           (await (send-attempt! runtime candidate subscription binding)))))))
 
 (defn install!
   "Enable the bounded pilot only for an explicitly selected DID and private key."
-  [app writer path owner key-file active-proof!]
+  [app writer path owner key-file active-proof! owner-root-did]
   (when (or owner key-file)
     (let [key (when key-file (crypto/read-private-key! key-file))]
       (when-not (and (did/did? owner) (<= (count owner) 2048) key)
         (throw (ex-info "Mailbox webhook pilot requires a recipient DID and a private key file" {})))
-      (let [runtime {:owner owner :key key :writer writer :path path
+      (let [runtime {:owner owner :key key :writer writer :path path :owner-root-did owner-root-did
                      :active-proof! active-proof! :verifying? (atom nil)}]
         (http/on-interval! app 2500 #(work! runtime))
         runtime))))

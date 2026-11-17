@@ -259,9 +259,25 @@ with no registered mailbox does not appear in discovery.
 
 Enable `AXXIUM_MAILBOX_STREAM_ENABLED=true` on an instance with an explicit
 actor directory and configured human root. Set
-`AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=false` to keep webhook subscriptions
-disabled. Native MCP notifications travel over the authenticated HTTP
-connection and require no callback URL.
+`AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=false` for the SSE-only profile. Native
+MCP notifications travel over the authenticated HTTP connection and require
+no callback URL.
+
+For both transports, explicitly enable `AXXIUM_MAILBOX_TRANSPORT_COEXISTENCE=true`
+and `AXXIUM_MAILBOX_SUBSCRIPTIONS_ENABLED=true` alongside streaming. This
+profile requires a configured webhook recipient and sealing key plus the
+owner-consented Work OAuth authority described below. Only that live OAuth
+binding can list or manage webhook events. Eligible native sessions keep
+their existing SSE permissions. Disabling coexistence and webhook
+subscriptions restores the SSE-only profile on restart. An authorized,
+unexpired callback can resume on restart when webhooks are enabled.
+
+Both adapters signal the same durable inbox. Webhook payloads carry the
+message ID. SSE clients obtain that ID from the inbox after the signal.
+Use the message ID to correlate processing when both adapters watch one
+inbox. Each adapter has its own subscription and delivery evidence. A
+recipient can acknowledge its message while a webhook notification is still
+pending, so a handler should check whether it has already handled that ID.
 
 After `initialize`, an eligible client receives the `resources.subscribe`
 capability. Open an HTTP GET on the same `/api/mailbox/mcp` endpoint with
