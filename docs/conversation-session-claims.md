@@ -12,7 +12,7 @@ The application boundary verifies a live owner delegation that gives the exact a
 
 The same live claim returns the same actor even if its name or candidate DID in a retry differs. An expired proof, a dead actor, or a candidate owned by another claim fails closed. A retry does not extend a lease. Serialize claim decisions against the current identity ledger and commit the recorded decision and new actor together. A live adapter must prove that concurrent retries persist only one actor and recover from uncertain writes before enabling the command.
 
-Claiming an actor creates no credential or resource grant. Subsequent mailbox, Drive, Git, SSH, and SFTP access requires the corresponding actor-specific authorization. A claim response can disclose the public actor identity and lease. Secret custody belongs to a separate credential operation.
+Claiming an actor starts with no repository permissions or allowed resource actions, retains the connector's explicit prohibitions, and creates no credential or resource grant. Subsequent mailbox, Drive, Git, SSH, and SFTP access requires the corresponding actor-specific authorization. A claim response can disclose the public actor identity and lease. Keep opaque provider identifiers inside claim state. Secret custody belongs to a separate credential operation.
 
 ## Provider integration
 

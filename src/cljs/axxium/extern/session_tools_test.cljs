@@ -75,6 +75,31 @@
     (is (empty? (gi/directory-at st codex (js/Date.))) "nothing was advertised")
     (is (= session (mcp/authenticate st session key)) "the session authenticates with the returned key")))
 
+(defn- ^:async claim-metadata-is-private* []
+  (let [{:keys [at] :as ids} (mcp/event-ids)
+        deadline (js/Date. (+ (inst-ms at) 60000))
+        session (str codex ":s-claimed")
+        proof {:claim/owner-did root :claim/connector-did codex
+               :claim/issuer "https://connector.example" :claim/client-id "codex-app" :claim/subject "member-1"
+               :claim/product :codex :claim/context [:general]
+               :claim/conversation-id "conversation-1" :claim/session-id "session-1" :claim/expires-at deadline}
+        candidate {:actor/did session :actor/name "A conversation title" :actor/lease-until deadline}
+        {lg :ledger claim :result} (gi/claim-session (tree) codex proof candidate ids)
+        closed (await (mcp/call {:ledger lg :ids mcp/event-ids} {:actor codex}
+                                "session_close" {:actor/did session}))
+        st (state/fold (:ledger closed))]
+    (is (= session (:actor/did claim)))
+    (is (= :revoked (get-in closed [:result :resource/metadata :actor/status])))
+    (is (not (contains? (get-in closed [:result :resource/metadata]) :actor/session-claim)))
+    (is (= (dissoc proof :claim/expires-at)
+           (get-in (gi/actor-node st session) [:resource/metadata :actor/session-claim])))))
+
+(deftest closing-a-session-does-not-expose-claim-metadata
+  (async done
+    (-> (claim-metadata-is-private*)
+        (.catch (fn [e] (is false (str "claim-metadata-is-private rejected: " (pr-str e)))))
+        (.finally done))))
+
 (deftest a-refused-default-advert-still-returns-a-usable-session
   (async done
     (-> (refused-advert*)

@@ -17,7 +17,8 @@
    A credential is generic over :credential/type; :github-app is the first
    (GitHub blocks automated user sign-up, so each bot is its own App and
    shows as <slug>[bot]). :github-pat and :ssh-key share the same tree."
-  (:require [axxium.law.event :as event]
+  (:require [axxium.law.did :as did]
+            [axxium.law.event :as event]
             [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]))
@@ -44,6 +45,46 @@
 ;;    the advertised nodes at anchor that v sees and q matches.
 (def session-parent-kinds #{:agent :bot :session})
 (def max-lease-ms 86400000)
+
+(def ^:private claim-identifier
+  [:and [:string {:min 1 :max 512}] [:re #"^[!-~]+$"]])
+
+(def ^:private claim-did
+  [:and [:string {:max 1024}] [:fn did/web?]])
+
+(def ^:private SessionClaimProof
+  [:map {:closed true}
+   [:claim/owner-did claim-did]
+   [:claim/connector-did claim-did]
+   [:claim/issuer [:and claim-identifier [:re #"^https://[^?#]+$"]]]
+   [:claim/client-id claim-identifier]
+   [:claim/subject claim-identifier]
+   [:claim/product [:enum :work :dot :chat :codex]]
+   [:claim/context [:or [:tuple [:= :general]] [:tuple [:= :project] claim-identifier]]]
+   [:claim/conversation-id claim-identifier]
+   [:claim/session-id claim-identifier]
+   [:claim/expires-at [:fn inst?]]])
+
+(def ^:private SessionClaimCandidate
+  [:map {:closed true}
+   [:actor/did claim-did]
+   [:actor/name [:and [:string {:min 1 :max 160}] [:fn (complement str/blank?)]]]
+   [:actor/lease-until [:fn inst?]]])
+
+(defn valid-session-claim?
+  "Check the shape of server-verified delegation and its proposed child."
+  [proof candidate]
+  (and (m/validate SessionClaimProof proof)
+       (m/validate SessionClaimCandidate candidate)))
+
+(defn direct-session-child?
+  "A valid session DID uses exactly one suffix segment below its connector."
+  [connector child]
+  (let [prefix (str connector ":")]
+    (and (did/web? connector) (did/web? child)
+         (str/starts-with? child prefix)
+         (not (str/includes? (subs child (count prefix)) ":")))))
+
 (def advert-kind :resource/actor-advert)
 (defn advert-resource-id [did] (str "actor-advert:" did))
 
