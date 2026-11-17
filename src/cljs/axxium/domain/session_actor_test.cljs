@@ -1,10 +1,12 @@
 (ns axxium.domain.session-actor-test
   "S1-S3: leased session nodes, self-advertisement at ancestor anchors, and
    find(v, anchor, q) over the advert fold."
-  (:require [axxium.domain.github-identity :as gi]
+  (:require [axxium.domain.authority :as authority]
+            [axxium.domain.github-identity :as gi]
             [axxium.domain.kernel-fixture :as fx]
             [axxium.domain.mailbox-mcp :as mailbox]
             [axxium.domain.policy :as policy]
+            [axxium.domain.resource :as resource]
             [axxium.domain.state :as state]
             [cljs.test :refer [deftest is testing]]))
 
@@ -89,6 +91,40 @@
                                      [:resource/metadata :actor/session-claim :claim/conversation-id])))
     (is (= "session-2" (get-in (gi/actor-node second-state s2)
                                 [:resource/metadata :actor/session-claim :claim/session-id])))))
+
+(deftest new-session-claims-require-an-address-without-grants
+  (let [ids (counter)
+        lg (tree ids)
+        file (resource/local-file root "/fixture/session.txt" {})
+        {registered :ledger} (resource/register lg (state/fold lg) root file (ids))
+        grant {:grant/id "session-read" :grant/actor s1 :grant/resource (:resource/id file)
+               :grant/actions [:read]}
+        add-grant (fn [journal g] (resource/issue-grant journal (state/fold journal) root g (ids)))
+        {pregranted :ledger pregrant :effect} (add-grant registered grant)
+        proof (claim-proof)
+        candidate (claim-candidate s1)
+        {claimed :ledger result :result} (gi/claim-session registered codex proof candidate (ids))
+        {postgranted :ledger postgrant :effect} (add-grant claimed grant)]
+    (is (some? pregrant))
+    (is (= {:ledger pregranted :error :forbidden}
+           (gi/claim-session pregranted codex proof candidate (ids))))
+    (is (= s1 (:actor/did result)))
+    (is (some? postgrant))
+    (is (= {:ledger postgranted :result result}
+           (gi/claim-session postgranted codex proof candidate (ids))))
+    (testing "prior membership with inherited access also disqualifies a candidate"
+      (let [membership (authority/membership-grant "session-member" s1 fx/team)
+            team {:resource/id (:grant/resource membership) :resource/kind :resource/actor
+                  :resource/owner root :resource/store :local}
+            {with-team :ledger} (resource/register registered (state/fold registered) root team (ids))
+            {with-permission :ledger}
+            (add-grant with-team (assoc grant :grant/id "team-read" :grant/actor fx/team))
+            {with-member :ledger joined :effect} (add-grant with-permission membership)]
+        (is (some? joined))
+        (is (authority/allowed? (state/fold with-member) s1 (:resource/id file) :read fx/t0)
+            "membership carries authority")
+        (is (= {:ledger with-member :error :forbidden}
+               (gi/claim-session with-member codex proof candidate (ids))))))))
 
 (deftest session-claims-fail-closed-on-unverified-scope-and-stale-identity
   (let [ids (counter)

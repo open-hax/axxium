@@ -318,6 +318,8 @@
 
             (and (session-lease-ok? state connector-did lease-until at)
                  (<= (inst-ms lease-until) (inst-ms expires-at))
+                 (not-any? #(and (= did (:grant/actor %)) (seq (:grant/actions %)))
+                           (vals (:grants state)))
                  (law/policy-within? empty-policy parent-policy))
             (let [session (update (node did connector-did name empty-policy :active :session)
                                   :resource/metadata assoc
