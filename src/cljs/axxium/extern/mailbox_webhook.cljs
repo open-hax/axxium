@@ -54,6 +54,14 @@
   [value]
   (some? (secret-bytes value)))
 
+(defn same-secret?
+  "Compare decoded Standard Webhooks keys regardless of Base64 padding."
+  [left right]
+  (when-let [left-key (secret-bytes left)]
+    (when-let [right-key (secret-bytes right)]
+      (and (= (.-length left-key) (.-length right-key))
+           (crypto/timingSafeEqual left-key right-key)))))
+
 (defn subscription-id
   "Derive the stable identity for the unfiltered message.available event."
   [owner url]
@@ -76,19 +84,22 @@
 (defn- header-id? [value]
   (and (string? value) (some? (re-matches #"[A-Za-z0-9_-]{1,128}" value))))
 
-(defn- request-options [subscription-id event-id key body signal]
+(defn- signature [event-id timestamp body key]
+  (str "v1," (-> (.createHmac crypto "sha256" key)
+                 (.update (str event-id "." timestamp ".") "utf8")
+                 (.update body)
+                 (.digest "base64"))))
+
+(defn- request-options [subscription-id event-id keys body signal]
   (let [timestamp (str (js/Math.floor (/ (credentials/now-ms) 1000)))
-        signature (-> (.createHmac crypto "sha256" key)
-                      (.update (str event-id "." timestamp ".") "utf8")
-                      (.update body)
-                      (.digest "base64"))]
+        signatures (str/join " " (distinct (map (partial signature event-id timestamp body) keys)))]
     #js {:method "POST"
          :redirect "error"
          :signal signal
          :headers #js {"Content-Type" "application/json"
                        "webhook-id" event-id
                        "webhook-timestamp" timestamp
-                       "webhook-signature" (str "v1," signature)
+                       "webhook-signature" signatures
                        "X-MCP-Subscription-Id" subscription-id}
          :body body}))
 
@@ -113,7 +124,7 @@
       (or (.-aborted signal) (contains? #{"AbortError" "TimeoutError"} name)) {:reason "timeout"}
       :else {:reason "unreachable"})))
 
-(defn- ^:async post! [fetch {:keys [id url secret]} event-id payload response->result]
+(defn- ^:async post! [fetch {:keys [id url secret previous-secret]} event-id payload response->result]
   (let [url (canonical-url url)
         key (secret-bytes secret)]
     (if-not (and url key (header-id? id) (header-id? event-id))
@@ -124,7 +135,8 @@
             (if (> (.-length body) event-limit)
               {:reason "payload_too_large"}
               (let [send (or fetch @fetch-callback)
-                    response (await (send url (request-options id event-id key body signal)))]
+                    keys (into [key] (keep secret-bytes) [previous-secret])
+                    response (await (send url (request-options id event-id keys body signal)))]
                 (await (response->result response)))))
           (catch :default error
             (transport-failure signal error)))))))
@@ -141,7 +153,7 @@
   ([fetch subscription]
    (let [challenge (.toString (crypto/randomBytes 32) "base64url")
          event-id (str "msg_verification_" (credentials/secure-id))
-         result (await (post! fetch subscription event-id
+         result (await (post! fetch (select-keys subscription [:id :url :secret]) event-id
                               {"type" "verification" "challenge" challenge}
                               (fn ^:async verify-response [response]
                                 (if (.-ok response)
@@ -157,7 +169,8 @@
      (merge {:verified? false} (select-keys result [:verified? :reason])))))
 
 (defn ^:async deliver!
-  "Sign and send one event. The caller owns event identity and retry policy."
+  "Sign and send one event, optionally with an additional prior key. The caller
+   owns the rotation deadline, event identity and retry policy."
   ([subscription event] (await (deliver! nil subscription event)))
   ([fetch subscription event]
    (let [result (await (post! fetch subscription (get event "eventId") event

@@ -15,6 +15,7 @@
 (def ^:private max-ttl-ms 86400000)
 (def ^:private max-attempts 3)
 (def ^:private attempt-lease-ms 30000)
+(def ^:private first-retry-delay-ms 5000)
 
 (defn- subscription-id? [value]
   (and (string? value) (re-matches #"sub_[0-9a-f]{64}" value)))
@@ -149,7 +150,7 @@
      :attempt attempt-number}))
 
 (defn- retry-delay-ms [attempt-number]
-  (* 5000 attempt-number))
+  (reduce (fn [delay _] (* 2 delay)) first-retry-delay-ms (range 1 attempt-number)))
 
 (defn- eligible-message [view sub event at]
   (let [base (candidate sub event 1)

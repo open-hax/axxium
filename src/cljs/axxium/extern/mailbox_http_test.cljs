@@ -218,6 +218,70 @@
         (.catch (fn [error] (is false (str error))))
         (.finally done))))
 
+(defn- webhook-fixture-key [byte]
+  (str "whsec_" (.toString (js/Buffer.alloc 32 byte) "base64")))
+
+(defn- ^:async exercise-webhook-rotation!
+  [{:keys [app oauth access-token grant challenge-ok? challenges delivery-keys tick send
+           subscribe ledger]}]
+  (let [key0 (webhook-fixture-key 17)
+        key1 (webhook-fixture-key 18)
+        key2 (webhook-fixture-key 19)
+        key3 (webhook-fixture-key 20)
+        key4 (webhook-fixture-key 21)
+        start (secrets/now-ms)
+        elapsed (atom 0)
+        now-ms #(+ start @elapsed)
+        initialize #(request! @app "POST" access-token nil (rpc "initialize") {})
+        refresh (fn [sid key]
+                  (request! @app "POST" access-token sid
+                            (assoc-in subscribe ["params" "delivery" "secret"] key) {}))
+        deliver (fn ^:async deliver-rotation-fixture [name]
+                  (let [before (count @delivery-keys)]
+                    (is (= "accepted" (get (result (await (send name))) "accepted")))
+                    (await (@tick))
+                    (is (= (inc before) (count @delivery-keys)))
+                    (peek @delivery-keys)))]
+    (with-redefs [secrets/now-ms now-ms
+                  secrets/now #(js/Date. (now-ms))]
+      (let [sid (:sid (await (initialize)))
+            initial (get-in (await (refresh sid key0)) [:data "result"])
+            challenge-boundary (count @challenges)]
+        (is (str/starts-with? (get initial "id" "") "sub_"))
+        (reset! challenge-ok? false)
+        (is (= -32015 (get-in (await (refresh sid key1)) [:data "error" "code"])))
+        (is (= [key0 nil] (await (deliver "failed-rotation"))))
+        (reset! challenge-ok? true)
+        (is (= (get initial "id") (get-in (await (refresh sid key1)) [:data "result" "id"])))
+        (is (= [key1 key1] (subvec @challenges challenge-boundary)))
+        (await (.close (:app @app)))
+        (reset! app (await (start-app! oauth)))
+        (is (= [key1 key0] (await (deliver "rotation-after-restart"))))
+
+        (reset! elapsed 30000)
+        (let [unpadded (str/replace key1 #"=+$" "")
+              changed-ttl (-> subscribe
+                              (assoc-in ["params" "ttlMs"] 180000)
+                              (assoc-in ["params" "delivery" "secret"] unpadded))]
+          (is (= (get initial "id")
+                 (get-in (await (request! @app "POST" access-token sid changed-ttl {}))
+                         [:data "result" "id"])))
+          (is (= [key1 key1] (subvec @challenges challenge-boundary)))
+          (is (= [unpadded key0] (await (deliver "same-key-renewal"))))
+          (reset! elapsed 60000)
+          (is (= [unpadded nil] (await (deliver "rotation-deadline")))))
+
+        (is (= (get initial "id") (get-in (await (refresh sid key2)) [:data "result" "id"])))
+        (is (= (get initial "id") (get-in (await (refresh sid key3)) [:data "result" "id"])))
+        (is (= [key3 key2] (await (deliver "second-rotation"))))
+        (swap! grant assoc :oauth/grant-id "fixture-new-grant")
+        (let [new-sid (:sid (await (initialize)))]
+          (is (= (get initial "id") (get-in (await (refresh new-sid key4)) [:data "result" "id"])))
+          (is (= [key4 nil] (await (deliver "different-grant")))))
+        (is (= [key1 key1 key2 key3 key4] (subvec @challenges challenge-boundary)))
+        (let [saved (fs/readFileSync ledger "utf8")]
+          (is (not-any? #(str/includes? saved %) [key0 key1 key2 key3 key4])))))))
+
 (defn- ^:async verify-webhook* []
   (let [keys (await (signing/generate-ephemeral!))
         dir (fs/mkdtempSync (path/join (os/tmpdir) "axxium-mailbox-events-"))
@@ -232,21 +296,24 @@
                :access-proof! (fn [value] (when (= access-token value) @mailbox-grant))
                :active-grant? (fn [proof] (= proof @mailbox-grant))}
         challenge-ok? (atom false)
-        challenge-count (atom 0)
+        challenges (atom [])
         on-delivery (atom nil)
         deliveries (atom [])
+        delivery-keys (atom [])
         config cfg/get-in-config
         callback "https://callback.example.com/inbox"
-        secret (str "whsec_" (.toString (js/Buffer.alloc 32 7) "base64"))
+        secret (webhook-fixture-key 7)
         filter-args {"name" "message.available" "arguments" {}
                      "delivery" {"mode" "webhook" "url" callback}}
         subscribe (assoc (rpc "events/subscribe") "params"
                          (assoc-in filter-args ["delivery" "secret"] secret))
         unsubscribe (assoc (rpc "events/unsubscribe") "params" filter-args)
-        verify (fn []
-                 (swap! challenge-count inc)
+        verify (fn [{:keys [secret previous-secret]}]
+                 (is (nil? previous-secret))
+                 (swap! challenges conj secret)
                  (js/Promise.resolve {:verified? @challenge-ok? :reason "challenge_failed"}))
-        deliver (fn ^:async fake-callback [event]
+        deliver (fn ^:async fake-callback [{:keys [secret previous-secret]} event]
+                  (swap! delivery-keys conj [secret previous-secret])
                   (swap! deliveries conj event)
                   (when-let [f @on-delivery] (await (f)))
                   {:accepted? true :status 202 :response-request-id "req_work_fixture"})]
@@ -256,8 +323,9 @@
       (with-redefs [signing/current! (constantly keys)
                     db/query-auth-proof! (fn [q] (js/Promise.resolve (get @live q)))
                     http/on-interval! (fn [_ _ f] (reset! tick f))
-                    webhook/verify! (fn ([_] (verify)) ([_ _] (verify)))
-                    webhook/deliver! (fn ([_ event] (deliver event)) ([_ _ event] (deliver event)))
+                    webhook/verify! (fn ([binding] (verify binding)) ([_ binding] (verify binding)))
+                    webhook/deliver! (fn ([binding event] (deliver binding event))
+                                       ([_ binding event] (deliver binding event)))
                     cfg/get-in-config (fn [ks]
                                         (case (first ks)
                                           :mailbox/ledger-file ledger
@@ -321,7 +389,7 @@
           (is (= -32601 (get-in (await (request! @app "POST" a a-session subscribe {}))
                                 [:data "error" "code"])))
           (is (= -32001 (get-in (await (event-call subscribe)) [:data "error" "code"])))
-          (is (zero? @challenge-count))
+          (is (empty? @challenges))
           (await (request! @app "POST" b b-session (tool "register_mailbox" {}) {}))
           (is (= "message.available" (get-in (await (event-call (rpc "events/list")))
                                               [:data "result" "events" 0 "name"])))
@@ -335,7 +403,7 @@
             (is (str/starts-with? (get sub "id" "") "sub_"))
             (is (= sub refreshed))
             (is (= before (fs/readFileSync ledger "utf8")) "A duplicate subscribe does not append.")
-            (is (= 2 @challenge-count) "The same verified callback and key do not require a repeat challenge."))
+            (is (= [secret secret] @challenges) "The same verified callback and key do not require a repeat challenge."))
           (await (@tick))
           (is (empty? @deliveries) "Existing messages are not replayed on subscribe.")
           (await (.close (:app @app)))
@@ -372,7 +440,14 @@
           (let [saved (fs/readFileSync ledger "utf8")]
             (is (not (str/includes? saved callback)))
             (is (not (str/includes? saved secret)))
-            (is (not (str/includes? saved (secrets/token-hash b)))))))
+            (is (not (str/includes? saved (secrets/token-hash b)))))
+          (reset! on-delivery nil)
+          (reset! mailbox-grant (assoc root :oauth/grant-id "fixture-rotation-grant" :oauth/client-id "chatgpt-test"
+                                           :oauth/resource audience))
+          (await (exercise-webhook-rotation!
+                  {:app app :oauth oauth :access-token access-token :grant mailbox-grant
+                   :challenge-ok? challenge-ok? :challenges challenges :delivery-keys delivery-keys
+                   :tick tick :send send :subscribe subscribe :ledger ledger}))))
       (finally
         (when @app (await (.close (:app @app))))
         (fs/rmSync dir #js {:recursive true})))))
