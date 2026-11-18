@@ -95,7 +95,10 @@ caller ID scoped to the exact predecessor. It uses the existing
 a successor returns no prepared intent. The original intent remains retired.
 The child's prepared record links to its predecessor. A legacy record at
 the same caller ID is still recoverable in its original role and conflicts
-with successor materialization.
+with successor materialization. Before writing a parent checkpoint or a
+child preparation, the store checks all saved phases at the reserved child
+ID. A malformed or orphaned phase refuses the operation before either
+record is added.
 
 The checkpoint preserves the IDs and digest. The caller retains the approved
 notice content and supplies its digest. Authorization of new hints,

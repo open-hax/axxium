@@ -28,6 +28,12 @@
        first
        (path/join dir)))
 
+(defn- store-snapshot [dir]
+  (into {}
+        (map (fn [filename]
+               [filename (.toString (fs/readFileSync (path/join dir filename)) "base64")]))
+        (js->clj (fs/readdirSync dir))))
+
 (defn- failure-reason [run]
   (try
     (run)
@@ -194,6 +200,49 @@
             (fs/writeFileSync terminal-file terminal-bytes #js {:mode 8r600})
             (is (= :record-conflict
                    (failure-reason #(store/prepare-successor! dir caller-id binding))))))))))
+
+(deftest damaged-successor-refuses-before-publishing-any-record
+  (with-private-dir
+    (fn [fixture-dir]
+      (let [{:keys [caller-id binding]} intent
+            check (constantly completed)]
+        (store/prepare! fixture-dir intent)
+        (store/begin-attempt! fixture-dir intent)
+        (let [{:keys [successor-intent]}
+              (store/checkpoint-terminal! fixture-dir caller-id next-digest check)]
+          (store/prepare-successor! fixture-dir caller-id binding)
+          (store/begin-attempt! fixture-dir successor-intent)
+          (store/record-accepted! fixture-dir successor-intent "fixture-successor-queue")
+          (let [accepted-file (record-with-suffix fixture-dir ".accepted")
+                accepted-name (path/basename accepted-file)]
+            (testing "an orphaned successor acceptance leaves the parent attempted"
+              (with-private-dir
+                (fn [dir]
+                  (store/prepare! dir intent)
+                  (store/begin-attempt! dir intent)
+                  (fs/copyFileSync accepted-file (path/join dir accepted-name))
+                  (let [before (store-snapshot dir)]
+                    (is (= :record-conflict
+                           (failure-reason #(store/checkpoint-terminal! dir caller-id next-digest check))))
+                    (is (= :attempted (:state (store/recover! dir caller-id))))
+                    (is (false? (:permit? (store/begin-attempt! dir intent))))
+                    (is (= :record-conflict
+                           (failure-reason #(store/begin-attempt! dir successor-intent))))
+                    (is (= before (store-snapshot dir)))))))
+            (testing "a torn successor acceptance leaves the existing checkpoint intact"
+              (with-private-dir
+                (fn [dir]
+                  (store/prepare! dir intent)
+                  (store/begin-attempt! dir intent)
+                  (let [checkpoint (store/checkpoint-terminal! dir caller-id next-digest check)]
+                    (fs/writeFileSync (path/join dir accepted-name) "[torn" #js {:mode 8r600})
+                    (let [before (store-snapshot dir)]
+                      (is (= :invalid-record
+                             (failure-reason #(store/prepare-successor! dir caller-id binding))))
+                      (is (= checkpoint (store/recover! dir caller-id)))
+                      (is (= :invalid-record
+                             (failure-reason #(store/begin-attempt! dir successor-intent))))
+                      (is (= before (store-snapshot dir))))))))))))))
 
 (deftest malformed-or-unpublished-state-never-creates-a-duplicate-permit
   (with-private-dir
