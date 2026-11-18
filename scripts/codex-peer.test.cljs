@@ -87,6 +87,16 @@
   (.send client (js/JSON.stringify
                  (clj->js {"jsonrpc" "2.0" "id" (get message "id") "result" result}))))
 
+(defn- send-progress! [client]
+  (let [progress (js/JSON.stringify
+                  #js {:jsonrpc "2.0" :method "fixture/progress"
+                       :params #js {:text (.repeat "a" (* 1792 1024))}})]
+    (letfn [(send-next [remaining]
+              (when (and (pos? remaining) (= ws/WebSocket.OPEN (.-readyState client)))
+                (.send client progress (fn [error]
+                                         (when-not error (send-next (dec remaining)))))))]
+      (send-next 5))))
+
 (defn- install-rpc-fixture! [client socket-path mode calls errors]
   (.on client "error" (fn [_] nil))
   (.on client "message"
@@ -104,8 +114,14 @@
                    (fs/renameSync socket-path (str socket-path ".displaced")))
                  (when (and (= mode :exit-peer) (= method queue-method))
                    (.exit js/process 0))
-                 (if (and (= mode :server-request) (= method queue-method))
+                 (cond
+                   (and (= mode :server-request) (= method queue-method))
                    (.send client "{\"id\":99,\"method\":\"fixture/server-request\"}")
+
+                   (and (= mode :stream-limit) (= method queue-method))
+                   (send-progress! client)
+
+                   :else
                    (socket-pair! client
                                  (if (and (= mode :wrong-response) (= method queue-method))
                                    (update message "id" inc)
@@ -255,8 +271,9 @@
     (p/let [_ (refused-stream! addon :rename-socket "AXXIUM_PEER_PATH" first-read)
             _ (refused-stream! addon :wrong-response :unexpected-rpc-id first-read)
             _ (refused-stream! addon :server-request :unexpected-rpc-request first-read)
+            _ (refused-stream! addon :stream-limit :rpc-stream-limit first-read)
             _ (refused-stream! addon :redirect :native-connection-error [])]
-      (println "PASS path drift, wrong reply, server request and redirect with socket cleanup"))))
+      (println "PASS path drift, wrong reply, server request, stream limit and redirect with socket cleanup"))))
 
 (defn- child-ready! [child]
   (js/Promise.

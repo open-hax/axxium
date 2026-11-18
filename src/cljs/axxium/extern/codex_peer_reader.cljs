@@ -12,9 +12,9 @@
 (def ^:private capture-ms 20000)
 (def ^:private connect-ms 5000)
 (def ^:private max-executable-bytes (* 512 1024 1024))
-(def ^:private max-frame-bytes (* 2 1024 1024))
+(def ^:private max-message-bytes (* 2 1024 1024))
 (def ^:private max-capture-bytes (* 8 1024 1024))
-(def ^:private max-frames 256)
+(def ^:private max-events 256)
 (def ^:private max-pages 16)
 (def ^:private page-entries 50)
 (def ^:private max-history-items 4096)
@@ -102,17 +102,20 @@
       (when pending ((:reject pending) error))
       (.terminate ws))))
 
-(defn- account-frame! [state bytes]
-  (let [{:keys [bytes-read frames-read]}
-        (swap! state #(-> % (update :bytes-read + bytes) (update :frames-read inc)))]
-    (when (or (> bytes-read max-capture-bytes) (> frames-read max-frames))
-      (refuse! :rpc-capture-limit))))
+(defn- ensure-stream-size! [socket]
+  (when (> (.-bytesRead socket) max-capture-bytes)
+    (refuse! :rpc-stream-limit)))
 
-(defn- response! [{:keys [state deadline]} data binary?]
+(defn- account-event! [state]
+  (when (> (:events (swap! state update :events inc)) max-events)
+    (refuse! :rpc-capture-limit)))
+
+(defn- response! [{:keys [state socket deadline]} data binary?]
   (remaining-ms! deadline)
+  (ensure-stream-size! socket)
   (when (or binary? (not (js/Buffer.isBuffer data)))
     (refuse! :invalid-rpc-frame))
-  (account-frame! state (.-length data))
+  (account-event! state)
   (let [frame (try
                 (js->clj (js/JSON.parse (.toString data "utf8")))
                 (catch :default _ (refuse! :invalid-rpc-json)))
@@ -147,13 +150,13 @@
                                 :lookup (fn [& _] (refuse! :unverified-connection))
                                 :followRedirects false
                                 :perMessageDeflate false
-                                :maxPayload max-frame-bytes
+                                :maxPayload max-message-bytes
                                 :maxBufferedChunks 1024
                                 :maxFragments 1024
                                 :maxHeaderSize 8192
                                 :handshakeTimeout handshake-ms})
-            state (atom {:bytes-read 0 :frames-read 0 :next-id 0})
-            rpc {:ws ws :agent agent :state state :deadline deadline}
+            state (atom {:events 0 :next-id 0})
+            rpc {:ws ws :socket socket :agent agent :state state :deadline deadline}
             opened (js/Promise.
                     (fn [resolve reject]
                       (swap! state assoc :pending {:reject reject})
@@ -164,6 +167,11 @@
                                  (resolve nil))))))
             timeout (js/setTimeout #(reject-session! rpc (failure :capture-timeout))
                                    (max 0 (js/Math.ceil (- deadline (js/performance.now)))))]
+        (.prependListener socket "data"
+                          (fn [_bytes]
+                            (try
+                              (ensure-stream-size! socket)
+                              (catch :default error (reject-session! rpc error)))))
         (.on ws "error" #(reject-session! rpc (failure :native-connection-error)))
         (.on ws "close" #(reject-session! rpc (failure :native-connection-closed)))
         (.on ws "message"
@@ -173,9 +181,9 @@
                  (catch :default error (reject-session! rpc error)))))
         (doseq [event ["ping" "pong"]]
           (.on ws event
-               (fn [bytes]
+               (fn [_bytes]
                  (try
-                   (account-frame! state (.-length bytes))
+                   (account-event! state)
                    (catch :default error (reject-session! rpc error))))))
         (assoc rpc :opened opened :timeout timeout))
       (catch :default error
@@ -189,8 +197,9 @@
     (.terminate ws)
     (finally (.destroy agent))))
 
-(defn- ensure-open! [{:keys [state ws deadline]}]
+(defn- ensure-open! [{:keys [state ws socket deadline]}]
   (remaining-ms! deadline)
+  (ensure-stream-size! socket)
   (when (or (:failed? @state) (not= 1 (.-readyState ws)))
     (refuse! :native-connection-closed)))
 

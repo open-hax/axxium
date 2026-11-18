@@ -98,8 +98,9 @@ methods described above. It returns the configured `:approved-reader` and
 paired `:evidence` for reconciliation. Keep this capture within the client
 and pass it to the normalizer for the exact saved intent. The transport
 uses a single 20-second collection budget, with up to five seconds each for
-connect and upgrade. The frame and stream bounds supplement the page and item
-limits.
+connect and upgrade. The reader limits inbound socket bytes to 8 MiB,
+individual WebSocket messages to 2 MiB, and message and control events to
+256 per capture. Page and item limits also apply.
 
 Build the guard with Linux C and Node-API headers, then run the isolated
 socket fixture with Node and nbb installed locally.
