@@ -80,6 +80,14 @@
     (is (= {:disposition :hold :reason :invalid-observation}
            (dispatch/reconcile intent (assoc observed :history history)))))
   (is (= {:disposition :hold :reason :invalid-observation}
+         (dispatch/reconcile intent (assoc observed :history [completed-item
+                                                              (assoc completed-item :caller-id "unrelated"
+                                                                     :item-id "item-b" :status :failed)]))))
+  (is (= {:disposition :retire :turn-id "turn-a" :item-id "item-a"}
+         (dispatch/reconcile intent (assoc observed :history [completed-item
+                                                              (assoc completed-item :caller-id "unrelated"
+                                                                     :item-id "item-b")]))))
+  (is (= {:disposition :hold :reason :invalid-observation}
          (dispatch/reconcile intent [:not-an-observation])))
   (doseq [saved [nil (assoc intent :caller-id "") (assoc intent :notice-sha256 "bad")
                  (assoc-in intent [:binding :generation] nil)]]

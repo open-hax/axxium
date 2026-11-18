@@ -38,6 +38,12 @@
        (every? row? rows)
        (= (count rows) (count (into #{} (map identity-key) rows)))))
 
+(defn- consistent-turn-status? [history]
+  (->> history
+       (group-by :turn-id)
+       vals
+       (every? #(apply = (map :status %)))))
+
 (defn- hold [reason]
   {:disposition :hold :reason reason})
 
@@ -98,7 +104,8 @@
     (hold :incomplete-observation)
 
     (not (and (valid-projection? (:queue observation) queue-row? :queue-id)
-              (valid-projection? (:history observation) turn-item? (juxt :turn-id :item-id))))
+              (valid-projection? (:history observation) turn-item? (juxt :turn-id :item-id))
+              (consistent-turn-status? (:history observation))))
     (hold :invalid-observation)
 
     :else
