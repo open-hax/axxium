@@ -14,6 +14,12 @@
       (.update text "utf8")
       (.digest "hex")))
 
+(defn- reconcile-intent [intent approved-reader evidence]
+  (let [{:keys [observation error]} (native/normalize intent approved-reader evidence notice-sha256)]
+    (if error
+      {:disposition :hold :reason error}
+      (dispatch/reconcile intent observation))))
+
 (defn reconcile-capture!
   "Read a saved intent and classify a pre-authenticated native capture.
 
@@ -24,8 +30,14 @@
   (if-let [{:keys [intent state]} (store/recover! directory caller-id)]
     (if (= :prepared state)
       {:disposition :hold :reason :not-attempted}
-      (let [{:keys [observation error]} (native/normalize intent approved-reader evidence notice-sha256)]
-        (if error
-          {:disposition :hold :reason error}
-          (dispatch/reconcile intent observation))))
+      (reconcile-intent intent approved-reader evidence))
     {:disposition :hold :reason :missing-intent}))
+
+(defn retire-capture!
+  "Apply a completed native capture to this intent's durable checkpoint.
+
+   The caller independently authorizes the peer and any successor notice.
+   Native queue and mailbox effects stay outside this operation."
+  [directory caller-id approved-reader evidence successor-digest]
+  (store/checkpoint-terminal! directory caller-id successor-digest
+                              #(reconcile-intent % approved-reader evidence)))

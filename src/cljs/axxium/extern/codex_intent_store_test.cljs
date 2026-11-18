@@ -42,7 +42,11 @@
         (is (= :invalid-store (failure-reason #(store/prepare! dir intent))))
         (is (= :invalid-store (failure-reason #(store/recover! dir (:caller-id intent)))))
         (is (= :invalid-store (failure-reason #(store/begin-attempt! dir intent))))
-        (is (= :invalid-store (failure-reason #(store/record-accepted! dir intent "unused-queue"))))))))
+        (is (= :invalid-store (failure-reason #(store/record-accepted! dir intent "unused-queue"))))
+        (is (= :invalid-store
+               (failure-reason #(store/checkpoint-terminal! dir (:caller-id intent) nil identity))))
+        (is (= :invalid-store
+               (failure-reason #(store/prepare-successor! dir (:caller-id intent) (:binding intent)))))))))
 
 (deftest immutable-dispatch-custody
   (with-private-dir
@@ -96,6 +100,67 @@
         (is (= {:state :attempted :intent exact} (store/recover! dir escaped-id)))
         (is (false? (:permit? (store/begin-attempt! dir exact))))
         (is (= 2 (.-length (fs/readdirSync dir))))))))
+
+(def ^:private completed {:disposition :retire :turn-id "turn-complete" :item-id "item-matched"})
+(def ^:private next-digest "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+
+(deftest terminal-checkpoint-reserves-one-recoverable-successor
+  (with-private-dir
+    (fn [dir]
+      (let [{:keys [caller-id binding]} intent
+            verify (fn [saved] (is (= intent saved)) completed)]
+        (is (= {:disposition :hold :reason :missing-intent}
+               (store/checkpoint-terminal! dir caller-id next-digest verify)))
+        (store/prepare! dir intent)
+        (is (= {:disposition :hold :reason :not-attempted}
+               (store/checkpoint-terminal! dir caller-id next-digest verify)))
+        (is (= :not-retired
+               (failure-reason #(store/prepare-successor! dir caller-id binding))))
+        (is (true? (:permit? (store/begin-attempt! dir intent))))
+        (let [{:keys [successor-intent] :as checkpoint}
+              (store/checkpoint-terminal! dir caller-id next-digest verify)
+              successor-id (:caller-id successor-intent)]
+          (is (= :retired (:state checkpoint)))
+          (is (= {:turn-id "turn-complete" :item-id "item-matched"} (:terminal checkpoint)))
+          (is (= binding (:binding successor-intent)))
+          (is (= next-digest (:notice-sha256 successor-intent)))
+          (is (not= caller-id successor-id))
+          (is (= checkpoint (store/recover! dir caller-id)))
+          (is (= checkpoint (store/checkpoint-terminal! dir caller-id next-digest verify)))
+          (is (nil? (store/recover! dir successor-id)))
+          (is (= :reserved-caller-id
+                 (failure-reason #(store/prepare! dir successor-intent))))
+          (is (= :binding-mismatch
+                 (failure-reason #(store/prepare-successor! dir caller-id
+                                                            (assoc binding :generation "different")))))
+          (is (= {:state :prepared :intent successor-intent}
+                 (store/prepare-successor! dir caller-id binding)))
+          (is (= :record-conflict
+                 (failure-reason #(store/checkpoint-terminal! dir caller-id nil verify))))
+          (is (= :record-conflict
+                 (failure-reason #(store/checkpoint-terminal! dir caller-id next-digest
+                                                               (constantly (assoc completed :turn-id "other"))))))
+          (is (false? (:permit? (store/begin-attempt! dir intent))))
+          (is (true? (:permit? (store/begin-attempt! dir successor-intent))))
+          (is (= {:state :attempted :intent successor-intent}
+                 (store/prepare-successor! dir caller-id binding)))
+          (is (false? (:permit? (store/begin-attempt! dir successor-intent)))))))))
+
+(deftest a-late-acceptance-preserves-the-original-terminal-witness
+  (with-private-dir
+    (fn [dir]
+      (let [{:keys [caller-id binding]} intent
+            check (constantly completed)]
+        (store/prepare! dir intent)
+        (store/begin-attempt! dir intent)
+        (let [terminal (store/checkpoint-terminal! dir caller-id nil check)
+              later (store/record-accepted! dir intent "late-queue-id")]
+          (is (= :retired (:state later)))
+          (is (= (:terminal terminal) (:terminal later)))
+          (is (= "late-queue-id" (get-in later [:intent :queue-id])))
+          (is (= later (store/checkpoint-terminal! dir caller-id nil check)))
+          (is (nil? (store/prepare-successor! dir caller-id binding)))
+          (is (false? (:permit? (store/begin-attempt! dir intent)))))))))
 
 (deftest malformed-or-unpublished-state-never-creates-a-duplicate-permit
   (with-private-dir

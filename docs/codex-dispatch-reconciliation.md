@@ -73,9 +73,31 @@ entries, with up to 4,096 items across the returned turns. The original
 method-not-found for `thread/items/list` in the isolated fixture.
 
 The combined client reads the saved intent and returns a reconciliation
-disposition. Applying that disposition, atomic retirement and rollover, peer
-authentication for the installed Desktop endpoint, and live activation require
-separate runtime qualification.
+disposition. Peer authentication for the installed Desktop endpoint and live
+activation have separate runtime qualification.
+
+## Terminal checkpoint and rollover
+
+Use `axxium.extern.codex-dispatch-client/retire-capture!` to apply an
+authenticated capture to a saved attempt. Only a unique matching completed
+turn can retire the intent. The caller can also supply the digest of a
+separately approved new notice. The store commits the terminal turn and item
+and the optional successor reservation together. Each parent reserves at
+most one successor. Retries recover the same reservation, while a different
+witness or notice digest conflicts. A late queue acceptance preserves the
+terminal state and the reservation.
+
+After a process restart, use `prepare-successor!` with the original caller ID
+and the current authorized binding. The store syncs the parent checkpoint
+before it materializes the successor. That child has a reserved, deterministic
+caller ID scoped to the exact predecessor. It uses the existing
+`begin-attempt!` operation for its own one-time permit. A checkpoint without
+a successor returns no prepared intent. The original intent remains retired.
+
+The checkpoint preserves the IDs and digest. The caller retains the approved
+notice content and supplies its digest. Authorization of new hints,
+automatic hint coalescing, native submission, mailbox acknowledgment and
+working-task completion have separate contracts.
 
 Run the focused fixtures under nbb or as part of Axxium's existing Shadow
 test build. The filesystem fixtures use temporary Linux stores. The native
