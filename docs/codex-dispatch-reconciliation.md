@@ -30,13 +30,66 @@ binding, or unverifiable correlation must not be marked complete.
 | In-progress, failed, or interrupted native turn | Hold the original intent |
 
 Retirement describes the native notice turn. Mailbox acknowledgment and the
-result of the assigned work have their own evidence. This law performs no
-effects. Durable storage, atomic observation and write ownership, native
-IPC, and live activation belong to the later client adapter qualification.
+result of the assigned work have their own evidence. The reconciliation law
+is pure.
 
-Run the same law fixtures under nbb or as part of Axxium's existing Shadow
-test build.
+## Linux client custody
+
+Use `axxium.extern.codex-intent-store` with a pre-provisioned local
+directory owned by the client account at mode `0700`. Keep that directory
+stable across restart. The owner keeps authority over the queued notice and
+its actor, device, thread, and binding generation. Use a unique caller ID
+for each intentional submission and retain it when recovering an uncertain
+outcome.
+
+1. Build the intent with `axxium.extern.codex-dispatch-client/notice-sha256`
+   and call `prepare!` before attempting a native submission.
+2. Call `begin-attempt!` with the same intent. Only the caller that receives
+   `:permit? true` may send. The attempt record is synchronized before the
+   permit returns. A process that exits after receiving a permit leaves the
+   same durable state as a lost response. A retry gets no new permit.
+3. Use `record-accepted!` only with the verified queue ID for that exact
+   attempt. `recover!` retains the accepted ID, and an empty native read
+   leaves the saved intent available for investigation.
+
+Records contain the exact binding, caller ID, notice digest, and optional
+accepted queue ID. The store synchronizes each owner-private file and
+publishes it with a create-only link and a directory sync. The owner must
+preserve the checkpoint directory and its contents instead of restoring an
+older copy or deleting an uncertain attempt.
+
+## Native observations
+
+Call `axxium.extern.codex-dispatch-client/reconcile-capture!` with the store,
+caller ID, configured approved reader, and verified capture. The transport
+establishes the reader's identity independently, checks the bound peer before
+and after collection, pairs requests with replies, and applies byte and
+deadline budgets. Capture validation checks the exact bound thread and
+binding generation, the cursor chain, request/reply IDs, and the single text
+of any matching notice. It accepts `thread/queue/list` and explicit full
+`thread/turns/list` pages. Each method is limited to 16 pages of up to 128
+entries, with up to 4,096 items across the returned turns. The original
+0.169.1 Unix server returned
+method-not-found for `thread/items/list` in the isolated fixture.
+
+The combined client reads the saved intent and returns a reconciliation
+disposition. Applying that disposition, atomic retirement and rollover, peer
+authentication for the installed Desktop endpoint, and live activation require
+separate runtime qualification.
+
+Run the focused fixtures under nbb or as part of Axxium's existing Shadow
+test build. The filesystem fixtures use temporary Linux stores. The native
+capture fixtures exercise complete and partial protocol evidence.
 
 ```sh
-nbb -cp src/cljs -e '(require (quote [axxium.law.codex-dispatch-test]) (quote [cljs.test :as t])) (t/run-tests (quote axxium.law.codex-dispatch-test))'
+nbb -cp src/cljs -e '
+(require (quote [axxium.extern.codex-dispatch-client-test])
+         (quote [axxium.extern.codex-intent-store-test])
+         (quote [axxium.law.codex-dispatch-test])
+         (quote [axxium.law.codex-native-observation-test])
+         (quote [cljs.test :as t]))
+(t/run-tests (quote axxium.extern.codex-dispatch-client-test)
+             (quote axxium.extern.codex-intent-store-test)
+             (quote axxium.law.codex-dispatch-test)
+             (quote axxium.law.codex-native-observation-test))'
 ```
