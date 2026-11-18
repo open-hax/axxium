@@ -93,11 +93,14 @@ before it materializes the successor. That child has a reserved, deterministic
 caller ID scoped to the exact predecessor. It uses the existing
 `begin-attempt!` operation for its own one-time permit. A checkpoint without
 a successor returns no prepared intent. The original intent remains retired.
+The child's prepared record links to its predecessor. A legacy record at
+the same caller ID is still recoverable in its original role and conflicts
+with successor materialization.
 
 The checkpoint preserves the IDs and digest. The caller retains the approved
 notice content and supplies its digest. Authorization of new hints,
 automatic hint coalescing, native submission, mailbox acknowledgment and
-working-task completion have separate contracts.
+completion of the assigned work have separate contracts.
 
 Run the focused fixtures under nbb or as part of Axxium's existing Shadow
 test build. The filesystem fixtures use temporary Linux stores. The native

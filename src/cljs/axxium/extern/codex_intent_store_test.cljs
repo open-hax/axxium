@@ -162,6 +162,39 @@
           (is (nil? (store/prepare-successor! dir caller-id binding)))
           (is (false? (:permit? (store/begin-attempt! dir intent)))))))))
 
+(deftest cannot-adopt-a-legacy-intent-as-a-new-successor
+  (with-private-dir
+    (fn [dir]
+      (let [{:keys [caller-id binding]} intent
+            check (constantly completed)]
+        (store/prepare! dir intent)
+        (store/begin-attempt! dir intent)
+        (let [parent-file (record-with-suffix dir ".prepared")
+              {:keys [successor-intent]} (store/checkpoint-terminal! dir caller-id next-digest check)
+              terminal-file (record-with-suffix dir ".terminal")
+              terminal-bytes (fs/readFileSync terminal-file)
+              successor-id (:caller-id successor-intent)]
+          (store/prepare-successor! dir caller-id binding)
+          (store/begin-attempt! dir successor-intent)
+          (store/record-accepted! dir successor-intent "legacy-queue-id")
+          (let [child-file (->> (js->clj (fs/readdirSync dir))
+                                (map #(path/join dir %))
+                                (filter #(str/ends-with? % ".prepared"))
+                                (remove #{parent-file})
+                                first)
+                decoded (js->clj (js/JSON.parse (fs/readFileSync child-file "utf8")))
+                legacy (assoc decoded 0 1 5 nil)]
+            (fs/writeFileSync child-file (str (js/JSON.stringify (clj->js legacy)) "\n"))
+            (fs/unlinkSync terminal-file)
+            (is (= :record-conflict
+                   (failure-reason #(store/checkpoint-terminal! dir caller-id next-digest check))))
+            (is (= :attempted (:state (store/recover! dir caller-id))))
+            (is (= "legacy-queue-id" (get-in (store/recover! dir successor-id) [:intent :queue-id])))
+            (is (= :accepted (:state (store/prepare! dir successor-intent))))
+            (fs/writeFileSync terminal-file terminal-bytes #js {:mode 8r600})
+            (is (= :record-conflict
+                   (failure-reason #(store/prepare-successor! dir caller-id binding))))))))))
+
 (deftest malformed-or-unpublished-state-never-creates-a-duplicate-permit
   (with-private-dir
     (fn [dir]
