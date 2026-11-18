@@ -6,10 +6,12 @@
   "license": "GPL-3.0-or-later",
   "scripts": {
     "build": "shadow-cljs release server",
+    "build:codex-peer": "sh scripts/build-codex-peer.sh",
     "watch": "shadow-cljs watch server",
     "start": "node dist/server.js",
     "typecheck": "shadow-cljs compile server",
     "test": "shadow-cljs compile test && node target/test.cjs && shadow-cljs release lifecycle-fixture && node --test scripts/actor-pages.test.mjs scripts/oidc-return.test.mjs scripts/lifecycle.test.mjs scripts/provision-signing-key.test.mjs scripts/identity-tree.test.mjs && npm run test:atproto-esm",
+    "test:codex-peer": "npm run build:codex-peer && nbb -cp src/cljs scripts/codex-peer.test.cljs target/codex-peer/codex_peer.node",
     "test:compose": "shadow-cljs release lifecycle-fixture && node --test scripts/compose-stop-grace.test.mjs",
     "boundary:check": "node scripts/check-js-boundary.mjs --check",
     "test:atproto-esm": "shadow-cljs release atproto-oauth-fixture && node --test scripts/atproto-release.test.mjs",
@@ -33,6 +35,7 @@
     "jose": "^5.9.3",
     "oidc-provider": "9.13.0",
     "pg": "^8.16.3",
-    "shadow-cljs": "^3.3.5"
+    "shadow-cljs": "^3.3.5",
+    "ws": "8.21.0"
   }
 }

@@ -73,8 +73,46 @@ entries, with up to 4,096 items across the returned turns. The original
 method-not-found for `thread/items/list` in the isolated fixture.
 
 The combined client reads the saved intent and returns a reconciliation
-disposition. Peer authentication for the installed Desktop endpoint and live
-activation have separate runtime qualification.
+disposition.
+
+## Linux peer-authenticated reader
+
+`axxium.extern.codex-peer-reader/capture!` accepts the built Node-API addon
+and an independently approved binding. The configuration carries
+`:socket-path`, `:socket-device`, `:socket-inode`, `:uid`, `:gid`,
+`:pid`, `:exec-sha256`, and the exact actor/device/thread/generation
+`:binding`. Device and inode values are decimal strings. The operator
+establishes these pins before using the reader. Pin the canonical socket
+vnode. If Codex publishes a symlink as its control endpoint, verify its
+target independently and supply that target path.
+
+The Linux guard connects to the pinned Unix socket, checks the connected
+peer's credentials and process descriptor, and retains its executable file.
+The nbb reader verifies the expected executable digest and performs the
+WebSocket exchange over the same verified connection. It rechecks the
+peer and executable at collection close. The connection is single-use and
+requires kernel support for `SO_PEERPIDFD`. [Node connected socket API](https://nodejs.org/docs/latest-v22.x/api/net.html#new-netsocketoptions)
+
+The reader sends `initialize`, `initialized`, and the two bounded read
+methods described above. It returns the configured `:approved-reader` and
+paired `:evidence` for reconciliation. Keep this capture within the client
+and pass it to the normalizer for the exact saved intent. The transport
+uses a single 20-second collection budget, with up to five seconds each for
+connect and upgrade. The frame and stream bounds supplement the page and item
+limits.
+
+Build the guard with Linux C and Node-API headers, then run the isolated
+socket fixture with Node and nbb installed locally.
+
+```sh
+npm run test:codex-peer
+```
+
+The build writes `target/codex-peer/codex_peer.node`.
+`AXXIUM_NODE_INCLUDE_DIR` selects the directory containing `node_api.h`.
+The regular server start path is separate from the reader. Enrolling the
+actual Desktop endpoint and starting automated hint intake require their
+own runtime qualification.
 
 ## Terminal checkpoint and rollover
 
