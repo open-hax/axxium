@@ -83,6 +83,20 @@
         (is (true? (:permit? (store/begin-attempt! dir exact))))
         (is (= 2 (.-length (fs/readdirSync dir))))))))
 
+(deftest oversized-accepted-frame-leaves-the-attempt-recoverable
+  (with-private-dir
+    (fn [dir]
+      (let [escaped-id (apply str (repeat 512 (char 0)))
+            exact (assoc intent :caller-id escaped-id
+                         :binding (zipmap (keys (:binding intent)) (repeat escaped-id)))]
+        (store/prepare! dir exact)
+        (is (true? (:permit? (store/begin-attempt! dir exact))))
+        (is (= :record-too-large
+               (failure-reason #(store/record-accepted! dir exact escaped-id))))
+        (is (= {:state :attempted :intent exact} (store/recover! dir escaped-id)))
+        (is (false? (:permit? (store/begin-attempt! dir exact))))
+        (is (= 2 (.-length (fs/readdirSync dir))))))))
+
 (deftest malformed-or-unpublished-state-never-creates-a-duplicate-permit
   (with-private-dir
     (fn [dir]

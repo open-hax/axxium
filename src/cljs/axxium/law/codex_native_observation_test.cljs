@@ -108,6 +108,14 @@
                         (assoc-in (into turn-path [:request "id"]) 1)
                         (assoc-in (into turn-path [:response "id"]) 1)))))))
 
+(deftest numeric-rpc-identities-must-round-trip-exactly
+  (let [reads #(assoc (evidence [] []) :queue-pages
+                      [(rpc-page % "thread/queue/list" {} [] nil)])]
+    (is (some? (:observation (project (reads 9007199254740991)))))
+    (is (some? (:observation (project (reads "9007199254740992")))))
+    (is (= {:error :incomplete-queue} (project (reads 9007199254740992))))
+    (is (= {:error :incomplete-queue} (project (reads -9007199254740992))))))
+
 (deftest incomplete-content-and-provenance-never-retire
   (let [partial (assoc turn "itemsView" "summary")
         unknown (assoc turn "status" "unknown")

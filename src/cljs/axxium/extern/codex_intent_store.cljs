@@ -60,8 +60,11 @@
                        "." (name phase))))
 
 (defn- encode [phase {:keys [binding caller-id notice-sha256]} queue-id]
-  (let [frame [1 (name phase) caller-id (mapv binding binding-fields) notice-sha256 queue-id]]
-    (js/Buffer.from (str (js/JSON.stringify (clj->js frame)) "\n") "utf8")))
+  (let [frame [1 (name phase) caller-id (mapv binding binding-fields) notice-sha256 queue-id]
+        bytes (js/Buffer.from (str (js/JSON.stringify (clj->js frame)) "\n") "utf8")]
+    (when (> (.-length bytes) record-limit)
+      (refuse! :record-too-large))
+    bytes))
 
 (defn- decode! [phase caller-id bytes]
   (let [data (try

@@ -21,6 +21,10 @@
 (defn- identity-string? [value]
   (and (string? value) (not (str/blank? value))))
 
+(defn- rpc-id? [value]
+  (or (identity-string? value)
+      (and (integer? value) (<= -9007199254740991 value 9007199254740991))))
+
 (defn- binding? [binding]
   (and (map? binding)
        (= #{:actor-did :device-id :thread-id :generation} (set (keys binding)))
@@ -42,7 +46,7 @@
         next-cursor (get result "nextCursor")]
     (when (and (map? request) (map? response) (map? params) (map? result)
                (= "2.0" (get request "jsonrpc" "2.0") (get response "jsonrpc" "2.0"))
-               (or (integer? request-id) (identity-string? request-id))
+               (rpc-id? request-id)
                (= request-id (get response "id"))
                (= method (get request "method"))
                (not (contains? response "error"))
