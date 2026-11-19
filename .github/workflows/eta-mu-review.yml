@@ -38,6 +38,3 @@ jobs:
           echo "build=125" >> "$statuses"
           echo "Dependency installation failed; test and build were not attempted." >> "$log"
         fi
-    secrets:
-      ETA_MU_APP_ID: ${{ secrets.ETA_MU_APP_ID }}
-      ETA_MU_APP_PRIVATE_KEY: ${{ secrets.ETA_MU_APP_PRIVATE_KEY }}
