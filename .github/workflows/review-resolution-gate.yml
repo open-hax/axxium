@@ -14,8 +14,7 @@ permissions:
 
 jobs:
   review-gate:
-    uses: open-hax/eta-mu/.github/workflows/review-resolution-gate.yml@main
+    uses: open-hax/eta-mu/.github/workflows/review-resolution-gate.yml@40058f43f47e9f793210803f185159cd81999986
     with:
       pr: ${{ github.event.pull_request.number }}
       strict: true
-    secrets: inherit
