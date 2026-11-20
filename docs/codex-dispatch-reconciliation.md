@@ -67,8 +67,11 @@ and after collection, pairs requests with replies, and applies byte and
 deadline budgets. Capture validation checks the exact bound thread and
 binding generation, the cursor chain, request/reply IDs, and the single text
 of any matching notice. It accepts `thread/queue/list` and explicit full
-`thread/turns/list` pages. Each method is limited to 16 pages of up to 128
-entries, with up to 4,096 items across the returned turns. The original
+`thread/turns/list` pages. A queue read must start at the first page and
+return an explicit null continuation in that same response. The native
+queue cursor is a live offset, so a queue read with a continuation holds the
+saved intent. Full-turn history supports up to 16 pages and 4,096 items.
+Each page allows up to 128 entries. The original
 0.169.1 Unix server returned
 method-not-found for `thread/items/list` in the isolated fixture.
 

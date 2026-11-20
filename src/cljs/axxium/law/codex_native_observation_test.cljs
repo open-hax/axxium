@@ -68,20 +68,17 @@
          (dispatch/reconcile intent
                              (:observation (project (evidence [] [(assoc turn "items" [(dissoc user-item "clientId")])])))))))
 
-(deftest all-pages-must-belong-to-one-complete-native-read
+(deftest queue-read-requires-one-initial-terminal-page
   (let [other-row (assoc queue-row "id" "queue-b" "clientUserMessageId" "unrelated"
                         "input" [{"type" "image" "url" "fixture:img"}])
         begin (rpc-page 1 "thread/queue/list" {} [other-row] "next")
         last-page (rpc-page 3 "thread/queue/list" {"cursor" "next"} [queue-row] nil)
         wrap #(assoc (evidence [] []) :queue-pages %)]
-    (is (= "queue-a" (get-in (project (wrap [begin last-page])) [:observation :queue 0 :queue-id])))
-    (doseq [bad [[begin]
+    (doseq [bad [[begin last-page]
+                 [begin]
                  [last-page]
-                 [begin (assoc-in last-page [:request "params" "cursor"] "different")]
-                 [begin (assoc-in last-page [:request "params" "limit"] 49)]
-                 [begin (assoc-in last-page [:response "result" "nextCursor"] "next") last-page]
                  [(queue-page []) last-page]
-                 [(update-in last-page [:response "result"] dissoc "nextCursor")]
+                 [(update-in (queue-page []) [:response "result"] dissoc "nextCursor")]
                  [(assoc-in (queue-page [queue-row other-row]) [:request "params" "limit"] 1)]]]
       (is (= {:error :incomplete-queue} (project (wrap bad)))))))
 
@@ -147,20 +144,22 @@
                      (assoc queue-row "id" (str "queue-" index)
                             "clientUserMessageId" (str "caller-" index)))
                    (range 129))
-        pages (fn [total]
-                (mapv (fn [index]
-                        (rpc-page (+ 100 index) "thread/queue/list"
-                                  {"cursor" (when (pos? index) (str "page-" index))}
-                                  [(nth rows index)]
-                                  (when (< (inc index) total) (str "page-" (inc index)))))
-                      (range total)))
+        turn-pages (fn [total]
+                     (mapv (fn [index]
+                             (rpc-page (+ 100 index) "thread/turns/list"
+                                       {"itemsView" "full"
+                                        "cursor" (when (pos? index) (str "page-" index))}
+                                       [(assoc turn "id" (str "turn-" index) "items" [])]
+                                       (when (< (inc index) total) (str "page-" (inc index)))))
+                           (range total)))
         single (fn [page-limit entries]
                  [(rpc-page 1 "thread/queue/list" {"limit" page-limit} entries nil)])
         items (mapv (fn [index] {"id" (str "item-" index) "type" "agentMessage"})
                     (range 4097))
         native-reads #(project (assoc (evidence [] []) :queue-pages %))]
-    (is (some? (:observation (native-reads (pages 16)))))
-    (is (= {:error :incomplete-queue} (native-reads (pages 17))))
+    (is (some? (:observation (project (assoc (evidence [] []) :turn-pages (turn-pages 16))))))
+    (is (= {:error :incomplete-history}
+           (project (assoc (evidence [] []) :turn-pages (turn-pages 17)))))
     (is (some? (:observation (native-reads (single 128 (pop rows))))))
     (is (= {:error :incomplete-queue} (native-reads (single 129 rows))))
     (is (= {:error :incomplete-queue} (native-reads (single 128 rows))))
