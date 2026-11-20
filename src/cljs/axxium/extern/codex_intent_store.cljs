@@ -8,12 +8,16 @@
 
 (def ^:private record-limit 16384)
 (def ^:private binding-fields [:actor-did :device-id :thread-id :generation])
+(def ^:private successor-prefix "axxium-rollover-")
 
 (defn- refuse! [reason]
   (throw (ex-info "Codex dispatch intent store refused the operation" {:reason reason})))
 
 (defn- id? [value]
   (and (string? value) (<= (count value) 512) (not (str/blank? value))))
+
+(defn- digest? [value]
+  (and (string? value) (boolean (re-matches #"[0-9a-f]{64}" value))))
 
 (defn- intent? [{:keys [binding caller-id notice-sha256] :as intent}]
   (and (map? intent)
@@ -22,8 +26,7 @@
        (= (set binding-fields) (set (keys binding)))
        (every? id? (vals binding))
        (id? caller-id)
-       (string? notice-sha256)
-       (boolean (re-matches #"[0-9a-f]{64}" notice-sha256))))
+       (digest? notice-sha256)))
 
 (defn- require-intent! [intent]
   (when-not (and (map? intent) (intent? intent))
@@ -59,8 +62,21 @@
   (path/join root (str (token-crypto/stable-digest "codex-dispatch-intent/v1" caller-id)
                        "." (name phase))))
 
-(defn- encode [phase {:keys [binding caller-id notice-sha256]} queue-id]
-  (let [frame [1 (name phase) caller-id (mapv binding binding-fields) notice-sha256 queue-id]
+(defn- terminal-detail? [detail]
+  (and (vector? detail) (= 3 (count detail))
+       (let [[turn-id item-id successor-digest] detail]
+         (and (id? turn-id) (id? item-id)
+              (or (nil? successor-digest) (digest? successor-digest))))))
+
+(defn- reserved-caller? [caller-id]
+  (str/starts-with? caller-id successor-prefix))
+
+(defn- record-version [phase detail]
+  (if (or (= :terminal phase) (and (= :prepared phase) (some? detail))) 2 1))
+
+(defn- encode [phase {:keys [binding caller-id notice-sha256]} detail]
+  (let [frame [(record-version phase detail) (name phase) caller-id
+               (mapv binding binding-fields) notice-sha256 detail]
         bytes (js/Buffer.from (str (js/JSON.stringify (clj->js frame)) "\n") "utf8")]
     (when (> (.-length bytes) record-limit)
       (refuse! :record-too-large))
@@ -71,17 +87,23 @@
                (js->clj (js/JSON.parse (.toString bytes "utf8")))
                (catch :default _ (refuse! :invalid-record)))
         frame (when (vector? data) data)
-        [version kind saved-caller binding-values notice-sha256 queue-id] frame]
+        [version kind saved-caller binding-values notice-sha256 detail] frame]
     (when-not (and (= 6 (count frame))
-                   (= 1 version) (= (name phase) kind) (= caller-id saved-caller)
+                   (= (record-version phase detail) version) (= (name phase) kind) (= caller-id saved-caller)
                    (vector? binding-values) (= (count binding-fields) (count binding-values))
-                   (if (= :accepted phase) (id? queue-id) (nil? queue-id)))
+                   (case phase
+                     :accepted (id? detail)
+                     :terminal (terminal-detail? detail)
+                     :prepared (or (nil? detail)
+                                   (and (id? detail) (not= caller-id detail)
+                                        (reserved-caller? caller-id)))
+                     (nil? detail)))
       (refuse! :invalid-record))
     (let [intent {:binding (zipmap binding-fields binding-values)
                   :caller-id saved-caller :notice-sha256 notice-sha256}]
-      (when-not (and (intent? intent) (.equals bytes (encode phase intent queue-id)))
+      (when-not (and (intent? intent) (.equals bytes (encode phase intent detail)))
         (refuse! :invalid-record))
-      {:intent intent :queue-id queue-id})))
+      {:intent intent :detail detail})))
 
 (defn- open-record [filename]
   (try
@@ -121,10 +143,10 @@
         false
         (throw failure)))))
 
-(defn- commit! [descriptor root phase {:keys [caller-id] :as intent} queue-id]
+(defn- commit! [descriptor root phase {:keys [caller-id] :as intent} detail]
   (let [temporary (path/join root (str ".intent-" (crypto/randomUUID) ".tmp"))
         filename (record-path root caller-id phase)
-        bytes (encode phase intent queue-id)
+        bytes (encode phase intent detail)
         staging (fs/openSync temporary "wx" 8r600)]
     (try
       (try
@@ -133,24 +155,55 @@
         (finally (fs/closeSync staging)))
       (let [published? (link-record! temporary filename)]
         (when (and (not published?)
-                   (not= {:intent intent :queue-id queue-id} (read-record! root caller-id phase)))
+                   (not= {:intent intent :detail detail} (read-record! root caller-id phase)))
           (refuse! :record-conflict))
         (fs/fsyncSync descriptor)
         published?)
       (finally (fs/unlinkSync temporary)))))
 
-(defn- load-intent! [root caller-id]
+(defn- reserved-successor [intent successor-digest]
+  (when successor-digest
+    {:binding (:binding intent)
+     :caller-id (str successor-prefix
+                     (token-crypto/stable-digest
+                      "codex-dispatch-successor/v1"
+                      [(mapv (:binding intent) binding-fields)
+                       (:caller-id intent) (:notice-sha256 intent)]))
+     :notice-sha256 successor-digest}))
+
+(defn- retire-state [intent accepted {:keys [detail]}]
+  (let [[turn-id item-id successor-digest] detail]
+    {:state :retired
+     :intent (cond-> intent accepted (assoc :queue-id (:detail accepted)))
+     :terminal {:turn-id turn-id :item-id item-id}
+     :successor-intent (reserved-successor intent successor-digest)}))
+
+(defn- read-intent-records! [root caller-id]
   ;; Observe dependent records first so a concurrent publication can't
   ;; masquerade as an orphan. Earlier records are immutable once linked.
-  (let [accepted (read-record! root caller-id :accepted)
+  (let [terminal (read-record! root caller-id :terminal)
+        accepted (read-record! root caller-id :accepted)
         attempted (read-record! root caller-id :attempted)
         prepared (read-record! root caller-id :prepared)
         intent (:intent prepared)]
     (when (or (and attempted (not= intent (:intent attempted)))
-              (and accepted (or (not attempted) (not= intent (:intent accepted)))))
+              (and accepted (or (not attempted) (not= intent (:intent accepted))))
+              (and terminal (or (not attempted) (not= intent (:intent terminal)))))
       (refuse! :record-conflict))
+    {:terminal terminal :accepted accepted :attempted attempted :prepared prepared}))
+
+(defn- require-successor-slot! [root predecessor successor]
+  (when successor
+    (when-let [existing (:prepared (read-intent-records! root (:caller-id successor)))]
+      (when-not (= {:intent successor :detail predecessor} existing)
+        (refuse! :record-conflict)))))
+
+(defn- load-intent! [root caller-id]
+  (let [{:keys [terminal accepted attempted prepared]} (read-intent-records! root caller-id)
+        intent (:intent prepared)]
     (cond
-      accepted {:state :accepted :intent (assoc intent :queue-id (:queue-id accepted))}
+      terminal (retire-state intent accepted terminal)
+      accepted {:state :accepted :intent (assoc intent :queue-id (:detail accepted))}
       attempted {:state :attempted :intent intent}
       prepared {:state :prepared :intent intent})))
 
@@ -159,10 +212,17 @@
     (refuse! :intent-mismatch)))
 
 (defn recover!
-  "Read one caller's saved intent and its state from the private store."
+  "Read one caller's saved intent and its state from the private store.
+
+   A successor reservation is observational here. Use prepare-successor!
+   to sync the parent checkpoint before materializing it."
   [directory caller-id]
   (when-not (id? caller-id) (refuse! :invalid-caller-id))
   (with-store! directory (fn [_ root] (load-intent! root caller-id))))
+
+(defn- prepare-at! [descriptor root intent predecessor]
+  (commit! descriptor root :prepared intent predecessor)
+  (load-intent! root (:caller-id intent)))
 
 (defn prepare!
   "Persist the exact intent before submission. An identical retry reads the
@@ -171,10 +231,16 @@
   (require-intent! intent)
   (with-store! directory
     (fn [descriptor root]
-      (when-let [saved (load-intent! root (:caller-id intent))]
-        (require-saved! saved intent))
-      (commit! descriptor root :prepared intent nil)
-      (load-intent! root (:caller-id intent)))))
+      (let [caller-id (:caller-id intent)
+            saved (load-intent! root caller-id)]
+        (if saved
+          (do
+            (require-saved! saved intent)
+            (fs/fsyncSync descriptor)
+            (load-intent! root caller-id))
+          (do
+            (when (reserved-caller? caller-id) (refuse! :reserved-caller-id))
+            (prepare-at! descriptor root intent nil)))))))
 
 (defn begin-attempt!
   "Consume the one submission permit before transmitting. Once the immutable
@@ -206,3 +272,51 @@
         (when (= :prepared (:state saved)) (refuse! :not-attempted))
         (commit! descriptor root :accepted intent queue-id)
         (load-intent! root caller-id)))))
+
+(defn checkpoint-terminal!
+  "Retire one attempted intent with a verified completed turn and item.
+
+   verify receives the saved intent from this store. Its trusted caller
+   authenticates and reconciles a native capture for that intent. A successor
+   digest is an explicit reservation by the caller for a newly observed hint.
+   A hold or acceptance result leaves the checkpoint untouched."
+  [directory caller-id successor-digest verify]
+  (when-not (and (id? caller-id) (fn? verify)
+                 (or (nil? successor-digest) (digest? successor-digest)))
+    (refuse! :invalid-terminal-request))
+  (with-store! directory
+    (fn [descriptor root]
+      (let [{:keys [state intent]} (load-intent! root caller-id)]
+        (case state
+          nil {:disposition :hold :reason :missing-intent}
+          :prepared {:disposition :hold :reason :not-attempted}
+          (let [{:keys [disposition turn-id item-id] :as observed} (verify intent)]
+            (case disposition
+              :hold observed
+              :accepted observed
+              :retire
+              (let [detail [turn-id item-id successor-digest]]
+                (when-not (terminal-detail? detail)
+                  (refuse! :invalid-terminal-witness))
+                (require-successor-slot! root caller-id (reserved-successor intent successor-digest))
+                (commit! descriptor root :terminal (dissoc intent :queue-id) detail)
+                (load-intent! root caller-id))
+              (refuse! :invalid-terminal-witness))))))))
+
+(defn prepare-successor!
+  "Materialize the same reserved successor from a durable parent checkpoint.
+
+   The caller supplies the currently authorized binding. A nil result means
+   the exact parent retired without reserving another intent."
+  [directory parent-caller-id binding]
+  (when-not (id? parent-caller-id)
+    (refuse! :invalid-caller-id))
+  (with-store! directory
+    (fn [descriptor root]
+      (let [{:keys [state intent successor-intent]} (load-intent! root parent-caller-id)]
+        (when-not (= :retired state) (refuse! :not-retired))
+        (when-not (= binding (:binding intent)) (refuse! :binding-mismatch))
+        (when successor-intent
+          (require-successor-slot! root parent-caller-id successor-intent)
+          (fs/fsyncSync descriptor)
+          (prepare-at! descriptor root successor-intent parent-caller-id))))))

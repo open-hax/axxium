@@ -84,3 +84,43 @@
            (try
              (client/reconcile-capture! "/fixture" caller-id approved-reader {})
              (catch :default error (:reason (ex-data error))))))))
+
+(deftest apply-only-exact-completed-native-capture
+  (when (= "linux" (.-platform js/process))
+    (let [directory (.realpathSync fs (.mkdtempSync fs (.join path (.tmpdir os) "axxium-codex-terminal-")))
+          intent {:binding binding-id :caller-id caller-id :notice-sha256 (client/notice-sha256 notice)}
+          user-item {"type" "userMessage" "id" "item-terminal" "clientId" caller-id "content" input}
+          completed {"id" "turn-terminal" "status" "completed" "itemsView" "full" "items" [user-item]}
+          terminal-capture (capture [] [completed])
+          next-digest (client/notice-sha256 "Separate approved hint")]
+      (try
+        (store/prepare! directory intent)
+        (store/begin-attempt! directory intent)
+        (is (= {:disposition :hold :reason :reader-binding-mismatch}
+               (client/retire-capture! directory caller-id approved-reader
+                                       (dissoc terminal-capture :reader-after) next-digest)))
+        (is (= {:disposition :hold :reason :turn-not-completed}
+               (client/retire-capture! directory caller-id approved-reader
+                                       (capture [] [(assoc completed "status" "failed")]) next-digest)))
+        (is (= :attempted (:state (store/recover! directory caller-id))))
+        (let [snapshot #(into (sorted-map)
+                              (for [file (.readdirSync fs directory)]
+                                [file (.readFileSync fs (.join path directory file) "hex")]))
+              before (snapshot)
+              queue-row {"id" "other-queue" "clientUserMessageId" "other" "input" []}
+              continued (-> (capture [queue-row] [completed])
+                            (assoc-in [:queue-pages 0 :response "result" "nextCursor"] "1"))]
+          (is (= {:disposition :hold :reason :incomplete-queue}
+                 (client/retire-capture! directory caller-id approved-reader continued next-digest)))
+          (is (= before (snapshot)))
+          (is (= :attempted (:state (store/recover! directory caller-id))))
+          (is (false? (:permit? (store/begin-attempt! directory intent)))))
+        (let [{:keys [successor-intent] :as saved}
+              (client/retire-capture! directory caller-id approved-reader terminal-capture next-digest)]
+          (is (= :retired (:state saved)))
+          (is (= {:turn-id "turn-terminal" :item-id "item-terminal"} (:terminal saved)))
+          (is (= next-digest (:notice-sha256 successor-intent)))
+          (is (= successor-intent
+                 (:intent (store/prepare-successor! directory caller-id binding-id)))))
+        (finally
+          (.rmSync fs directory #js {:recursive true :force true}))))))
