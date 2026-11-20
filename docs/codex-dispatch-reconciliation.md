@@ -118,8 +118,35 @@ npm run test:codex-peer
 The build writes `target/codex-peer/codex_peer.node`.
 `AXXIUM_NODE_INCLUDE_DIR` selects the directory containing `node_api.h`.
 The regular server start path is separate from the reader. Enrolling the
-actual Desktop endpoint and starting automated hint intake require their
-own runtime qualification.
+actual Desktop endpoint requires its own runtime qualification.
+
+## Reconcile an attempt after an inbox hint
+
+Create one `axxium.extern.codex-dispatch-client/inbox-intake` worker for the
+saved caller ID, private store, and independently pinned Desktop peer.
+Pass the worker the exact binding verified by the authenticated Axxium
+subscription adapter and the decoded string-keyed
+`notifications/resources/updated` frame for `axxium://mailbox/inbox`. Use the
+binding from the authenticated subscription and local configuration. The
+frame itself carries only a resource URI.
+
+Each accepted hint triggers an authenticated, bounded queue and full-turn
+read for the saved attempt. Hints received before the first read coalesce.
+Multiple hints during a read retain one pending read for the same intent.
+The worker uses one connection at a time. An ordinary read returning no
+matching evidence leaves the saved attempt recoverable. A terminal
+checkpoint satisfies the original intent. Recovery validates the saved
+binding and syncs the pinned directory before returning terminal success.
+A directory sync failure leaves the checkpoint available for another
+recovery attempt. The worker requires a separate saved attempt for later
+mailbox work.
+
+Codex sends native turn and queue notifications to connections associated
+with the thread. A fresh initialized reader lacks that association. The
+intake worker uses Axxium's existing authenticated hint instead of waiting
+on the Desktop socket. Each Desktop connection runs initialization and
+bounded reads. The worker can only checkpoint a verified matching turn.
+Host receiver wiring and live endpoint enrollment require a runtime test.
 
 ## Terminal checkpoint and rollover
 

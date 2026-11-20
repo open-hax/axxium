@@ -5,7 +5,6 @@
             ["node:child_process" :as child-process]
             ["node:crypto" :as crypto]
             ["node:events" :as events]
-            ["node:fs" :as fs]
             ["node:http" :as http]
             ["node:module" :as module]
             ["node:os" :as os]
@@ -13,9 +12,27 @@
             ["node:readline" :as readline]
             ["node:url" :as url]
             ["ws" :as ws]
-            [axxium.extern.codex-peer-reader :as reader]
-            [axxium.law.codex-native-observation :as observations]
             [promesa.core :as p]))
+
+(def ^:private directory-sync-probe (atom nil))
+
+;; nbb resolves built-in function exports when it first requires the module.
+;; Install the fixture probe before requiring the store or reader.
+(let [load-commonjs (module/createRequire (url/pathToFileURL (path/resolve "package.json")))
+      common-fs (load-commonjs "node:fs")
+      real-sync (aget common-fs "fsyncSync")]
+  (aset common-fs "fsyncSync"
+        (fn [fd]
+          (if (and @directory-sync-probe (.isDirectory (.fstatSync common-fs fd)))
+            (@directory-sync-probe real-sync fd)
+            (real-sync fd))))
+  (module/syncBuiltinESMExports))
+
+(require '["node:fs" :as fs]
+         '[axxium.extern.codex-dispatch-client :as dispatch]
+         '[axxium.extern.codex-intent-store :as store]
+         '[axxium.extern.codex-peer-reader :as reader]
+         '[axxium.law.codex-native-observation :as observations])
 
 (def ^:private binding-id
   {:actor-did "did:web:fixture.example"
@@ -29,6 +46,9 @@
 (def ^:private turns-method "thread/turns/list")
 (def ^:private rpc-methods ["initialize" "initialized" queue-method turns-method turns-method])
 (def ^:private timeout-ms 8000)
+(def ^:private inbox-change
+  {"jsonrpc" "2.0" "method" "notifications/resources/updated"
+   "params" {"uri" "axxium://mailbox/inbox"}})
 
 (defn- sha256 [value]
   (-> (crypto/createHash "sha256") (.update value) (.digest "hex")))
@@ -131,11 +151,12 @@
                    (send-progress! client)
 
                    :else
-                   (socket-pair! client
-                                 (if (and (= mode :wrong-response) (= method queue-method))
-                                   (update message "id" inc)
-                                   message)
-                                 (fixture-reply method params))))))
+                   (let [result (fixture-reply method params)]
+                     (socket-pair! client
+                                   (if (and (= mode :wrong-response) (= method queue-method))
+                                     (update message "id" inc)
+                                     message)
+                                   (if (fn? mode) (mode method params result) result)))))))
            (catch :default error
              (swap! errors conj error)
              (.terminate client))))))
@@ -258,6 +279,102 @@
                     :status :completed :notice-sha256 (sha256 notice)}]})
        (println "PASS same verified Unix connection, exact read-only RPCs, and normalized capture")))))
 
+(defn- inbox-intake! [addon]
+  (let [directory (private-directory)
+        intent {:binding binding-id :caller-id caller-id
+                :notice-sha256 (dispatch/notice-sha256 notice)}
+        trigger (atom nil)
+        pass (atom 0)
+        mode (fn [method params reply]
+               (when (and (= method queue-method) (nil? (get params "cursor"))
+                          (= 1 (swap! pass inc)))
+                 (@trigger)
+                 (@trigger))
+               (if (and (= method turns-method) (= 1 @pass))
+                 (update reply "data" #(mapv (fn [row] (assoc row "items" [])) %))
+                 reply))]
+    (store/prepare! directory intent)
+    (p/finally
+     (p/let [_ (in-fixture!
+                :wrong-response
+                (fn [{:keys [connections]} config]
+                  (let [worker (dispatch/inbox-intake directory caller-id addon config)
+                        notify #(worker binding-id inbox-change)]
+                    (p/let [prepared (notify)
+                            _ (assert-equal prepared {:disposition :hold :reason :not-attempted})
+                            _ (assert-equal @connections 0)
+                            _ (assert-equal (:permit? (store/begin-attempt! directory intent)) true)
+                            _ (expect-refusal! notify :unexpected-rpc-id)
+                            _ (expect-refusal! notify :unexpected-rpc-id)]
+                      (assert-equal @connections 2)
+                      (assert-equal (:state (store/recover! directory caller-id)) :attempted)))))
+             _ (in-fixture!
+                mode
+                (fn [{:keys [connections calls]} config]
+                  (let [worker (dispatch/inbox-intake directory caller-id addon config)
+                        notify #(worker binding-id inbox-change)]
+                    (p/let [foreign (worker (assoc binding-id :generation "other-generation") inbox-change)
+                            wrong-resource (worker binding-id
+                                                   (assoc-in inbox-change ["params" "uri"] "other"))
+                            request (worker binding-id (assoc inbox-change "id" 0))
+                            _ (doseq [result [foreign wrong-resource request]]
+                                (assert-equal result {:disposition :ignored}))
+                            _ (assert-equal @connections 0)
+                            _ (reset! trigger notify)
+                            result (let [running (notify)]
+                                     (assert-equal (identical? running (notify)) true)
+                                     running)
+                            recovered (notify)]
+                      (assert-equal @connections 2)
+                      (assert-equal @calls (into rpc-methods rpc-methods))
+                      (assert-equal result recovered)
+                      (assert-equal (:state recovered) :retired)
+                      (assert-equal (:successor-intent recovered) nil)
+                      (assert-equal (:terminal recovered) {:turn-id "fixture-turn" :item-id "fixture-item"})))))]
+       (println "PASS bound inbox hints, single-flight reads, and verified terminal checkpoint"))
+     (fn [] (remove-directory! directory)))))
+
+(defn- recovered-terminal-durability! [addon]
+  (let [directory (private-directory)
+        intent {:binding binding-id :caller-id caller-id
+                :notice-sha256 (dispatch/notice-sha256 notice)}
+        fail-sync? (atom true)
+        syncs (atom 0)]
+    (store/prepare! directory intent)
+    (assert-equal (:permit? (store/begin-attempt! directory intent)) true)
+    (p/finally
+     (in-fixture!
+      :ordinary
+      (fn [{:keys [calls connections]} config]
+        (let [notify #(let [worker (dispatch/inbox-intake directory caller-id addon config)]
+                        (worker binding-id inbox-change))]
+          (reset! directory-sync-probe
+                  (fn [real-sync fd]
+                    (let [attempt (swap! syncs inc)]
+                      (if @fail-sync?
+                        (throw (ex-info "Synthetic directory sync failure"
+                                        {:reason (if (= attempt 1)
+                                                   :fixture-publication-sync
+                                                   :fixture-recovery-sync)}))
+                        (real-sync fd)))))
+          (p/let [_ (expect-refusal! notify :fixture-publication-sync)
+                  visible (store/recover! directory caller-id)
+                  _ (assert-equal (:state visible) :retired)
+                  _ (assert-equal @syncs 1)
+                  _ (expect-refusal! notify :fixture-recovery-sync)
+                  _ (assert-equal @syncs 2)
+                  _ (reset! fail-sync? false)
+                  confirmed (notify)]
+            (assert-equal confirmed visible)
+            (assert-equal @syncs 3)
+            (assert-equal @connections 1)
+            (assert-equal @calls rpc-methods)
+            (assert-equal (:permit? (store/begin-attempt! directory intent)) false)
+            (println "PASS recovered terminal requires a directory sync before success, with zero recovery RPCs")))))
+     (fn []
+       (reset! directory-sync-probe nil)
+       (remove-directory! directory)))))
+
 (defn- wrong-pins! [addon]
   (in-fixture!
    :ordinary
@@ -357,6 +474,8 @@
   (let [load-addon (module/createRequire (url/pathToFileURL (path/resolve "package.json")))
         addon (load-addon (path/resolve addon-path))]
     (p/let [_ (same-socket-capture! addon)
+            _ (inbox-intake! addon)
+            _ (recovered-terminal-durability! addon)
             _ (wrong-pins! addon)
             _ (unproven-queue-capture! addon)
             _ (reject-after-connection! addon)

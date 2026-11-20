@@ -2,8 +2,15 @@
   "Node-side bridge between durable intent custody and native observation."
   (:require ["node:crypto" :as crypto]
             [axxium.extern.codex-intent-store :as store]
+            [axxium.extern.codex-peer-reader :as reader]
             [axxium.law.codex-dispatch :as dispatch]
-            [axxium.law.codex-native-observation :as native]))
+            [axxium.law.codex-native-observation :as native]
+            [promesa.core :as p]))
+
+(def ^:private inbox-hint
+  {"jsonrpc" "2.0"
+   "method" "notifications/resources/updated"
+   "params" {"uri" "axxium://mailbox/inbox"}})
 
 (defn notice-sha256
   "Hash the exact UTF-8 text of one Codex notice."
@@ -41,3 +48,46 @@
   [directory caller-id approved-reader evidence successor-digest]
   (store/checkpoint-terminal! directory caller-id successor-digest
                               #(reconcile-intent % approved-reader evidence)))
+
+(defn- reconcile-saved! [directory caller-id addon config]
+  (p/let [saved (store/recover! directory caller-id)]
+    (cond
+      (nil? saved) {:disposition :hold :reason :missing-intent}
+      (not= (:binding config) (get-in saved [:intent :binding]))
+      {:disposition :hold :reason :binding-mismatch}
+      (= :prepared (:state saved)) {:disposition :hold :reason :not-attempted}
+      (= :retired (:state saved)) (store/confirm-terminal! directory caller-id (:binding config))
+      :else
+      (p/let [{:keys [approved-reader evidence]} (reader/capture! addon config)]
+        (retire-capture! directory caller-id approved-reader evidence nil)))))
+
+(defn inbox-intake
+  "Return one worker for the exact saved intent and independently approved peer.
+
+   Call it with the binding verified by the existing Axxium subscription
+   adapter and its decoded string-keyed hint. Calls during a capture share the
+   result and coalesce into one pending read. A terminal checkpoint satisfies
+   this worker's original intent."
+  [directory caller-id addon config]
+  (let [state (atom {})]
+    (letfn [(drain! []
+              (swap! state assoc :pending? false)
+              (p/handle (p/then (p/resolved nil)
+                                (fn [_] (reconcile-saved! directory caller-id addon config)))
+                        (fn [result error]
+                          (if (and (:pending? @state) (not= :retired (:state result)))
+                            (drain!)
+                            (do
+                              (reset! state {})
+                              (if error (throw error) result))))))]
+      (fn [verified-binding frame]
+        (if (and (some? verified-binding)
+                 (= (:binding config) verified-binding)
+                 (= inbox-hint frame))
+          (do
+            (swap! state assoc :pending? true)
+            (or (:running @state)
+                (let [running (p/then (p/resolved nil) (fn [_] (drain!)))]
+                  (swap! state assoc :running running)
+                  running)))
+          (p/resolved {:disposition :ignored}))))))
