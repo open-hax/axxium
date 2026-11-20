@@ -66,3 +66,8 @@
   p-skill-candidate: 0.29
   receipt-refs: open-hax/axxium#85 owner-proof denial coverage
   note: Keep the alternate principal well formed and hold the mailbox address and bound-DID equality constant to isolate auth method. Prove a retained binding was opened with a due message before asserting no attempt or callback.
+
+## MiMo consumer retirement 2026-11-17
+- Scoped pin-only migration to merged eta-mu#388. Gate/auth bytes preserved.
+- Friction: source inventory can drift; compare fresh default, not cached caller content.
+- Local actionlint and exact-delta checks passed; hosted verification pending. No spore promoted.
