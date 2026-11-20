@@ -97,9 +97,12 @@ peer and executable at collection close. The connection is single-use and
 requires kernel support for `SO_PEERPIDFD`. [Node connected socket API](https://nodejs.org/docs/latest-v22.x/api/net.html#new-netsocketoptions)
 
 The reader sends `initialize`, `initialized`, and the two bounded read
-methods described above. It returns the configured `:approved-reader` and
-paired `:evidence` for reconciliation. Keep this capture within the client
-and pass it to the normalizer for the exact saved intent. The transport
+methods described above. It requests one initial queue page with a limit
+of 100 and preserves the response's continuation for reconciliation. It
+reads full-turn history in pages of up to 50 entries. It returns the
+configured `:approved-reader` and paired `:evidence` for reconciliation.
+Keep this capture within the client and pass it to the normalizer for the
+exact saved intent. The transport
 uses a single 20-second collection budget, with up to five seconds each for
 connect and upgrade. The reader limits inbound socket bytes to 8 MiB,
 individual WebSocket messages to 2 MiB, and message and control events to

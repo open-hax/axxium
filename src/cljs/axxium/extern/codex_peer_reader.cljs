@@ -17,6 +17,7 @@
 (def ^:private max-events 256)
 (def ^:private max-pages 16)
 (def ^:private page-entries 50)
+(def ^:private queue-page-entries 100)
 (def ^:private max-history-items 4096)
 (def ^:private pin-keys
   [:socket-path :uid :gid :pid :socket-device :socket-inode :exec-sha256])
@@ -232,7 +233,7 @@
                     data (get result "data")
                     next-cursor (get result "nextCursor")
                     pages (conj pages page)]
-                (when-not (and (vector? data) (<= (count data) page-entries)
+                (when-not (and (vector? data) (<= (count data) (get params "limit"))
                                (contains? result "nextCursor"))
                   (refuse! :invalid-native-page))
                 (let [history-items (if (= method "thread/turns/list")
@@ -245,7 +246,11 @@
                       (when-not (and (bounded-text? next-cursor 4096) (seq data)
                                      (< (count pages) max-pages) (not (contains? cursors next-cursor)))
                         (refuse! :native-page-limit))
-                      (read-page pages (conj cursors next-cursor) next-cursor history-items)))))))]
+                      ;; Preserve a queue continuation for the observation law.
+                      ;; A second live-offset read cannot establish coverage.
+                      (if (= method "thread/queue/list")
+                        pages
+                        (read-page pages (conj cursors next-cursor) next-cursor history-items))))))))]
     (read-page [] #{} nil 0)))
 
 (defn- collect! [rpc addon handle config deadline]
@@ -258,7 +263,7 @@
                                      "capabilities" {"experimentalApi" true}})]
       (ensure-open! rpc)
       (.send (:ws rpc) "{\"method\":\"initialized\"}")
-      (p/let [queue (read-pages! rpc "thread/queue/list" params)
+      (p/let [queue (read-pages! rpc "thread/queue/list" (assoc params "limit" queue-page-entries))
               turns (read-pages! rpc "thread/turns/list" (assoc params "itemsView" "full"))]
         (ensure-open! rpc)
         (authenticate! addon handle config deadline)
