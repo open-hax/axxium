@@ -103,6 +103,18 @@
                (client/retire-capture! directory caller-id approved-reader
                                        (capture [] [(assoc completed "status" "failed")]) next-digest)))
         (is (= :attempted (:state (store/recover! directory caller-id))))
+        (let [snapshot #(into (sorted-map)
+                              (for [file (.readdirSync fs directory)]
+                                [file (.readFileSync fs (.join path directory file) "hex")]))
+              before (snapshot)
+              queue-row {"id" "other-queue" "clientUserMessageId" "other" "input" []}
+              continued (-> (capture [queue-row] [completed])
+                            (assoc-in [:queue-pages 0 :response "result" "nextCursor"] "1"))]
+          (is (= {:disposition :hold :reason :incomplete-queue}
+                 (client/retire-capture! directory caller-id approved-reader continued next-digest)))
+          (is (= before (snapshot)))
+          (is (= :attempted (:state (store/recover! directory caller-id))))
+          (is (false? (:permit? (store/begin-attempt! directory intent)))))
         (let [{:keys [successor-intent] :as saved}
               (client/retire-capture! directory caller-id approved-reader terminal-capture next-digest)]
           (is (= :retired (:state saved)))
