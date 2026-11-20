@@ -178,13 +178,7 @@
      :terminal {:turn-id turn-id :item-id item-id}
      :successor-intent (reserved-successor intent successor-digest)}))
 
-(defn- require-successor-slot! [root predecessor successor]
-  (when successor
-    (when-let [existing (read-record! root (:caller-id successor) :prepared)]
-      (when-not (= {:intent successor :detail predecessor} existing)
-        (refuse! :record-conflict)))))
-
-(defn- load-intent! [root caller-id]
+(defn- read-intent-records! [root caller-id]
   ;; Observe dependent records first so a concurrent publication can't
   ;; masquerade as an orphan. Earlier records are immutable once linked.
   (let [terminal (read-record! root caller-id :terminal)
@@ -196,6 +190,17 @@
               (and accepted (or (not attempted) (not= intent (:intent accepted))))
               (and terminal (or (not attempted) (not= intent (:intent terminal)))))
       (refuse! :record-conflict))
+    {:terminal terminal :accepted accepted :attempted attempted :prepared prepared}))
+
+(defn- require-successor-slot! [root predecessor successor]
+  (when successor
+    (when-let [existing (:prepared (read-intent-records! root (:caller-id successor)))]
+      (when-not (= {:intent successor :detail predecessor} existing)
+        (refuse! :record-conflict)))))
+
+(defn- load-intent! [root caller-id]
+  (let [{:keys [terminal accepted attempted prepared]} (read-intent-records! root caller-id)
+        intent (:intent prepared)]
     (cond
       terminal (retire-state intent accepted terminal)
       accepted {:state :accepted :intent (assoc intent :queue-id (:detail accepted))}
@@ -312,5 +317,6 @@
         (when-not (= :retired state) (refuse! :not-retired))
         (when-not (= binding (:binding intent)) (refuse! :binding-mismatch))
         (when successor-intent
+          (require-successor-slot! root parent-caller-id successor-intent)
           (fs/fsyncSync descriptor)
           (prepare-at! descriptor root successor-intent parent-caller-id))))))
