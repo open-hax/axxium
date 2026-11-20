@@ -13,6 +13,8 @@
             ["node:readline" :as readline]
             ["node:url" :as url]
             ["ws" :as ws]
+            [axxium.extern.codex-dispatch-client :as dispatch]
+            [axxium.extern.codex-intent-store :as store]
             [axxium.extern.codex-peer-reader :as reader]
             [axxium.law.codex-native-observation :as observations]
             [promesa.core :as p]))
@@ -29,6 +31,9 @@
 (def ^:private turns-method "thread/turns/list")
 (def ^:private rpc-methods ["initialize" "initialized" queue-method queue-method turns-method turns-method])
 (def ^:private timeout-ms 8000)
+(def ^:private inbox-change
+  {"jsonrpc" "2.0" "method" "notifications/resources/updated"
+   "params" {"uri" "axxium://mailbox/inbox"}})
 
 (defn- sha256 [value]
   (-> (crypto/createHash "sha256") (.update value) (.digest "hex")))
@@ -122,11 +127,12 @@
                    (send-progress! client)
 
                    :else
-                   (socket-pair! client
-                                 (if (and (= mode :wrong-response) (= method queue-method))
-                                   (update message "id" inc)
-                                   message)
-                                 (fixture-reply method params))))))
+                   (let [result (fixture-reply method params)]
+                     (socket-pair! client
+                                   (if (and (= mode :wrong-response) (= method queue-method))
+                                     (update message "id" inc)
+                                     message)
+                                   (if (fn? mode) (mode method params result) result)))))))
            (catch :default error
              (swap! errors conj error)
              (.terminate client))))))
@@ -234,6 +240,61 @@
                     :status :completed :notice-sha256 (sha256 notice)}]})
        (println "PASS same verified Unix connection, exact read-only RPCs, and normalized capture")))))
 
+(defn- inbox-intake! [addon]
+  (let [directory (private-directory)
+        intent {:binding binding-id :caller-id caller-id
+                :notice-sha256 (dispatch/notice-sha256 notice)}
+        trigger (atom nil)
+        pass (atom 0)
+        mode (fn [method params reply]
+               (when (and (= method queue-method) (nil? (get params "cursor"))
+                          (= 1 (swap! pass inc)))
+                 (@trigger)
+                 (@trigger))
+               (if (and (= method turns-method) (= 1 @pass))
+                 (update reply "data" #(mapv (fn [row] (assoc row "items" [])) %))
+                 reply))]
+    (store/prepare! directory intent)
+    (p/finally
+     (p/let [_ (in-fixture!
+                :wrong-response
+                (fn [{:keys [connections]} config]
+                  (let [worker (dispatch/inbox-intake directory caller-id addon config)
+                        notify #(worker binding-id inbox-change)]
+                    (p/let [prepared (notify)
+                            _ (assert-equal prepared {:disposition :hold :reason :not-attempted})
+                            _ (assert-equal @connections 0)
+                            _ (assert-equal (:permit? (store/begin-attempt! directory intent)) true)
+                            _ (expect-refusal! notify :unexpected-rpc-id)
+                            _ (expect-refusal! notify :unexpected-rpc-id)]
+                      (assert-equal @connections 2)
+                      (assert-equal (:state (store/recover! directory caller-id)) :attempted)))))
+             _ (in-fixture!
+                mode
+                (fn [{:keys [connections calls]} config]
+                  (let [worker (dispatch/inbox-intake directory caller-id addon config)
+                        notify #(worker binding-id inbox-change)]
+                    (p/let [foreign (worker (assoc binding-id :generation "other-generation") inbox-change)
+                            wrong-resource (worker binding-id
+                                                   (assoc-in inbox-change ["params" "uri"] "other"))
+                            request (worker binding-id (assoc inbox-change "id" 0))
+                            _ (doseq [result [foreign wrong-resource request]]
+                                (assert-equal result {:disposition :ignored}))
+                            _ (assert-equal @connections 0)
+                            _ (reset! trigger notify)
+                            result (let [running (notify)]
+                                     (assert-equal (identical? running (notify)) true)
+                                     running)
+                            recovered (notify)]
+                      (assert-equal @connections 2)
+                      (assert-equal @calls (into rpc-methods rpc-methods))
+                      (assert-equal result recovered)
+                      (assert-equal (:state recovered) :retired)
+                      (assert-equal (:successor-intent recovered) nil)
+                      (assert-equal (:terminal recovered) {:turn-id "fixture-turn" :item-id "fixture-item"})))))]
+       (println "PASS bound inbox hints, single-flight reads, and verified terminal checkpoint"))
+     (fn [] (remove-directory! directory)))))
+
 (defn- wrong-pins! [addon]
   (in-fixture!
    :ordinary
@@ -333,6 +394,7 @@
   (let [load-addon (module/createRequire (url/pathToFileURL (path/resolve "package.json")))
         addon (load-addon (path/resolve addon-path))]
     (p/let [_ (same-socket-capture! addon)
+            _ (inbox-intake! addon)
             _ (wrong-pins! addon)
             _ (reject-after-connection! addon)
             _ (peer-exit! addon)]
