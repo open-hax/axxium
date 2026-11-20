@@ -67,8 +67,11 @@ and after collection, pairs requests with replies, and applies byte and
 deadline budgets. Capture validation checks the exact bound thread and
 binding generation, the cursor chain, request/reply IDs, and the single text
 of any matching notice. It accepts `thread/queue/list` and explicit full
-`thread/turns/list` pages. Each method is limited to 16 pages of up to 128
-entries, with up to 4,096 items across the returned turns. The original
+`thread/turns/list` pages. A queue read must start at the first page and
+return an explicit null continuation in that same response. The native
+queue cursor is a live offset, so a queue read with a continuation holds the
+saved intent. Full-turn history supports up to 16 pages and 4,096 items.
+Each page allows up to 128 entries. The original
 0.169.1 Unix server returned
 method-not-found for `thread/items/list` in the isolated fixture.
 
@@ -94,9 +97,12 @@ peer and executable at collection close. The connection is single-use and
 requires kernel support for `SO_PEERPIDFD`. [Node connected socket API](https://nodejs.org/docs/latest-v22.x/api/net.html#new-netsocketoptions)
 
 The reader sends `initialize`, `initialized`, and the two bounded read
-methods described above. It returns the configured `:approved-reader` and
-paired `:evidence` for reconciliation. Keep this capture within the client
-and pass it to the normalizer for the exact saved intent. The transport
+methods described above. It requests one initial queue page with a limit
+of 100 and preserves the response's continuation for reconciliation. It
+reads full-turn history in pages of up to 50 entries. It returns the
+configured `:approved-reader` and paired `:evidence` for reconciliation.
+Keep this capture within the client and pass it to the normalizer for the
+exact saved intent. The transport
 uses a single 20-second collection budget, with up to five seconds each for
 connect and upgrade. The reader limits inbound socket bytes to 8 MiB,
 individual WebSocket messages to 2 MiB, and message and control events to

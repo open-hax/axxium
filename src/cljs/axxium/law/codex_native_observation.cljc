@@ -170,7 +170,11 @@
 
 (defn- normalize-reads [intent evidence digest-text]
   (let [thread-id (get-in intent [:binding :thread-id])
-        queue-pages (collect-pages queue-method thread-id queue-params? (:queue-pages evidence))
+        raw-queue-pages (:queue-pages evidence)
+        ;; Native queue cursors are offsets into the current queue. Only one
+        ;; initial response with no continuation proves complete coverage.
+        queue-pages (when (and (vector? raw-queue-pages) (= 1 (count raw-queue-pages)))
+                      (collect-pages queue-method thread-id queue-params? raw-queue-pages))
         turn-pages (collect-pages turns-method thread-id turns-params? (:turn-pages evidence))]
     (cond
       (nil? queue-pages) {:error :incomplete-queue}
@@ -190,8 +194,9 @@
    The transport authenticates the reader independently before and after
    collection, verifies every reply came from it, and applies byte and time
    budgets. Evidence carries those two reader attestations and paired queue
-   and full-turn pages. Each method allows 16 pages of up to 128 entries, and
-   full-turn history allows 4096 items total. Each page retains its native
+   and full-turn pages. Queue coverage requires one initial terminal page.
+   Full-turn history allows 16 pages and 4096 items total. Each page accepts
+   up to 128 entries and retains its native
    request and response with string keys. The pure digest-text function
    hashes the exact UTF-8 notice text.
    Returns a projection for codex-dispatch/reconcile or a reason to hold."

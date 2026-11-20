@@ -29,7 +29,7 @@
 (def ^:private caller-id "fixture-caller")
 (def ^:private queue-method "thread/queue/list")
 (def ^:private turns-method "thread/turns/list")
-(def ^:private rpc-methods ["initialize" "initialized" queue-method queue-method turns-method turns-method])
+(def ^:private rpc-methods ["initialize" "initialized" queue-method turns-method turns-method])
 (def ^:private timeout-ms 8000)
 (def ^:private inbox-change
   {"jsonrpc" "2.0" "method" "notifications/resources/updated"
@@ -66,26 +66,32 @@
                "content" [{"type" "text" "text" notice "text_elements" []}]}]
              [])})
 
-(defn- paginated-reply [method params]
+(defn- queue-reply [params]
   (assert/strictEqual (get params "threadId") (:thread-id binding-id))
-  (when (= turns-method method)
-    (assert/strictEqual (get params "itemsView") "full"))
-  (let [cursor (get params "cursor")
-        queue? (= queue-method method)]
+  (assert/strictEqual (get params "limit") 100)
+  (assert/strictEqual (contains? params "cursor") false)
+  {"data" (mapv #(queue-row (str "other-queue-" %)) (range 100))
+   "nextCursor" nil})
+
+(defn- paginated-turn-reply [params]
+  (assert/strictEqual (get params "threadId") (:thread-id binding-id))
+  (assert/strictEqual (get params "itemsView") "full")
+  (let [cursor (get params "cursor")]
     (assert/strictEqual (boolean (pos-int? (get params "limit"))) true)
     (if (nil? cursor)
-      {"data" [(if queue? (queue-row "other-queue") (turn-row "other-turn"))]
-       "nextCursor" (str method "/second")}
+      {"data" [(turn-row "other-turn")]
+       "nextCursor" (str turns-method "/second")}
       (do
-        (assert/strictEqual cursor (str method "/second"))
-        {"data" [(if queue? (queue-row "second-queue") (turn-row "fixture-turn"))]
+        (assert/strictEqual cursor (str turns-method "/second"))
+        {"data" [(turn-row "fixture-turn")]
          "nextCursor" nil}))))
 
 (defn- fixture-reply [method params]
   (case method
     "initialize" {"userAgent" "codex-app-server/fixture" "codexHome" "/fixture"
                   "platformFamily" "unix" "platformOs" "linux"}
-    ("thread/queue/list" "thread/turns/list") (paginated-reply method params)
+    "thread/queue/list" (queue-reply params)
+    "thread/turns/list" (paginated-turn-reply params)
     (throw (ex-info "Unexpected fixture method" {:method method}))))
 
 (defn- socket-pair! [client message result]
@@ -122,6 +128,9 @@
                  (cond
                    (and (= mode :server-request) (= method queue-method))
                    (.send client "{\"id\":99,\"method\":\"fixture/server-request\"}")
+
+                   (and (= mode :continued-queue) (= method queue-method))
+                   (socket-pair! client message (assoc (queue-reply params) "nextCursor" "100"))
 
                    (and (= mode :stream-limit) (= method queue-method))
                    (send-progress! client)
@@ -214,6 +223,20 @@
   (assert/ok (= actual expected)
              (str "Fixture expected " (pr-str expected) ", saw " (pr-str actual))))
 
+(defn- unproven-queue-capture! [addon]
+  (in-fixture!
+   :continued-queue
+   (fn [{:keys [calls errors]} config]
+     (p/let [{:keys [approved-reader evidence]} (reader/capture! addon config)]
+       (assert-equal @calls rpc-methods)
+       (assert-equal @errors [])
+       (assert-equal (count (:queue-pages evidence)) 1)
+       (assert-equal (get-in evidence [:queue-pages 0 :response "result" "nextCursor"]) "100")
+       (assert-equal (observations/normalize {:binding binding-id :caller-id caller-id}
+                                             approved-reader evidence sha256)
+                     {:error :incomplete-queue})
+       (println "PASS queue continuation retained without a second queue read")))))
+
 (defn- same-socket-capture! [addon]
   (in-fixture!
    :ordinary
@@ -226,7 +249,8 @@
        (assert-equal (:binding approved-reader) binding-id)
        (assert-equal (:reader-before evidence) approved-reader)
        (assert-equal (:reader-after evidence) approved-reader)
-       (assert/strictEqual (count (:queue-pages evidence)) 2)
+       (assert/strictEqual (count (:queue-pages evidence)) 1)
+       (assert/strictEqual (count (get-in evidence [:queue-pages 0 :response "result" "data"])) 100)
        (assert/strictEqual (count (:turn-pages evidence)) 2)
        (assert-equal @calls rpc-methods)
        (assert/strictEqual @connections 1)
@@ -396,6 +420,7 @@
     (p/let [_ (same-socket-capture! addon)
             _ (inbox-intake! addon)
             _ (wrong-pins! addon)
+            _ (unproven-queue-capture! addon)
             _ (reject-after-connection! addon)
             _ (peer-exit! addon)]
       (println "PASS Linux Codex peer reader fixture"))))
