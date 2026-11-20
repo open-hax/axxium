@@ -56,7 +56,7 @@
       (not= (:binding config) (get-in saved [:intent :binding]))
       {:disposition :hold :reason :binding-mismatch}
       (= :prepared (:state saved)) {:disposition :hold :reason :not-attempted}
-      (= :retired (:state saved)) saved
+      (= :retired (:state saved)) (store/confirm-terminal! directory caller-id (:binding config))
       :else
       (p/let [{:keys [approved-reader evidence]} (reader/capture! addon config)]
         (retire-capture! directory caller-id approved-reader evidence nil)))))

@@ -220,6 +220,18 @@
   (when-not (id? caller-id) (refuse! :invalid-caller-id))
   (with-store! directory (fn [_ root] (load-intent! root caller-id))))
 
+(defn confirm-terminal!
+  "Return the binding-matched terminal checkpoint after syncing its directory."
+  [directory caller-id binding]
+  (when-not (id? caller-id) (refuse! :invalid-caller-id))
+  (with-store! directory
+    (fn [descriptor root]
+      (let [{:keys [state intent] :as saved} (load-intent! root caller-id)]
+        (when-not (= :retired state) (refuse! :not-retired))
+        (when-not (= binding (:binding intent)) (refuse! :binding-mismatch))
+        (fs/fsyncSync descriptor)
+        saved))))
+
 (defn- prepare-at! [descriptor root intent predecessor]
   (commit! descriptor root :prepared intent predecessor)
   (load-intent! root (:caller-id intent)))

@@ -134,9 +134,11 @@ Each accepted hint triggers an authenticated, bounded queue and full-turn
 read for the saved attempt. Hints received before the first read coalesce.
 Multiple hints during a read retain one pending read for the same intent.
 The worker uses one connection at a time. An ordinary read returning no
-matching evidence leaves the saved attempt recoverable. An exact terminal
-checkpoint satisfies the original intent and later calls recover that
-checkpoint. The worker requires a separate saved attempt for later
+matching evidence leaves the saved attempt recoverable. A terminal
+checkpoint satisfies the original intent. Recovery validates the saved
+binding and syncs the pinned directory before returning terminal success.
+A directory sync failure leaves the checkpoint available for another
+recovery attempt. The worker requires a separate saved attempt for later
 mailbox work.
 
 Codex sends native turn and queue notifications to connections associated

@@ -5,7 +5,6 @@
             ["node:child_process" :as child-process]
             ["node:crypto" :as crypto]
             ["node:events" :as events]
-            ["node:fs" :as fs]
             ["node:http" :as http]
             ["node:module" :as module]
             ["node:os" :as os]
@@ -13,11 +12,27 @@
             ["node:readline" :as readline]
             ["node:url" :as url]
             ["ws" :as ws]
-            [axxium.extern.codex-dispatch-client :as dispatch]
-            [axxium.extern.codex-intent-store :as store]
-            [axxium.extern.codex-peer-reader :as reader]
-            [axxium.law.codex-native-observation :as observations]
             [promesa.core :as p]))
+
+(def ^:private directory-sync-probe (atom nil))
+
+;; nbb resolves built-in function exports when it first requires the module.
+;; Install the fixture probe before requiring the store or reader.
+(let [load-commonjs (module/createRequire (url/pathToFileURL (path/resolve "package.json")))
+      common-fs (load-commonjs "node:fs")
+      real-sync (aget common-fs "fsyncSync")]
+  (aset common-fs "fsyncSync"
+        (fn [fd]
+          (if (and @directory-sync-probe (.isDirectory (.fstatSync common-fs fd)))
+            (@directory-sync-probe real-sync fd)
+            (real-sync fd))))
+  (module/syncBuiltinESMExports))
+
+(require '["node:fs" :as fs]
+         '[axxium.extern.codex-dispatch-client :as dispatch]
+         '[axxium.extern.codex-intent-store :as store]
+         '[axxium.extern.codex-peer-reader :as reader]
+         '[axxium.law.codex-native-observation :as observations])
 
 (def ^:private binding-id
   {:actor-did "did:web:fixture.example"
@@ -319,6 +334,47 @@
        (println "PASS bound inbox hints, single-flight reads, and verified terminal checkpoint"))
      (fn [] (remove-directory! directory)))))
 
+(defn- recovered-terminal-durability! [addon]
+  (let [directory (private-directory)
+        intent {:binding binding-id :caller-id caller-id
+                :notice-sha256 (dispatch/notice-sha256 notice)}
+        fail-sync? (atom true)
+        syncs (atom 0)]
+    (store/prepare! directory intent)
+    (assert-equal (:permit? (store/begin-attempt! directory intent)) true)
+    (p/finally
+     (in-fixture!
+      :ordinary
+      (fn [{:keys [calls connections]} config]
+        (let [notify #(let [worker (dispatch/inbox-intake directory caller-id addon config)]
+                        (worker binding-id inbox-change))]
+          (reset! directory-sync-probe
+                  (fn [real-sync fd]
+                    (let [attempt (swap! syncs inc)]
+                      (if @fail-sync?
+                        (throw (ex-info "Synthetic directory sync failure"
+                                        {:reason (if (= attempt 1)
+                                                   :fixture-publication-sync
+                                                   :fixture-recovery-sync)}))
+                        (real-sync fd)))))
+          (p/let [_ (expect-refusal! notify :fixture-publication-sync)
+                  visible (store/recover! directory caller-id)
+                  _ (assert-equal (:state visible) :retired)
+                  _ (assert-equal @syncs 1)
+                  _ (expect-refusal! notify :fixture-recovery-sync)
+                  _ (assert-equal @syncs 2)
+                  _ (reset! fail-sync? false)
+                  confirmed (notify)]
+            (assert-equal confirmed visible)
+            (assert-equal @syncs 3)
+            (assert-equal @connections 1)
+            (assert-equal @calls rpc-methods)
+            (assert-equal (:permit? (store/begin-attempt! directory intent)) false)
+            (println "PASS recovered terminal requires a directory sync before success, with zero recovery RPCs")))))
+     (fn []
+       (reset! directory-sync-probe nil)
+       (remove-directory! directory)))))
+
 (defn- wrong-pins! [addon]
   (in-fixture!
    :ordinary
@@ -419,6 +475,7 @@
         addon (load-addon (path/resolve addon-path))]
     (p/let [_ (same-socket-capture! addon)
             _ (inbox-intake! addon)
+            _ (recovered-terminal-durability! addon)
             _ (wrong-pins! addon)
             _ (unproven-queue-capture! addon)
             _ (reject-after-connection! addon)
