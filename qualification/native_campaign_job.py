@@ -126,7 +126,11 @@ def verify_work_adoption(origin, *, api=public_work_api):
     scanner = api('pulls/'+str(work_campaign.SCANNER_PR))
     scanner_head = work_campaign.SCANNER_HEAD
     require(collector.accepted_pr(scanner, scanner_head), 'Work scanner adoption differs')
-    for accepted in {work_campaign.APPLICATION, work_campaign.SCANNER, scanner_head, scanner['merge_commit_sha'], revision}:
+    fixtures = api('pulls/'+str(work_campaign.HARNESS_PR))
+    require(collector.accepted_pr(fixtures, work_campaign.HARNESS), 'Work fixture adoption differs')
+    fixture_merge = fixtures['merge_commit_sha']
+    for accepted in {work_campaign.APPLICATION, work_campaign.SCANNER, scanner_head, scanner['merge_commit_sha'],
+                     work_campaign.HARNESS, fixture_merge, revision}:
         require(api('compare/'+accepted+'...main').get('merge_base_commit', {}).get('sha') == accepted,
                 'Work evidence source is outside native main')
     pulls = api('commits/'+revision+'/pulls?per_page=100')
@@ -162,12 +166,20 @@ def verify_work_adoption(origin, *, api=public_work_api):
             'Work scanner bytes differ from #53')
     require(collector.verify_evaluator_custody(revision) == {name:hashes['qualification/'+name]
             for name in collector.RUNTIME_FILES}, 'Imported Work evaluator custody differs')
+    fixture_hashes = {}
+    for relative in sorted(work_campaign.HARNESS_PATHS):
+        pinned = subprocess.check_output(['git','show',work_campaign.HARNESS+':'+relative],cwd=CONTROLLER)
+        merged = subprocess.check_output(['git','show',fixture_merge+':'+relative],cwd=CONTROLLER)
+        require(pinned == merged, 'Merged Work fixture differs from the reviewed bytes')
+        fixture_hashes[relative] = collector.sha(pinned)
     return {'producer_revision':revision, 'controller_pr':adopted[0]['number'],
             'controller_pr_head':adopted[0]['head']['sha'], 'controller_file_sha256':hashes,
             'application_pr':work_campaign.APPLICATION_PR, 'application_sha':work_campaign.APPLICATION,
             'scanner_pr':work_campaign.SCANNER_PR, 'scanner_revision':work_campaign.SCANNER,
             'scanner_pr_head':scanner_head,
-            'scanner_merge_sha':scanner['merge_commit_sha'], 'harness_sha':work_campaign.APPLICATION,
+            'scanner_merge_sha':scanner['merge_commit_sha'], 'harness_sha':work_campaign.HARNESS,
+            'harness_pr':work_campaign.HARNESS_PR, 'harness_merge_sha':fixture_merge,
+            'harness_fixture_sha256':fixture_hashes,
             'native_adoption_verified':True}
 
 
@@ -366,7 +378,7 @@ def execute(index, root, unit, destination, origin, adoption, state):
     work = origin.get('workflow') == work_campaign.WORKFLOW
     base = WORK_BASE if work else BASE
     application = work_campaign.APPLICATION if work else collector.APPLICATION
-    harness_revision = application if work else collector.HARNESS
+    harness_revision = work_campaign.HARNESS if work else collector.HARNESS
     producer_revision = adoption['producer_revision'] if work else collector.PRODUCER
     STAGE='worker-source-preparation'
     subprocess.run(['sudo','mkdir','-p',str(base)],check=True,capture_output=True)
@@ -405,15 +417,18 @@ def execute(index, root, unit, destination, origin, adoption, state):
         producer=m.producer_custody(producer_revision,external=True)
         if work:
             candidates,selection=work_campaign.select(m,l,index)
-            require(not harness['changed_test_paths'] and harness['application_sha']==harness['harness_sha']==application,
-                    'Native Work harness must retain the exact tracked tests')
+            require(harness['changed_test_paths']==sorted(work_campaign.HARNESS_PATHS)
+                    and harness['application_sha']==application and harness['harness_sha']==harness_revision,
+                    'Native Work harness differs from the reviewed fixture overlay')
+            support_paths=h.WORK_TEST_SUPPORT_PATHS
         else:
             candidates,selection=l.select_candidates(m,profile=collector.PROFILE,path_prefix='src/cljs/',batch_index=index,sample_seed=collector.SEED)
             require(len(candidates)==PARTITIONS[index][0] and selection['selection_sha256']==PARTITIONS[index][1]
                     and selection['inventory_sha256']==INVENTORY and len(selection['inventory_fingerprints'])==2852,
                     'Native whole selection differs')
             require(len(harness['files'])==130,'Native legacy harness differs')
-        require(harness['test_support_paths']==sorted(h.TEST_SUPPORT_PATHS),'Native harness test support differs')
+            support_paths=h.TEST_SUPPORT_PATHS
+        require(harness['test_support_paths']==sorted(support_paths),'Native harness test support differs')
     gate=root/'qualification/results/.native-launch-ready'
     report=root/'qualification/results'/(work_campaign.OUTPUT if work else 'native-standard-v2-v5')/'report.json'
     argv=['sudo','systemd-run','--unit='+unit,'--service-type=exec','--uid='+str(os.getuid()),'--gid='+str(os.getgid()),

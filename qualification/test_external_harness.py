@@ -344,6 +344,54 @@ class ExternalHarnessTests(unittest.TestCase):
         with mock.patch.object(harness, 'FIXTURE_ERROR_HARNESS_SHA', bad), self.assertRaises(harness.HarnessError):
             harness.prepare(self.root, self.application, bad)
 
+    def test_work_overlay_accepts_only_the_fixed_fixture_paths(self):
+        """Only the exact reviewed test blobs overlay the clean Work checkout."""
+        paths = harness.work_campaign.HARNESS_PATHS
+        added = harness.work_campaign.HARNESS_ADDED_TEST
+        for path in paths - {added}:
+            self.write(path, '; application fixture\n')
+        application = self.commit('Work application')
+        for path in paths:
+            self.write(path, '; reviewed fixture\n')
+        reviewed = self.commit('reviewed Work overlay')
+        self.write('scripts/lifecycle.test.mjs', '; altered lifecycle fixture\n')
+        indirect = self.commit('same paths but an indirect descendant')
+        self.git('checkout', '-q', '--detach', application)
+        for path in paths:
+            self.write(path, '; reviewed fixture\n')
+        self.write('package.json', '{"name":"unexpected application bytes"}\n')
+        extra = self.commit('extra package input')
+        self.git('checkout', '-q', '--detach', self.application)
+        for path in paths:
+            self.write(path, '; unrelated fixture\n')
+        unrelated = self.commit('overlay outside exact Work ancestry')
+        self.git('checkout', '-q', '--detach', application)
+        with mock.patch.object(harness.work_campaign, 'APPLICATION', application):
+            with mock.patch.object(harness.work_campaign, 'HARNESS', reviewed):
+                descriptor = harness.prepare(self.root, application, reviewed)
+                project = Path(descriptor['project_dir'])
+                self.assertEqual(set(descriptor['changed_test_paths']), paths)
+                for path in paths:
+                    relative = path.removeprefix('src/cljs/')
+                    generated = project / ('src/'+relative if relative != path else path)
+                    self.assertEqual(generated.read_text(), '; reviewed fixture\n')
+                    if path == added:
+                        self.assertFalse((self.root/path).exists())
+                    else:
+                        self.assertEqual((self.root/path).read_text(), '; application fixture\n')
+                self.assertEqual((project/'package.json').read_bytes(), (self.root/'package.json').read_bytes())
+                harness.validate(self.root, descriptor)
+                with self.assertRaises(harness.HarnessError):
+                    harness.prepare(self.root, application, application)
+            with mock.patch.object(harness.work_campaign, 'HARNESS', indirect):
+                descendant = harness.prepare(self.root, application, indirect)
+                self.assertEqual(set(descendant['changed_test_paths']), paths)
+                harness.validate(self.root, descendant)
+            for revision, reason in ((unrelated, 'descend from'), (extra, 'exact accepted test files')):
+                with (self.subTest(revision=revision), mock.patch.object(harness.work_campaign, 'HARNESS', revision),
+                      self.assertRaisesRegex(harness.HarnessError, reason)):
+                    harness.prepare(self.root, application, revision)
+
 
 if __name__ == '__main__':
     unittest.main()
