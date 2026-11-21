@@ -41,16 +41,24 @@ function startFixture(overrides = {}) {
   return { child, readUntil, output: () => output, error: () => error };
 }
 
-async function boundedExit(exited, ms = 28000) {
+/** Observe child completion without leaving the fixture deadline timer running. */
+async function waitForExit(exited, ms) {
   let guard;
   try {
     return await Promise.race([
       exited,
-      new Promise((_, reject) => { guard = setTimeout(() => reject(new Error('child exceeded shutdown bound')), ms); }),
+      new Promise(resolve => { guard = setTimeout(resolve, ms, null); }),
     ]);
   } finally {
     clearTimeout(guard);
   }
+}
+
+/** Require child completion for fixtures with an expected shutdown deadline. */
+async function boundedExit(exited, ms = 28000) {
+  const result = await waitForExit(exited, ms);
+  if (result === null) throw new Error('child exceeded shutdown bound');
+  return result;
 }
 
 test('repeated signals during schema initialization close the pool and prevent listening', { timeout: 8000 }, async () => {
@@ -114,6 +122,7 @@ test('blocked initialization and pool cleanup are bounded despite repeated signa
 
 test('SIGTERM drains an active HTTP request before closing the database pool', { timeout: 8000 }, async () => {
   const fixture = startFixture();
+  const closed = once(fixture.child, 'close');
   try {
     const [, port] = await fixture.readUntil(/LISTEN (\d+)/);
     const response = fetch(`http://127.0.0.1:${port}/hold`);
@@ -124,7 +133,9 @@ test('SIGTERM drains an active HTTP request before closing the database pool', {
     const result = await response;
     assert.equal(result.status, 200);
     assert.deepEqual(await result.json(), { result: 'drained' });
-    const [code, signal] = await exited;
+    const shutdown = await waitForExit(exited, 3000);
+    assert.ok(shutdown, 'Fastify child did not exit after draining the active request');
+    const [code, signal] = shutdown;
     assert.equal(signal, null);
     assert.equal(code, 0, fixture.error());
     const events = fixture.output();
@@ -132,7 +143,8 @@ test('SIGTERM drains an active HTTP request before closing the database pool', {
     assert.ok(events.indexOf('REQUEST_RELEASED') < events.indexOf('POOL_END'));
     assert.equal((events.match(/POOL_END/g) ?? []).length, 1);
   } finally {
-    if (fixture.child.exitCode === null) fixture.child.kill('SIGKILL');
+    if (fixture.child.exitCode === null && fixture.child.signalCode === null) fixture.child.kill('SIGKILL');
+    if (await waitForExit(closed, 1000) === null) throw new Error('active HTTP fixture child cleanup did not complete');
   }
 });
 

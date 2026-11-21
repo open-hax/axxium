@@ -1,7 +1,7 @@
 (ns axxium.law.clio-pin-test
   "Pins the vendored clio canonical form of one fixed event. If the vendored
    copy drifts from open-hax/clio 9b14cda this expected string changes."
-  (:require [clio.shape.canonical :as canonical]
+  (:require [axxium.extern.clio-pin-fixture-test :as fixture]
             [cljs.test :refer [deftest is]]))
 
 (def fixed-event
@@ -18,4 +18,4 @@
   "[:map [[[:keyword \"event\" \"actor\"] [:string \"did:plc:bbbbbbbbbbbbbbbbbbbbbbbb\"]] [[:keyword \"event\" \"at\"] [:inst [:number :safe-integer \"1793491200000\"]]] [[:keyword \"event\" \"body\"] [:map [[[:keyword nil \"n\"] [:number :real 1 \"6755399441055744\" -52]] [[:keyword nil \"tags\"] [:set [[:keyword nil \"a\"] [:keyword nil \"b\"]]]] [[:keyword nil \"text\"] [:string \"hi\"]]]]] [[:keyword \"event\" \"causes\"] [:sequential []]] [[:keyword \"event\" \"id\"] [:string \"00000000-0000-4000-8000-000000000001\"]] [[:keyword \"event\" \"seq\"] [:number :safe-integer \"1\"]] [[:keyword \"event\" \"stream\"] [:string \"mbox/did:plc:aaaaaaaaaaaaaaaaaaaaaaaa\"]] [[:keyword \"event\" \"type\"] [:keyword \"axxium.mbox\" \"sent\"]]]]")
 
 (deftest canonical-form-is-pinned
-  (is (= expected-canonical (canonical/canonical-edn fixed-event))))
+  (is (= expected-canonical (fixture/bounded-canonical-edn fixed-event))))

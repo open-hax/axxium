@@ -16,6 +16,13 @@
     (is (> @calls 1))))
 
 (deftest refuses-a-non-progressing-write
-  (is (thrown? js/Error
-               (disk/write-all! (js/Buffer.from "event" "utf8")
-                                (fn [_ _ _] 0)))))
+  (let [calls (atom 0)
+        error (try
+                (disk/write-all! (js/Buffer.from "event" "utf8")
+                                 (fn [_ _ _]
+                                   (when (> (swap! calls inc) 1)
+                                     (throw (js/Error. "test writer called again after zero progress")))
+                                   0))
+                (catch js/Error error error))]
+    (is (= "ledger write made invalid progress" (ex-message error)))
+    (is (= 1 @calls))))
