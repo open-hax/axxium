@@ -6,6 +6,7 @@
             ["node:net" :refer [Socket]]
             ["ws" :refer [WebSocket]]
             [axxium.extern.token-crypto :as token-crypto]
+            [axxium.law.codex-native-observation :as observations]
             [clojure.string :as str]
             [promesa.core :as p]))
 
@@ -253,8 +254,56 @@
                         (read-page pages (conj cursors next-cursor) next-cursor history-items))))))))]
     (read-page [] #{} nil 0)))
 
-(defn- collect! [rpc addon handle config deadline]
-  (let [params {"threadId" (get-in config [:binding :thread-id]) "limit" page-entries}
+(defn- read-queue! [rpc thread-id]
+  (read-pages! rpc "thread/queue/list" {"threadId" thread-id "limit" queue-page-entries}))
+
+(defn- window-page! [rpc thread-id cursor items-view]
+  (p/let [page (rpc! rpc "thread/turns/list"
+                     (cond-> {"threadId" thread-id "limit" 1 "itemsView" items-view}
+                       cursor (assoc "cursor" cursor)))]
+    (let [{:strs [data] next-cursor "nextCursor" :as result} (get-in page [:response "result"])]
+      (when-not (and (vector? data) (<= (count data) 1) (contains? result "nextCursor"))
+        (refuse! :invalid-native-page))
+      (when (and (some? next-cursor)
+                 (not (and (seq data) (bounded-text? next-cursor 4096))))
+        (refuse! :native-page-limit))
+      page)))
+
+(defn- read-window! [rpc thread-id [_ anchor-turn]]
+  (letfn [(read-next [pages cursors cursor history-items]
+            (p/let [metadata (window-page! rpc thread-id cursor "notLoaded")]
+              (let [{:strs [data] next-cursor "nextCursor"} (get-in metadata [:response "result"])
+                    {turn-id "id" status "status"} (first data)]
+                (cond
+                  (and anchor-turn (= anchor-turn turn-id))
+                  (do
+                    (when-not (= "completed" status)
+                      (refuse! :history-anchor-unavailable))
+                    (conj pages {:metadata metadata :full nil}))
+
+                  (and (nil? anchor-turn) (empty? pages) (empty? data))
+                  [{:metadata metadata :full nil}]
+
+                  (or (empty? data) (and anchor-turn (nil? next-cursor)))
+                  (refuse! :history-anchor-unavailable)
+
+                  :else
+                  (p/let [full (window-page! rpc thread-id cursor "full")]
+                    (let [rows (get-in full [:response "result" "data"])
+                          history-items (+ history-items (count-history-items! rows))
+                          pages (conj pages {:metadata metadata :full full})]
+                      (when (> history-items max-history-items)
+                        (refuse! :native-page-limit))
+                      (if (nil? next-cursor)
+                        pages
+                        (do
+                          (when (or (contains? cursors next-cursor) (>= (count pages) max-pages))
+                            (refuse! :native-page-limit))
+                          (read-next pages (conj cursors next-cursor) next-cursor history-items)))))))))]
+    (read-next [] #{} nil 0)))
+
+(defn- collect! [rpc addon handle config deadline read!]
+  (let [thread-id (get-in config [:binding :thread-id])
         reader {:identity (token-crypto/stable-digest "codex-peer-reader/v1" (mapv config pin-keys))
                 :binding (:binding config)}]
     (p/let [_ (:opened rpc)
@@ -263,31 +312,22 @@
                                      "capabilities" {"experimentalApi" true}})]
       (ensure-open! rpc)
       (.send (:ws rpc) "{\"method\":\"initialized\"}")
-      (p/let [queue (read-pages! rpc "thread/queue/list" (assoc params "limit" queue-page-entries))
-              turns (read-pages! rpc "thread/turns/list" (assoc params "itemsView" "full"))]
+      (p/let [observation (read! rpc thread-id)]
         (ensure-open! rpc)
         (authenticate! addon handle config deadline)
         {:approved-reader reader
-         :evidence {:reader-before reader :reader-after reader
-                    :queue-pages queue :turn-pages turns}}))))
+         :observation observation}))))
 
-(defn- observe-connected! [addon handle config deadline]
+(defn- observe-connected! [addon handle config deadline read!]
   (authenticate! addon handle config deadline)
   (let [socket (use-verified-fd! (.takeSocketFd addon handle))]
     (-> (p/let [_ (js/Promise.resolve nil)
                 rpc (open-rpc! socket deadline)]
-          (-> (p/let [_ (js/Promise.resolve nil)] (collect! rpc addon handle config deadline))
+          (-> (p/let [_ (js/Promise.resolve nil)] (collect! rpc addon handle config deadline read!))
               (.finally #(close-rpc! rpc))))
         (.finally #(.destroy socket)))))
 
-(defn capture!
-  "Return paired native queue and full-turn pages for the exact approved binding.
-
-   Both the addon and config come from independent host custody. The only
-   connection is the peer-guarded Unix descriptor and the only RPCs are
-   initialization and bounded reads. Pass the in-memory capture to the
-   dispatch observation law and retain only its normalized evidence."
-  [addon config]
+(defn- observe! [addon config read!]
   (let [deadline (+ (js/performance.now) capture-ms)]
     (p/let [_ (js/Promise.resolve nil)]
       (bind-and-pin! config)
@@ -295,5 +335,53 @@
             handle (.openPeer addon socket-path uid gid pid socket-device socket-inode
                               (min connect-ms (remaining-ms! deadline)))]
         (-> (p/let [_ (js/Promise.resolve nil)]
-              (observe-connected! addon handle config deadline))
+              (observe-connected! addon handle config deadline read!))
             (.finally #(.closePeer addon handle)))))))
+
+(defn- capture-evidence! [addon config read!]
+  (p/let [{:keys [approved-reader observation]} (observe! addon config read!)]
+    {:approved-reader approved-reader
+     :evidence (assoc observation :reader-before approved-reader :reader-after approved-reader)}))
+
+(defn capture!
+  "Return paired read-only RPC pages for the exact approved binding.
+
+   Both the addon and config come from independent host custody. Evidence
+   for an anchored attempt contains the bounded window up to its saved
+   predecessor. An older attempt still requires full history coverage.
+   Pass the in-memory capture to the dispatch observation law."
+  ([addon config]
+   (capture-evidence!
+    addon config
+    (fn [rpc thread-id]
+      (p/let [queue (read-queue! rpc thread-id)
+              turns (read-pages! rpc "thread/turns/list" {"threadId" thread-id "limit" page-entries
+                                                         "itemsView" "full"})]
+        {:queue-pages queue :turn-pages turns}))))
+  ([addon config history-anchor]
+   (when-not (observations/history-anchor? history-anchor)
+     (refuse! :invalid-history-anchor))
+   (capture-evidence!
+    addon config
+    (fn [rpc thread-id]
+      (p/let [queue (read-queue! rpc thread-id)
+              pages (read-window! rpc thread-id history-anchor)
+              head (window-page! rpc thread-id nil "notLoaded")]
+        {:queue-pages queue :window-pages pages :window-head head})))))
+
+(defn capture-anchor!
+  "Observe a pre-attempt history anchor on the authenticated Desktop peer.
+
+   Requires an empty complete initial queue and a newest completed turn or
+   empty history. The result describes a read, not a native dispatch permit."
+  [addon config]
+  (p/let [{:keys [approved-reader observation]}
+          (observe!
+           addon config
+           (fn [rpc thread-id]
+             (p/let [queue (read-queue! rpc thread-id)
+                     head (window-page! rpc thread-id nil "notLoaded")]
+               (observations/read-history-anchor thread-id (first queue) head))))]
+    (when-not observation
+      (refuse! :history-anchor-unavailable))
+    {:approved-reader approved-reader :history-anchor observation}))

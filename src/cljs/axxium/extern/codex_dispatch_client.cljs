@@ -34,10 +34,11 @@
    receipt. The owner of the durable intent must apply and persist any
    disposition before advancing to another notification."
   [directory caller-id approved-reader evidence]
-  (if-let [{:keys [intent state]} (store/recover! directory caller-id)]
+  (if-let [{:keys [intent state history-anchor]} (store/recover! directory caller-id)]
     (if (= :prepared state)
       {:disposition :hold :reason :not-attempted}
-      (reconcile-intent intent approved-reader evidence))
+      (reconcile-intent (cond-> intent history-anchor (assoc :history-anchor history-anchor))
+                        approved-reader evidence))
     {:disposition :hold :reason :missing-intent}))
 
 (defn retire-capture!
@@ -58,7 +59,9 @@
       (= :prepared (:state saved)) {:disposition :hold :reason :not-attempted}
       (= :retired (:state saved)) (store/confirm-terminal! directory caller-id (:binding config))
       :else
-      (p/let [{:keys [approved-reader evidence]} (reader/capture! addon config)]
+      (p/let [{:keys [approved-reader evidence]} (if-let [anchor (:history-anchor saved)]
+                                                  (reader/capture! addon config anchor)
+                                                  (reader/capture! addon config))]
         (retire-capture! directory caller-id approved-reader evidence nil)))))
 
 (defn inbox-intake

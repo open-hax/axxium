@@ -110,6 +110,83 @@
 (def ^:private completed {:disposition :retire :turn-id "turn-complete" :item-id "item-matched"})
 (def ^:private next-digest "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
+(deftest dispatch-permit-commits-and-retains-its-history-anchor
+  (with-private-dir
+    (fn [dir]
+      (let [{:keys [caller-id binding]} intent
+            anchor ["completed" "predecessor"]
+            attempted {:state :attempted :intent intent :history-anchor anchor}]
+        (store/prepare! dir intent)
+        (is (= (assoc attempted :permit? true) (store/begin-attempt! dir intent anchor)))
+        (let [attempt-file (record-with-suffix dir ".attempted")
+              bytes (fs/readFileSync attempt-file "utf8")]
+          (is (= [2 "attempted" caller-id (mapv binding [:actor-did :device-id :thread-id :generation])
+                  (:notice-sha256 intent) anchor]
+                 (js->clj (js/JSON.parse bytes))))
+          (is (= attempted (store/recover! dir caller-id)))
+          (is (= attempted (store/prepare! dir intent)))
+          (doseq [retry [(store/begin-attempt! dir intent anchor)
+                         (store/begin-attempt! dir intent ["completed" "different-predecessor"])
+                         (store/begin-attempt! dir intent)]]
+            (is (= (assoc attempted :permit? false) retry)))
+          (let [verify (fn [saved]
+                         (is (= (assoc intent :history-anchor anchor) saved))
+                         completed)
+                terminal (store/checkpoint-terminal! dir caller-id next-digest verify)
+                successor (:successor-intent terminal)
+                later (store/record-accepted! dir intent "late-native-queue")]
+            (is (= :retired (:state terminal)))
+            (is (= anchor (:history-anchor terminal) (:history-anchor later)))
+            (is (= later (store/confirm-terminal! dir caller-id binding)))
+            (is (= "late-native-queue" (get-in later [:intent :queue-id])))
+            (is (= {:state :prepared :intent successor}
+                   (store/prepare-successor! dir caller-id binding)))
+            (is (= {:state :attempted :intent successor :permit? true
+                    :history-anchor ["completed" "turn-complete"]}
+                   (store/begin-attempt! dir successor ["completed" "turn-complete"])))
+            (is (= bytes (fs/readFileSync attempt-file "utf8")))))))))
+
+(deftest legacy-dispatch-permit-cannot-acquire-an-anchor
+  (with-private-dir
+    (fn [dir]
+      (store/prepare! dir intent)
+      (let [attempt (dissoc (store/begin-attempt! dir intent) :permit?)
+            attempt-file (record-with-suffix dir ".attempted")
+            bytes (fs/readFileSync attempt-file "utf8")]
+        (is (= [1 "attempted" (:caller-id intent)
+                (mapv (:binding intent) [:actor-did :device-id :thread-id :generation])
+                (:notice-sha256 intent) nil]
+               (js->clj (js/JSON.parse bytes))))
+        (is (= (assoc attempt :permit? false) (store/begin-attempt! dir intent ["empty"])))
+        (is (= bytes (fs/readFileSync attempt-file "utf8")))
+        (is (= {:state :attempted :intent intent} (store/recover! dir (:caller-id intent))))))))
+
+(deftest reject-invalid-anchor-input-and-invalid-versioned-attempts
+  (with-private-dir
+    (fn [dir]
+      (let [caller-id (:caller-id intent)]
+        (store/prepare! dir intent)
+        (let [before (store-snapshot dir)]
+          (doseq [anchor [nil ["empty" "extra"] ["neither"] ["completed"] ["completed" " "]
+                          ["completed" (apply str (repeat 513 "x"))] {:turn-id "turn"}]]
+            (is (= :invalid-history-anchor
+                   (failure-reason #(store/begin-attempt! dir intent anchor)))))
+          (is (= before (store-snapshot dir))))
+        (is (= {:state :attempted :intent intent :permit? true :history-anchor ["empty"]}
+               (store/begin-attempt! dir intent ["empty"])))
+        (let [file (record-with-suffix dir ".attempted")
+              original (js->clj (js/JSON.parse (fs/readFileSync file "utf8")))]
+          (doseq [frame [(assoc original 0 1)
+                         (assoc original 0 3)
+                         (assoc original 5 nil)
+                         (assoc original 5 ["completed" ""])]]
+            (let [invalid (str (js/JSON.stringify (clj->js frame)) "\n")]
+              (fs/writeFileSync file invalid)
+              (is (= :invalid-record (failure-reason #(store/recover! dir caller-id))))
+              (is (= :invalid-record
+                     (failure-reason #(store/begin-attempt! dir intent ["empty"]))))
+              (is (= invalid (fs/readFileSync file "utf8"))))))))))
+
 (deftest terminal-checkpoint-reserves-one-recoverable-successor
   (with-private-dir
     (fn [dir]

@@ -4,6 +4,7 @@
             ["node:fs" :as fs]
             ["node:path" :as path]
             [axxium.extern.token-crypto :as token-crypto]
+            [axxium.law.codex-native-observation :as native-observation]
             [clojure.string :as str]))
 
 (def ^:private record-limit 16384)
@@ -72,7 +73,10 @@
   (str/starts-with? caller-id successor-prefix))
 
 (defn- record-version [phase detail]
-  (if (or (= :terminal phase) (and (= :prepared phase) (some? detail))) 2 1))
+  (case phase
+    :terminal 2
+    (:prepared :attempted) (if (some? detail) 2 1)
+    1))
 
 (defn- encode [phase {:keys [binding caller-id notice-sha256]} detail]
   (let [frame [(record-version phase detail) (name phase) caller-id
@@ -97,6 +101,7 @@
                      :prepared (or (nil? detail)
                                    (and (id? detail) (not= caller-id detail)
                                         (reserved-caller? caller-id)))
+                     :attempted (or (nil? detail) (native-observation/history-anchor? detail))
                      (nil? detail)))
       (refuse! :invalid-record))
     (let [intent {:binding (zipmap binding-fields binding-values)
@@ -200,12 +205,14 @@
 
 (defn- load-intent! [root caller-id]
   (let [{:keys [terminal accepted attempted prepared]} (read-intent-records! root caller-id)
-        intent (:intent prepared)]
-    (cond
-      terminal (retire-state intent accepted terminal)
-      accepted {:state :accepted :intent (assoc intent :queue-id (:detail accepted))}
-      attempted {:state :attempted :intent intent}
-      prepared {:state :prepared :intent intent})))
+        intent (:intent prepared)
+        saved (cond
+                terminal (retire-state intent accepted terminal)
+                accepted {:state :accepted :intent (assoc intent :queue-id (:detail accepted))}
+                attempted {:state :attempted :intent intent}
+                prepared {:state :prepared :intent intent})]
+    (cond-> saved
+      (some? (:detail attempted)) (assoc :history-anchor (:detail attempted)))))
 
 (defn- require-saved! [saved intent]
   (when-not (= intent (dissoc (:intent saved) :queue-id))
@@ -214,6 +221,7 @@
 (defn recover!
   "Read one caller's saved intent and its state from the private store.
 
+   An anchored attempt exposes its immutable history anchor on the saved state.
    A successor reservation is observational here. Use prepare-successor!
    to sync the parent checkpoint before materializing it."
   [directory caller-id]
@@ -254,10 +262,7 @@
             (when (reserved-caller? caller-id) (refuse! :reserved-caller-id))
             (prepare-at! descriptor root intent nil)))))))
 
-(defn begin-attempt!
-  "Consume the one submission permit before transmitting. Once the immutable
-   attempt exists, even a restart with an unknown outcome returns no permit."
-  [directory intent]
+(defn- consume-permit! [directory intent history-anchor]
   (require-intent! intent)
   (with-store! directory
     (fn [descriptor root]
@@ -265,10 +270,23 @@
             saved (load-intent! root caller-id)]
         (require-saved! saved intent)
         (if (= :prepared (:state saved))
-          (let [published? (commit! descriptor root :attempted intent nil)
+          (let [published? (commit! descriptor root :attempted intent history-anchor)
                 current (load-intent! root caller-id)]
             (assoc current :permit? (and published? (= :attempted (:state current)))))
           (assoc saved :permit? false))))))
+
+(defn begin-attempt!
+  "Consume the one submission permit before transmitting.
+
+   The three-argument form also commits the caller's verified pre-dispatch
+   history anchor in the same record. Once an attempt exists, a retry retains
+   its original anchor and returns no permit, including after restart."
+  ([directory intent]
+   (consume-permit! directory intent nil))
+  ([directory intent history-anchor]
+   (when-not (native-observation/history-anchor? history-anchor)
+     (refuse! :invalid-history-anchor))
+   (consume-permit! directory intent history-anchor)))
 
 (defn record-accepted!
   "Persist a verified native queue ID for an already attempted intent.
@@ -288,9 +306,9 @@
 (defn checkpoint-terminal!
   "Retire one attempted intent with a verified completed turn and item.
 
-   verify receives the saved intent from this store. Its trusted caller
-   authenticates and reconciles a native capture for that intent. A successor
-   digest is an explicit reservation by the caller for a newly observed hint.
+   verify receives the saved intent with its history anchor, when present.
+   Its trusted caller authenticates and reconciles a native capture for that
+   intent. A successor digest explicitly reserves a newly observed hint.
    A hold or acceptance result leaves the checkpoint untouched."
   [directory caller-id successor-digest verify]
   (when-not (and (id? caller-id) (fn? verify)
@@ -298,11 +316,12 @@
     (refuse! :invalid-terminal-request))
   (with-store! directory
     (fn [descriptor root]
-      (let [{:keys [state intent]} (load-intent! root caller-id)]
+      (let [{:keys [state intent history-anchor]} (load-intent! root caller-id)]
         (case state
           nil {:disposition :hold :reason :missing-intent}
           :prepared {:disposition :hold :reason :not-attempted}
-          (let [{:keys [disposition turn-id item-id] :as observed} (verify intent)]
+          (let [evidence-intent (cond-> intent history-anchor (assoc :history-anchor history-anchor))
+                {:keys [disposition turn-id item-id] :as observed} (verify evidence-intent)]
             (case disposition
               :hold observed
               :accepted observed

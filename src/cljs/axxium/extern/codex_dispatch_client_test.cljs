@@ -124,3 +124,44 @@
                  (:intent (store/prepare-successor! directory caller-id binding-id)))))
         (finally
           (.rmSync fs directory #js {:recursive true :force true}))))))
+
+(defn- window-page [id view cursor next-cursor turns]
+  (-> (page id "thread/turns/list"
+            (cond-> {"itemsView" view "limit" 1} cursor (assoc "cursor" cursor)) turns)
+      (assoc-in [:response "result" "nextCursor"] next-cursor)))
+
+(deftest reconcile-only-the-window-for-the-saved-attempt
+  (when (= "linux" (.-platform js/process))
+    (let [directory (.realpathSync fs (.mkdtempSync fs (.join path (.tmpdir os) "axxium-codex-window-")))
+          intent {:binding binding-id :caller-id caller-id :notice-sha256 (client/notice-sha256 notice)}
+          anchor ["completed" "turn-before-attempt"]
+          metadata {"id" "turn-after-attempt" "status" "completed" "itemsView" "notLoaded" "items" []}
+          completed (assoc metadata "itemsView" "full" "items"
+                           [{"type" "userMessage" "id" "item-terminal" "clientId" caller-id "content" input}])
+          before (assoc metadata "id" (second anchor))
+          head (window-page 2 "notLoaded" nil "to-anchor" [metadata])
+          evidence {:reader-before approved-reader :reader-after approved-reader
+                    :queue-pages [(page 1 "thread/queue/list" {} [])]
+                    :window-pages [{:metadata head
+                                    :full (window-page 3 "full" nil "to-anchor" [completed])}
+                                   {:metadata (window-page 4 "notLoaded" "to-anchor" "older" [before])
+                                    :full nil}]
+                    :window-head (window-page 5 "notLoaded" nil "to-anchor" [metadata])}]
+      (try
+        (store/prepare! directory intent)
+        (is (true? (:permit? (store/begin-attempt! directory intent anchor))))
+        (is (= :hold (:disposition (client/retire-capture! directory caller-id approved-reader
+                                                         (assoc-in evidence [:window-pages 1 :metadata
+                                                                             :response "result" "data" 0 "id"]
+                                                                   "different-predecessor") nil))))
+        (is (= :hold (:disposition (client/retire-capture! directory caller-id approved-reader
+                                                         (capture [] [completed]) nil))))
+        (is (= :attempted (:state (store/recover! directory caller-id))))
+        (is (= {:disposition :retire :turn-id "turn-after-attempt" :item-id "item-terminal"}
+               (client/reconcile-capture! directory caller-id approved-reader evidence)))
+        (let [saved (client/retire-capture! directory caller-id approved-reader evidence nil)]
+          (is (= :retired (:state saved)))
+          (is (= anchor (:history-anchor saved)))
+          (is (= {:turn-id "turn-after-attempt" :item-id "item-terminal"} (:terminal saved))))
+        (finally
+          (.rmSync fs directory #js {:recursive true :force true}))))))

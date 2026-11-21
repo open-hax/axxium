@@ -78,6 +78,37 @@ method-not-found for `thread/items/list` in the isolated fixture.
 The combined client reads the saved intent and returns a reconciliation
 disposition.
 
+### Bound new attempts by the pre-dispatch turn
+
+The live 0.171.0 Desktop peer can return full-history pages that exceed the
+reader's message limit. Before each new anchored attempt, call
+`axxium.extern.codex-peer-reader/capture-anchor!` with the independently
+approved binding and native peer. It verifies an empty, terminal initial
+queue page and reads one turn metadata row. The anchor is the latest completed
+turn ID, or explicit empty history. Treat an unavailable anchor as a hold.
+The caller is still responsible for qualifying the actual dispatch condition.
+
+Pass the returned `:history-anchor` to the three-argument `begin-attempt!`
+for the same binding. The create-only attempt record seals the anchor with
+the only permit. A previously saved attempt keeps its original record.
+The two-argument call can still be used for the existing full-history path.
+
+The anchored reader steps through descending turn metadata using the native
+cursor. It loads one full turn at each cursor newer than the saved anchor.
+The metadata and full response must agree on turn ID, status, and
+continuation. The reader keeps the final head metadata read in the evidence
+so the law can detect a change during collection. The anchor's full body
+and earlier turns are outside the history that needs to be read for this
+fresh caller ID. Empty-history anchors still require an explicit terminal
+cursor. The original reader budgets and single-page queue rule apply. If
+any required turn exceeds the budget, or the anchor or complete cursor
+chain cannot be verified, retain the saved attempt.
+
+Use the full turn to match the notice, even when item pagination reaches its
+terminal cursor. The isolated 0.171.0 test observed that `thread/items/list`
+omitted the queued user message, while the full turn retained the caller ID
+and the exact notice text.
+
 ## Linux peer-authenticated reader
 
 `axxium.extern.codex-peer-reader/capture!` accepts the built Node-API addon
