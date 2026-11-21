@@ -101,12 +101,33 @@
         {"data" [(turn-row "fixture-turn")]
          "nextCursor" nil}))))
 
+(defn- window-turn-response [params id next-cursor]
+  (assert/strictEqual (get params "threadId") (:thread-id binding-id))
+  (assert/strictEqual (get params "limit") 1)
+  (assert/strictEqual (contains? params "sortDirection") false)
+  (let [view (get params "itemsView")
+        row (turn-row id)]
+    {"data" [(case view
+               "notLoaded" (assoc row "itemsView" view "items" [])
+               "full" row)]
+     "nextCursor" next-cursor}))
+
+(defn- window-turn-reply [params]
+  (case (get params "cursor")
+    nil (window-turn-response params "fixture-turn" "window/anchor")
+    "window/anchor"
+    (do
+      (assert/strictEqual (get params "itemsView") "notLoaded")
+      (window-turn-response params "window-anchor" "window/older"))))
+
 (defn- fixture-reply [method params]
   (case method
     "initialize" {"userAgent" "codex-app-server/fixture" "codexHome" "/fixture"
                   "platformFamily" "unix" "platformOs" "linux"}
     "thread/queue/list" (queue-reply params)
-    "thread/turns/list" (paginated-turn-reply params)
+    "thread/turns/list" (if (= 1 (get params "limit"))
+                         (window-turn-reply params)
+                         (paginated-turn-reply params))
     (throw (ex-info "Unexpected fixture method" {:method method}))))
 
 (defn- socket-pair! [client message result]
@@ -149,6 +170,12 @@
 
                    (and (= mode :stream-limit) (= method queue-method))
                    (send-progress! client)
+
+                   (and (= mode :window-page-limit) (= method turns-method))
+                   (let [step (js/Number (get params "cursor" "0"))]
+                     (socket-pair! client message
+                                   (window-turn-response params (str "budget-turn-" step)
+                                                         (str (inc step)))))
 
                    :else
                    (let [result (fixture-reply method params)]
@@ -278,6 +305,107 @@
          :history [{:turn-id "fixture-turn" :item-id "fixture-item" :caller-id caller-id
                     :status :completed :notice-sha256 (sha256 notice)}]})
        (println "PASS same verified Unix connection, exact read-only RPCs, and normalized capture")))))
+
+(defn- recover-history-window! [addon]
+  (let [directory (private-directory)
+        intent {:binding binding-id :caller-id caller-id
+                :notice-sha256 (dispatch/notice-sha256 notice)}
+        pre-attempt? (atom true)
+        initial-methods ["initialize" "initialized" queue-method turns-method]
+        recovery-methods (into initial-methods (repeat 3 turns-method))
+        mode (fn [method params reply]
+               (if @pre-attempt?
+                 (case method
+                   "thread/queue/list" (assoc reply "data" [])
+                   "thread/turns/list"
+                   (do
+                     (assert/strictEqual (get params "itemsView") "notLoaded")
+                     (assert/strictEqual (contains? params "cursor") false)
+                     (window-turn-response params "window-anchor" "window/older"))
+                   reply)
+                 reply))]
+    (store/prepare! directory intent)
+    (p/finally
+     (in-fixture!
+      mode
+      (fn [{:keys [connections upgrades calls errors]} config]
+        (let [worker (dispatch/inbox-intake directory caller-id addon config)]
+          (p/let [{:keys [approved-reader history-anchor]} (reader/capture-anchor! addon config)
+                  _ (assert-equal (:binding approved-reader) binding-id)
+                  _ (assert-equal history-anchor ["completed" "window-anchor"])
+                  _ (assert-equal @calls initial-methods)
+                  _ (assert-equal @connections 1)
+                  _ (assert-equal (:permit? (store/begin-attempt! directory intent history-anchor)) true)
+                  _ (reset! pre-attempt? false)
+                  terminal (worker binding-id inbox-change)
+                  confirmed (worker binding-id inbox-change)]
+            (assert-equal terminal confirmed)
+            (assert-equal (:state terminal) :retired)
+            (assert-equal (:history-anchor terminal) history-anchor)
+            (assert-equal (:terminal terminal) {:turn-id "fixture-turn" :item-id "fixture-item"})
+            (assert-equal @connections 2)
+            (assert-equal (count @upgrades) 2)
+            (assert-equal @calls (into initial-methods recovery-methods))
+            (assert-equal @errors [])
+            (println "PASS pre-attempt anchor and bounded inbox recovery through verified sockets")))))
+     (fn [] (remove-directory! directory)))))
+
+(defn- anchor-admission! [addon]
+  (let [initial-methods ["initialize" "initialized" queue-method turns-method]
+        mode (fn [kind]
+               (fn [method _params reply]
+                 (case method
+                   "thread/queue/list"
+                   (cond-> (assoc reply "data" [])
+                     (= kind :queue-entry) (assoc "data" [(queue-row "pending")])
+                     (= kind :continued-queue) (assoc "data" [(queue-row "pending")]
+                                                     "nextCursor" "1"))
+                   "thread/turns/list"
+                   (case kind
+                     :empty {"data" [] "nextCursor" nil}
+                     :active (assoc-in reply ["data" 0 "status"] "inProgress")
+                     reply)
+                   reply)))]
+    (p/let [_ (in-fixture!
+               (mode :empty)
+               (fn [{:keys [connections calls errors]} config]
+                 (p/let [anchor (reader/capture-anchor! addon config)
+                         captured (reader/capture! addon config (:history-anchor anchor))]
+                   (assert-equal (:history-anchor anchor) ["empty"])
+                   (assert-equal (:observation
+                                  (observations/normalize
+                                   {:binding binding-id :caller-id caller-id
+                                    :history-anchor (:history-anchor anchor)}
+                                   (:approved-reader captured) (:evidence captured) sha256))
+                                 {:binding binding-id :queue-complete? true :history-complete? true
+                                  :queue [] :history []})
+                   (assert-equal @connections 2)
+                   (assert-equal @calls (into initial-methods (conj initial-methods turns-method)))
+                   (assert-equal @errors []))))
+            _ (reduce (fn [previous kind]
+                        (p/then previous
+                                (fn [_]
+                                  (in-fixture!
+                                   (mode kind)
+                                   (fn [{:keys [connections calls errors]} config]
+                                     (p/let [_ (expect-refusal! #(reader/capture-anchor! addon config)
+                                                                 :history-anchor-unavailable)]
+                                       (assert-equal @connections 1)
+                                       (assert-equal @calls initial-methods)
+                                       (assert-equal @errors [])))))))
+                      (p/resolved nil) [:active :queue-entry :continued-queue])]
+      (println "PASS empty anchor and refusal for active or incomplete native state"))))
+
+(defn- window-page-budget! [addon]
+  (in-fixture!
+   :window-page-limit
+   (fn [{:keys [connections calls errors]} config]
+     (p/let [_ (expect-refusal! #(reader/capture! addon config ["completed" "missing-anchor"])
+                                 :native-page-limit)]
+       (assert-equal @connections 1)
+       (assert-equal @calls (into ["initialize" "initialized" queue-method] (repeat 32 turns-method)))
+       (assert-equal @errors [])
+       (println "PASS anchored capture refuses to read beyond its 16-page window")))))
 
 (defn- inbox-intake! [addon]
   (let [directory (private-directory)
@@ -475,6 +603,9 @@
         addon (load-addon (path/resolve addon-path))]
     (p/let [_ (same-socket-capture! addon)
             _ (inbox-intake! addon)
+            _ (recover-history-window! addon)
+            _ (anchor-admission! addon)
+            _ (window-page-budget! addon)
             _ (recovered-terminal-durability! addon)
             _ (wrong-pins! addon)
             _ (unproven-queue-capture! addon)

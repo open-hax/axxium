@@ -21,6 +21,18 @@
 (defn- identity-string? [value]
   (and (string? value) (not (str/blank? value))))
 
+(defn- bounded-id? [value limit]
+  (and (identity-string? value) (<= (count value) limit)))
+
+(defn history-anchor?
+  "Validate the completed predecessor or explicitly empty history of a new attempt."
+  [anchor]
+  (and (vector? anchor)
+       (or (= ["empty"] anchor)
+           (and (= 2 (count anchor))
+                (= "completed" (first anchor))
+                (bounded-id? (second anchor) 512)))))
+
 (defn- rpc-id? [value]
   (or (identity-string? value)
       (and (integer? value) (<= -9007199254740991 value 9007199254740991))))
@@ -106,6 +118,108 @@
        (vector? (get turn "items"))
        (= "full" (get turn "itemsView" "full"))))
 
+(defn- metadata-turn? [turn]
+  (and (map? turn)
+       (bounded-id? (get turn "id") 512)
+       (contains? turn-status (get turn "status"))
+       (= "notLoaded" (get turn "itemsView"))
+       (= [] (get turn "items"))))
+
+(defn- window-page [thread-id view page]
+  (let [params? (fn [params]
+                  (and (every? (conj basic-params "itemsView" "sortDirection") (keys params))
+                       (= 1 (get params "limit"))
+                       (= view (get params "itemsView"))
+                       (= "desc" (get params "sortDirection" "desc"))))]
+    (when (map? page)
+      (when-let [{:keys [records next-cursor] :as result}
+                 (validated-page turns-method thread-id params? page)]
+        (when (and (or (nil? next-cursor) (bounded-id? next-cursor 4096))
+                   (every? (if (= "notLoaded" view) metadata-turn? native-turn?) records))
+          result)))))
+
+(defn- complete-queue-pages [thread-id pages]
+  ;; Native queue cursors are live offsets. Only one initial response
+  ;; with no continuation proves complete coverage.
+  (when (and (vector? pages) (= 1 (count pages)))
+    (collect-pages queue-method thread-id queue-params? pages)))
+
+(defn read-history-anchor
+  "Return an anchor from the initial terminal empty queue and newest completed turn.
+
+   The caller authenticates both RPCs on the bound native peer. Empty history
+   is explicit with a terminal initial metadata page and zero turns."
+  [thread-id queue-page metadata-page]
+  (when (identity-string? thread-id)
+    (let [queue (complete-queue-pages thread-id [queue-page])
+          metadata (window-page thread-id "notLoaded" metadata-page)
+          turn (first (:records metadata))]
+      (when (and queue metadata (empty? (:records queue))
+                 (nil? (get-in metadata [:params "cursor"]))
+                 (not= (:request-id metadata) (first (:request-ids queue))))
+        (cond
+          (nil? turn) ["empty"]
+          (= "completed" (get turn "status")) ["completed" (get turn "id")])))))
+
+(defn- matching-full-page [thread-id metadata full-page]
+  (when-let [full (window-page thread-id "full" full-page)]
+    (let [turn-fields #(select-keys % ["id" "status"])]
+      (when (and (= (:params metadata) (assoc (:params full) "itemsView" "notLoaded"))
+                 (= (:next-cursor metadata) (:next-cursor full))
+                 (= (mapv turn-fields (:records metadata))
+                    (mapv turn-fields (:records full))))
+        full))))
+
+(defn- window-entry [thread-id anchor entry]
+  (when (and (map? entry) (= #{:metadata :full} (set (keys entry))))
+    (when-let [metadata (window-page thread-id "notLoaded" (:metadata entry))]
+      (let [turn (first (:records metadata))
+            empty-anchor? (= ["empty"] anchor)
+            completed-anchor? (= ["completed" (get turn "id")] anchor)
+            full (:full entry)]
+        (cond
+          (nil? turn)
+          (when (and empty-anchor? (nil? (get-in metadata [:params "cursor"])) (nil? full))
+            {:metadata metadata :end? true})
+
+          completed-anchor?
+          (when (and (= "completed" (get turn "status")) (nil? full))
+            {:metadata metadata :end? true})
+
+          :else
+          (when-let [paired (matching-full-page thread-id metadata full)]
+            {:metadata metadata :full paired
+             :end? (and empty-anchor? (nil? (:next-cursor metadata)))}))))))
+
+(defn- collect-window-pages [thread-id anchor pages head-page]
+  (when (and (vector? pages) (<= 1 (count pages) max-pages-per-method))
+    (let [head (window-page thread-id "notLoaded" head-page)
+          entries (mapv #(window-entry thread-id anchor %) pages)]
+      (when (and head (= (dissoc head :request-id)
+                        (dissoc (:metadata (first entries)) :request-id)))
+        (loop [remaining (seq entries)
+               cursor nil
+               seen-cursors #{}
+               seen-turns #{}
+               ids [(:request-id head)]
+               turns []]
+          (when-let [{:keys [metadata full end?]} (first remaining)]
+            (let [{:keys [request-id params records next-cursor]} metadata
+                  turn-id (get (first records) "id")
+                  following (next remaining)
+                  accumulated (into turns (:records full))
+                  request-ids (cond-> (conj ids request-id) full (conj (:request-id full)))]
+              (when (and (= cursor (get params "cursor"))
+                         (not (contains? seen-cursors next-cursor))
+                         (not (contains? seen-turns turn-id)))
+                (cond
+                  (and end? (nil? following))
+                  {:request-ids request-ids :records accumulated}
+
+                  (and (not end?) following next-cursor)
+                  (recur following next-cursor (conj seen-cursors next-cursor)
+                         (conj seen-turns turn-id) request-ids accumulated))))))))))
+
 (defn- native-item? [item]
   (and (map? item)
        (identity-string? (get item "id"))
@@ -170,12 +284,10 @@
 
 (defn- normalize-reads [intent evidence digest-text]
   (let [thread-id (get-in intent [:binding :thread-id])
-        raw-queue-pages (:queue-pages evidence)
-        ;; Native queue cursors are offsets into the current queue. Only one
-        ;; initial response with no continuation proves complete coverage.
-        queue-pages (when (and (vector? raw-queue-pages) (= 1 (count raw-queue-pages)))
-                      (collect-pages queue-method thread-id queue-params? raw-queue-pages))
-        turn-pages (collect-pages turns-method thread-id turns-params? (:turn-pages evidence))]
+        queue-pages (complete-queue-pages thread-id (:queue-pages evidence))
+        turn-pages (if-let [anchor (:history-anchor intent)]
+                     (collect-window-pages thread-id anchor (:window-pages evidence) (:window-head evidence))
+                     (collect-pages turns-method thread-id turns-params? (:turn-pages evidence)))]
     (cond
       (nil? queue-pages) {:error :incomplete-queue}
       (nil? turn-pages) {:error :incomplete-history}
@@ -194,11 +306,14 @@
    The transport authenticates the reader independently before and after
    collection, verifies every reply came from it, and applies byte and time
    budgets. Evidence carries those two reader attestations and paired queue
-   and full-turn pages. Queue coverage requires one initial terminal page.
-   Full-turn history allows 16 pages and 4096 items total. Each page accepts
-   up to 128 entries and retains its native
-   request and response with string keys. The pure digest-text function
-   hashes the exact UTF-8 notice text.
+   and turn pages. Queue coverage requires one initial terminal page.
+   A saved anchor admits paired singleton metadata and full-turn reads of
+   newer turns, ending at the completed anchor or explicit empty history.
+   A distinct initial metadata reread must match the beginning of that scan.
+   Without a saved anchor, complete full-turn pagination remains required.
+   History allows 16 pages and 4096 items total. Each page keeps the native
+   request and response with string keys. The pure digest-text function hashes
+   the exact UTF-8 notice text.
    Returns a projection for codex-dispatch/reconcile or a reason to hold."
   [intent approved-reader evidence digest-text]
   (cond
@@ -206,6 +321,8 @@
               (binding? (:binding intent))
               (identity-string? (:caller-id intent))
               (present-or-nil? (:queue-id intent))
+              (or (not (contains? intent :history-anchor))
+                  (history-anchor? (:history-anchor intent)))
               (fn? digest-text)))
     {:error :invalid-intent}
 
@@ -216,7 +333,10 @@
               (= approved-reader (:reader-before evidence) (:reader-after evidence))))
     {:error :reader-binding-mismatch}
 
-    (not (nil? (:item-pages evidence)))
+    (or (some? (:item-pages evidence))
+        (if (:history-anchor intent)
+          (contains? evidence :turn-pages)
+          (or (contains? evidence :window-pages) (contains? evidence :window-head))))
     {:error :unsupported-native-history}
 
     :else
